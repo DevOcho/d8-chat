@@ -7,6 +7,32 @@ class ChatManager:
     def __init__(self):
         # {channel_id: {websocket_client, ...}}
         self.active_connections = {}
+        # {user_id: 'online'} - tracks presence
+        self.online_users = {}
+        # {user_id: websocket_client} - for broadcasting to all
+        self.all_clients = {}
+
+    def set_online(self, user_id, ws):
+        """Marks a user as online and stores their client."""
+        self.online_users[user_id] = 'online'
+        self.all_clients[user_id] = ws
+
+    def set_offline(self, user_id):
+        """Marks a user as offline."""
+        self.online_users.pop(user_id, None)
+        self.all_clients.pop(user_id, None)
+
+    def is_online(self, user_id):
+        """Checks if a user is online."""
+        return user_id in self.online_users
+
+    def broadcast_to_all(self, message_html):
+        """Broadcasts a message to every connected client."""
+        for client_ws in self.all_clients.values():
+            try:
+                client_ws.send(message_html)
+            except Exception as e:
+                print(f"Error sending presence update: {e}")
 
     def subscribe(self, channel_id, ws):
         """Subscribes a client to a channel."""
@@ -34,17 +60,18 @@ class ChatManager:
                     del self.active_connections[channel_id]
             ws.channel_id = None
 
-    def broadcast(self, channel_id, message_html):
-        """Broadcasts a message to all clients in a specific channel."""
+    def broadcast(self, channel_id, message_html, sender_ws=None):
+        """Broadcasts a message to all clients in a specific channel, optionally excluding the sender."""
         channel_id = str(channel_id)
         if channel_id in self.active_connections:
-            for client_ws in self.active_connections[channel_id]:
-                try:
-                    client_ws.send(message_html)
-                except Exception as e:
-                    print(f"Error sending to client {client_ws}: {e}")
-                    # You might want to remove a client that errors out
-                    self.unsubscribe(client_ws)
+            # Create a copy of the set to iterate over, in case of modification
+            for client_ws in list(self.active_connections[channel_id]):
+                if client_ws != sender_ws:
+                    try:
+                        client_ws.send(message_html)
+                    except Exception as e:
+                        print(f"Error sending to client {client_ws}: {e}")
+                        self.unsubscribe(client_ws)
 
 
 # Create a single global instance of the manager

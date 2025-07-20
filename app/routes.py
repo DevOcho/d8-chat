@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, redirect, url_for, session, g
+from flask import Blueprint, render_template, request, redirect, url_for, session, g, make_response
 from .models import User, Channel, ChannelMember, Message, Conversation
 from .sso import oauth # Import the oauth object
 import functools
@@ -83,7 +83,10 @@ def chat_interface():
     # Fetch all users for the Direct Messages list (excluding the current user)
     other_users = User.select().where(User.id != g.user.id)
 
-    return render_template('chat.html', channels=user_channels, direct_message_users=other_users)
+    return render_template('chat.html',
+                           channels=user_channels,
+                           direct_message_users=other_users,
+                           online_users=chat_manager.online_users)
 
 @main_bp.route('/chat/channel/<int:channel_id>')
 @login_required
@@ -106,7 +109,12 @@ def get_channel_chat(channel_id):
                 .where(Message.conversation == conversation)
                 .order_by(Message.created_at.asc()))
 
-    return render_template('partials/channel_chat.html', channel=channel, messages=messages)
+    # Add the HX-Trigger header to fire the custom even on the client (scrolling-chat window)
+    html = render_template('partials/channel_chat.html', channel=channel, messages=messages)
+    response = make_response(html)
+    response.headers['HX-Trigger'] = 'load-chat-history'
+
+    return response
 
 @main_bp.route('/chat/channel/<int:channel_id>/invite', methods=['GET'])
 @login_required
@@ -185,7 +193,12 @@ def get_dm_chat(other_user_id):
                 .where(Message.conversation == conversation)
                 .order_by(Message.created_at.asc()))
 
-    return render_template('partials/dm_chat.html', messages=messages, other_user=other_user)
+    # HX-Trigger the chat window to load.
+    html = render_template('partials/dm_chat.html', messages=messages, other_user=other_user)
+    response = make_response(html)
+    response.headers['HX-Trigger'] = 'load-chat-history'
+
+    return response
 
 
 # --- MODIFIED: WebSocket Handler ---
@@ -199,47 +212,52 @@ def chat(ws):
         return
     ws.user = user
 
+    # Mark user online and broadcast
+    chat_manager.set_online(user.id, ws)
+    presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
+    chat_manager.broadcast_to_all(presence_html)
+
     try:
         while True:
-            message_json = ws.receive()
-            if not message_json: continue
+            data = json.loads(ws.receive())
 
-            data = json.loads(message_json)
+            # --- HANDLE TYPING INDICATORS ---
+            if data.get('type') == 'typing_start':
+                indicator_html = f'<div id="typing-indicator" hx-swap-oob="true"><p>{ws.user.username} is typing...</p></div>'
+                chat_manager.broadcast(data.get('conversation_id'), indicator_html, sender_ws=ws)
+                continue
 
+            if data.get('type') == 'typing_stop':
+                indicator_html = '<div id="typing-indicator" hx-swap-oob="true"></div>'
+                chat_manager.broadcast(data.get('conversation_id'), indicator_html, sender_ws=ws)
+                continue
+
+            # --- HANDLE SUBSCRIPTION ---
             if data.get('type') == 'subscribe':
                 conv_id_str = data.get('conversation_id')
                 if conv_id_str:
                     chat_manager.subscribe(conv_id_str, ws)
-                    print(f"INFO: User '{ws.user.username}' subscribed to '{ws.channel_id}'")
                 continue
 
+            # --- HANDLE CHAT MESSAGES ---
             chat_text = data.get('chat_message')
             current_conversation_id_str = getattr(ws, 'channel_id', None)
-
             if not (chat_text and current_conversation_id_str): continue
 
-            # Find the conversation in the DB
             conversation = Conversation.get_or_none(conversation_id_str=current_conversation_id_str)
-            if not conversation:
-                print(f"ERROR: Conversation '{current_conversation_id_str}' not found.")
-                continue
+            if not conversation: continue
 
-            # Create ONE type of message, always linked to a conversation
-            new_message = Message.create(
-                user=ws.user,
-                conversation=conversation,
-                content=chat_text
-            )
-
-            message_html = f"""
-            <div id="messages-container" hx-swap-oob="beforeend">
-                {render_template('partials/message.html', message=new_message)}
-            </div>
-            """
+            new_message = Message.create(user=ws.user, conversation=conversation, content=chat_text)
+            message_html = f"""<div id="messages-container" hx-swap-oob="beforeend">{render_template('partials/message.html', message=new_message)}</div>"""
             chat_manager.broadcast(current_conversation_id_str, message_html)
 
     except Exception as e:
         print(f"ERROR: An exception occurred for user '{ws.user.username}': {e}")
     finally:
+        # --- PRESENCE: Mark user offline and broadcast ---
+        chat_manager.set_offline(ws.user.id)
+        presence_html = f'<span id="status-dot-{ws.user.id}" class="me-2 rounded-circle bg-secondary" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
+        chat_manager.broadcast_to_all(presence_html)
+
         chat_manager.unsubscribe(ws)
         print(f"INFO: Client connection closed for '{ws.user.username}'.")

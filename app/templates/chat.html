@@ -18,7 +18,7 @@
             <!-- This link will fetch channel content into the #chat-window div -->
             <a href="#" class="text-decoration-none text-light"
                hx-get="/chat/channel/{{ channel.id }}"
-               hx-target="#chat-window">
+               hx-target="#messages-container">
                 # {{ channel.name }}
             </a>
         </li>
@@ -30,11 +30,15 @@
     <h6 class="mt-4 text-secondary">Direct Messages</h6>
     <ul class="list-unstyled">
         {% for user in direct_message_users %}
-        <li>
+        <li class="d-flex align-items-center">
+            <span id="status-dot-{{ user.id }}"
+                  class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}"
+                  style="width: 10px; height: 10px; transition: background-color 0.3s ease;">
+            </span>
             <!-- This link will fetch DM content into the #chat-window div -->
             <a href="#" class="text-decoration-none text-light"
                hx-get="/chat/dm/{{ user.id }}"
-               hx-target="#chat-window">
+               hx-target="#messages-container">
                 {{ user.username }}
             </a>
         </li>
@@ -43,42 +47,132 @@
 </div>
 
 <!-- Main content area -->
-<main class="main-content" hx-ws="connect:/ws/chat" hx-ext="ws">
-    <!-- This div connects to the WebSocket endpoint -->
+<main class="main-content" ws-connect="/ws/chat" hx-ext="ws">
 
-        <!-- This div is the target for channel/DM history and new messages -->
-        <div id="chat-window" class="chat-messages" hx-swap-oob="true">
-            <div id="messages-container">
-                <!-- New messages will be swapped in here -->
-                <div class="text-center text-muted">
-                    <h3>Welcome, {{ g.user.username }}!</h3>
-                    <p>Select a channel or direct message on the left to start chatting.</p>
-                </div>
-            </div>
-        </div>
+  <!-- This div is the target for channel/DM history and new messages -->
+  <div id="chat-window" class="chat-messages position-relative">
+      <div id="messages-container" class="h-100" style="overflow-y: auto;">
+          <!-- New messages will be swapped in here -->
+          <div class="text-center text-muted">
+              <h3>Welcome, {{ g.user.username }}!</h3>
+              <p>Select a channel or direct message on the left to start chatting.</p>
+          </div>
+      </div>
 
-        <!-- Message input form -->
-        <div class="chat-input-form bg-light">
-            <!-- On submission, this form sends its data over the WebSocket -->
-            <form ws-send="send:submit" id="message-form">
-                <div class="input-group">
-                    <input name="chat_message" class="form-control" placeholder="Type a message..." autofocus>
-                    <button type="submit" class="btn btn-primary">Send</button>
-                </div>
-            </form>
+      <!-- "Jump to Bottom" button -->
+      <button id="jump-to-bottom-btn"
+            class="btn btn-primary btn-sm rounded-pill position-absolute bottom-0 start-50 translate-middle-x mb-3"
+            style="display: none; z-index: 10;">
+      ↓ Jump to Latest
+      </button>
+  </div>
+
+  <!-- Message input form and typing indicator -->
+  <div class="chat-input-form bg-light">
+      <!-- Div for typing indicator -->
+      <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
+      <!-- On submission, this form sends its data over the WebSocket -->
+      <form ws-send id="message-form">
+          <div class="input-group">
+              <input id="chat-message-input" name="chat_message" class="form-control" placeholder="Type a message..." autofocus>
+              <button type="submit" class="btn btn-primary">Send</button>
+          </div>
+      </form>
+
+      <div id="typing-sender"
+             ws-send
+             hx-trigger="typing-event"
+             style="display: none;">
         </div>
-    </div>
+  </div>
 </main>
 
 <script>
-    // Simple script to clear the input after a message is sent via HTMX/WebSocket
-    document.body.addEventListener('htmx:wsAfterSend', function(evt) {
-        // Find the input within the form that triggered the event
-        const form = document.getElementById('message-form');
-        const input = form.querySelector('input[name="chat_message"]');
-        if (input) {
-            input.value = ''; // Clear the input
-        }
-    });
+// --- Configuration ---
+const doneTypingInterval = 1500; // ms
+
+// --- Element References ---
+// We now target the messages-container directly for scrolling
+const messagesContainer = document.getElementById('messages-container');
+const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
+const messageInput = document.getElementById('chat-message-input');
+let typingTimer;
+
+// --- Helper Functions ---
+  function isUserNearBottom() {
+    const threshold = 100;
+    return messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight < threshold;
+  }
+
+function scrollToBottom() {
+    setTimeout(() => {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 0);
+  }
+
+function sendTypingStatus(isTyping) {
+    const typingSender = document.getElementById('typing-sender');
+    const activeConversation = document.querySelector('[data-conversation-id]');
+    if (typingSender && activeConversation) {
+        const conversationId = activeConversation.dataset.conversationId;
+        const type = isTyping ? 'typing_start' : 'typing_stop';
+        const payload = JSON.stringify({
+            type: type,
+            conversation_id: conversationId
+        });
+        typingSender.setAttribute("hx-vals", payload);
+        htmx.trigger(typingSender, "typing-event");
+    }
+}
+
+// --- Event Listeners ---
+
+// On initial history load, scroll to the bottom.
+document.body.addEventListener('load-chat-history', scrollToBottom);
+
+// When a new message comes in...
+document.body.addEventListener('htmx:afterSwap', function(event) {
+    const targetId = event.detail.target.id;
+
+    // Case 1: The entire message history was just loaded.
+    if (targetId === 'messages-container' && event.detail.requestConfig.verb === 'get') {
+      scrollToBottom();
+      return; // Done
+    }
+
+    // Case 2: A new message was appended via WebSocket OOB swap.
+    if (targetId === 'messages-container' && event.detail.swapSpec.swapStyle === 'beforeend') {
+      if (isUserNearBottom()) {
+        scrollToBottom();
+      } else {
+        jumpToBottomBtn.style.display = 'block';
+      }
+    }
+});
+
+// When the user scrolls the message container...
+messagesContainer.addEventListener('scroll', function() {
+    if (isUserNearBottom()) {
+        jumpToBottomBtn.style.display = 'none';
+    }
+});
+
+// When the user clicks the jump button...
+jumpToBottomBtn.addEventListener('click', function() {
+    scrollToBottom();
+    this.style.display = 'none';
+});
+
+// Typing indicator logic
+document.getElementById('chat-message-input').addEventListener('input', () => {
+    clearTimeout(typingTimer);
+    sendTypingStatus(true);
+    typingTimer = setTimeout(() => sendTypingStatus(false), doneTypingInterval);
+});
+
+// Form clearing logic
+document.getElementById('message-form').addEventListener('htmx:wsAfterSend', function() {
+    this.querySelector('input').value = '';
+});
 </script>
 {% endblock %}

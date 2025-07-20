@@ -1,9 +1,10 @@
 {% set conversation_id = "dm_" + ([g.user.id, other_user.id]|sort|join('_')) %}
 
-<!-- 
+<!--
 Attach the same trigger pattern to the main container for the DM view.
 -->
-<div ws-send="send" hx-trigger="load" hx-vals='{"type": "subscribe", "conversation_id": "{{ conversation_id }}"}'>
+<div class="h-100" data-conversation-id="{{ conversation_id }}">
+<div ws-send hx-trigger="load" hx-vals='{"type": "subscribe", "conversation_id": "{{ conversation_id }}"}' data-conversation-id="{{ conversation_id }}"></div>
 
     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
         <h4 class="mb-0">{{ other_user.username }}</h4>
