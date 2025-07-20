@@ -1,0 +1,14 @@
+<div id="invite-form-container" class="my-3">
+    <h5>Invite a User to #{{ channel.name }}</h5>
+    <form hx-post="/chat/channel/{{ channel.id }}/invite" hx-target="#invite-form-container" hx-swap="outerHTML">
+        <div class="input-group">
+            <select name="user_id" class="form-select">
+                <option selected>Choose a user...</option>
+                {% for user in users_to_invite %}
+                <option value="{{ user.id }}">{{ user.username }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-success" type="submit">Invite</button>
+        </div>
+    </form>
+</div>

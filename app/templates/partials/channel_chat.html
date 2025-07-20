@@ -1,0 +1,35 @@
+<!-- 
+This entire div replaces the content of #chat-window.
+The hx-trigger="load" will fire as soon as it's swapped into the DOM,
+sending the correct subscription message.
+-->
+<div ws-send="send" hx-trigger="load" hx-vals='{"type": "subscribe", "conversation_id": "channel_{{ channel.id }}"}'>
+
+    <!-- Container for the channel header -->
+    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
+        <h4 class="mb-0">#{{ channel.name }}</h4>
+        {% if channel.is_private %}
+        <div id="invite-button-container">
+            <button class="btn btn-sm btn-outline-secondary"
+                    hx-get="/chat/channel/{{ channel.id }}/invite"
+                    hx-target="#invite-button-container"
+                    hx-swap="outerHTML">
+                Invite User
+            </button>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Container for messages -->
+    <div id="messages-container">
+        {% for message in messages %}
+            {% include 'partials/message.html' %}
+        {% else %}
+            <div class="text-center text-muted">
+                <h5>Welcome to #{{ channel.name }}</h5>
+                <p>This is the beginning of the #{{ channel.name }} channel.</p>
+            </div>
+        {% endfor %}
+    </div>
+
+</div>

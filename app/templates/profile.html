@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>User Profile</h1>
+    <p>Welcome, <strong>{{ user.username }}</strong>!</p>
+    <ul>
+        <li><strong>Email:</strong> {{ user.email }}</li>
+        <li><strong>SSO ID:</strong> {{ user.sso_id }}</li>
+        <li><strong>SSO Provider:</strong> {{ user.sso_provider }}</li>
+    </ul>
+    <a href="{{ url_for('main.chat_interface') }}" class="btn btn-primary">Go to Chat</a>
+    <a href="{{ url_for('main.logout') }}" class="btn btn-danger">Logout</a>
+{% endblock %}

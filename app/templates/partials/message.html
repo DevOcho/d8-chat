@@ -1,0 +1,15 @@
+<div class="d-flex mb-3">
+    <div class="flex-shrink-0">
+        <!-- Placeholder for profile picture -->
+        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center" style="width: 40px; height: 40px;">
+            {{ message.user.username[0]|upper }}
+        </div>
+    </div>
+    <div class="flex-grow-1 ms-3">
+        <div>
+            <strong class="me-2">{{ message.user.username }}</strong>
+            <small class="text-muted">{{ message.created_at.strftime('%I:%M %p') }}</small>
+        </div>
+        <p>{{ message.content }}</p>
+    </div>
+</div>

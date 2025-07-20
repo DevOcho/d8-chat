@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="text-center">
+        <h1>Welcome to the Slack Clone</h1>
+        <p class="lead">A real-time chat application.</p>
+        <hr>
+        {% if g.user %}
+            <p>You are logged in as <strong>{{ g.user.username }}</strong>.</p>
+            <a href="{{ url_for('main.profile') }}" class="btn btn-primary">Go to Profile</a>
+            <a href="{{ url_for('main.chat_interface') }}" class="btn btn-primary">Go to Chat</a>
+            <a href="{{ url_for('main.logout') }}" class="btn btn-danger">Logout</a>
+        {% else %}
+            <p>Please log in to continue.</p>
+            <a href="{{ url_for('main.login_page') }}" class="btn btn-success">Login</a>
+        {% endif %}
+    </div>
+{% endblock %}

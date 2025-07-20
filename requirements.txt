@@ -1,0 +1,10 @@
+Flask
+peewee
+psycopg2-binary
+pydantic
+python-dotenv
+gunicorn
+Authlib
+requests
+flask-sock
+simple-websocket

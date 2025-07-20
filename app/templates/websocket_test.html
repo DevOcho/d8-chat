@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>WebSocket Test Page</h1>
+<p>Open your browser's developer console to see WebSocket messages.</p>
+
+<div class="mt-4">
+    <form id="messageForm">
+        <div class="input-group mb-3">
+            <input type="text" class="form-control" id="messageInput" placeholder="Enter message to send..." autofocus>
+            <button class="btn btn-primary" type="submit">Send Message</button>
+        </div>
+    </form>
+</div>
+
+<div id="log">
+    <h3>Log:</h3>
+    <pre id="console-log" style="height: 300px; overflow-y: scroll; border: 1px solid #ccc; background-color: #f5f5f5; padding: 10px;"></pre>
+</div>
+
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const messageForm = document.getElementById('messageForm');
+        const messageInput = document.getElementById('messageInput');
+        const logOutput = document.getElementById('console-log');
+
+        function log(message) {
+            console.log(message);
+            const timestamp = new Date().toLocaleTimeString();
+            logOutput.innerHTML += `[${timestamp}] ${message}\n`;
+            // Scroll to the bottom
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        // Determine the WebSocket protocol
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        // Construct the WebSocket URL
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat`;
+
+        log(`Attempting to connect to: ${wsUrl}`);
+        const socket = new WebSocket(wsUrl);
+
+        // Connection opened
+        socket.addEventListener('open', function (event) {
+            log('Successfully connected to the WebSocket server.');
+            socket.send('Hello, Server!');
+        });
+
+        // Listen for messages
+        socket.addEventListener('message', function (event) {
+            log(`Message from server: ${event.data}`);
+        });
+
+        // Connection closed
+        socket.addEventListener('close', function(event) {
+            if (event.wasClean) {
+                log(`Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+            } else {
+                log('Connection died');
+            }
+        });
+
+        // Connection error
+        socket.addEventListener('error', function(error) {
+            log(`[WebSocket Error] ${error.message}`);
+        });
+
+        // Send message from form
+        messageForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const message = messageInput.value;
+            if (message) {
+                log(`Sending: ${message}`);
+                socket.send(message);
+                messageInput.value = '';
+            }
+        });
+    });
+</script>
+{% endblock %}

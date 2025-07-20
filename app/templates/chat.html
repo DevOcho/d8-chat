@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block layout %}
+<!-- Far-left workspace sidebar (static for now) -->
+<div class="sidebar workspace-sidebar p-3 text-center text-white">
+    D8
+</div>
+
+<!-- Channel & DM list sidebar -->
+<div class="sidebar channel-sidebar p-3">
+    <h5 class="text-white">DevOcho</h5>
+    <hr class="text-secondary">
+
+    <h6 class="mt-4 text-secondary">Channels</h6>
+    <ul class="list-unstyled">
+        {% for channel in channels %}
+        <li>
+            <!-- This link will fetch channel content into the #chat-window div -->
+            <a href="#" class="text-decoration-none text-light"
+               hx-get="/chat/channel/{{ channel.id }}"
+               hx-target="#chat-window">
+                # {{ channel.name }}
+            </a>
+        </li>
+        {% else %}
+        <li>No channels found.</li>
+        {% endfor %}
+    </ul>
+
+    <h6 class="mt-4 text-secondary">Direct Messages</h6>
+    <ul class="list-unstyled">
+        {% for user in direct_message_users %}
+        <li>
+            <!-- This link will fetch DM content into the #chat-window div -->
+            <a href="#" class="text-decoration-none text-light"
+               hx-get="/chat/dm/{{ user.id }}"
+               hx-target="#chat-window">
+                {{ user.username }}
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+
+<!-- Main content area -->
+<main class="main-content" hx-ws="connect:/ws/chat" hx-ext="ws">
+    <!-- This div connects to the WebSocket endpoint -->
+
+        <!-- This div is the target for channel/DM history and new messages -->
+        <div id="chat-window" class="chat-messages" hx-swap-oob="true">
+            <div id="messages-container">
+                <!-- New messages will be swapped in here -->
+                <div class="text-center text-muted">
+                    <h3>Welcome, {{ g.user.username }}!</h3>
+                    <p>Select a channel or direct message on the left to start chatting.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Message input form -->
+        <div class="chat-input-form bg-light">
+            <!-- On submission, this form sends its data over the WebSocket -->
+            <form ws-send="send:submit" id="message-form">
+                <div class="input-group">
+                    <input name="chat_message" class="form-control" placeholder="Type a message..." autofocus>
+                    <button type="submit" class="btn btn-primary">Send</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</main>
+
+<script>
+    // Simple script to clear the input after a message is sent via HTMX/WebSocket
+    document.body.addEventListener('htmx:wsAfterSend', function(evt) {
+        // Find the input within the form that triggered the event
+        const form = document.getElementById('message-form');
+        const input = form.querySelector('input[name="chat_message"]');
+        if (input) {
+            input.value = ''; // Clear the input
+        }
+    });
+</script>
+{% endblock %}
