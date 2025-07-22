@@ -248,7 +248,7 @@ def chat(ws):
             if not conversation: continue
 
             new_message = Message.create(user=ws.user, conversation=conversation, content=chat_text)
-            message_html = f"""<div id="messages-container" hx-swap-oob="beforeend">{render_template('partials/message.html', message=new_message)}</div>"""
+            message_html = f"""<div id="message-list" hx-swap-oob="beforeend">{render_template('partials/message.html', message=new_message)}</div>"""
             chat_manager.broadcast(current_conversation_id_str, message_html)
 
     except Exception as e:
