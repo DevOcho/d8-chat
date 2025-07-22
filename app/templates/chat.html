@@ -1,24 +1,18 @@
 {% extends "base.html" %}
 
 {% block layout %}
-<!-- Far-left workspace sidebar (static for now) -->
-<div class="sidebar workspace-sidebar p-3 text-center text-white">
-    D8
-</div>
-
-<!-- Channel & DM list sidebar -->
+<!-- ... (sidebars are unchanged) ... -->
+<div class="sidebar workspace-sidebar p-3 text-center text-white">D8</div>
 <div class="sidebar channel-sidebar p-3">
-    <h5 class="text-white">DevOcho</h5>
-    <hr class="text-secondary">
-
+    <!-- Channel list -->
     <h6 class="mt-4 text-secondary">Channels</h6>
     <ul class="list-unstyled">
         {% for channel in channels %}
         <li>
-            <!-- This link will fetch channel content into the #chat-window div -->
+            <!-- MODIFIED: hx-target now points to our new messages container -->
             <a href="#" class="text-decoration-none text-light"
                hx-get="/chat/channel/{{ channel.id }}"
-               hx-target="#messages-container">
+               hx-target="#chat-messages-container">
                 # {{ channel.name }}
             </a>
         </li>
@@ -27,18 +21,16 @@
         {% endfor %}
     </ul>
 
+    <!-- DM list -->
     <h6 class="mt-4 text-secondary">Direct Messages</h6>
     <ul class="list-unstyled">
         {% for user in direct_message_users %}
         <li class="d-flex align-items-center">
-            <span id="status-dot-{{ user.id }}"
-                  class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}"
-                  style="width: 10px; height: 10px; transition: background-color 0.3s ease;">
-            </span>
-            <!-- This link will fetch DM content into the #chat-window div -->
+            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
+            <!-- MODIFIED: hx-target now points to our new messages container -->
             <a href="#" class="text-decoration-none text-light"
                hx-get="/chat/dm/{{ user.id }}"
-               hx-target="#messages-container">
+               hx-target="#chat-messages-container">
                 {{ user.username }}
             </a>
         </li>
@@ -47,19 +39,25 @@
 </div>
 
 <!-- Main content area -->
+<!-- MODIFIED: This structure is new -->
 <main class="main-content" ws-connect="/ws/chat" hx-ext="ws">
 
-  <!-- This div is the target for channel/DM history and new messages -->
-  <div id="chat-window" class="chat-messages position-relative">
-      <div id="messages-container" class="h-100" style="overflow-y: auto;">
-          <!-- New messages will be swapped in here -->
-          <div class="text-center text-muted">
-              <h3>Welcome, {{ g.user.username }}!</h3>
-              <p>Select a channel or direct message on the left to start chatting.</p>
-          </div>
+  <!-- NEW: Sticky Header Container -->
+  <div id="chat-header-container" class="p-3 border-bottom bg-white" style="flex-shrink: 0;">
+      <!-- The header content will be swapped in here from the backend -->
+      <div class="text-center text-muted">
+          <h4 class="mb-0">Welcome, {{ g.user.username }}!</h4>
+          <p class="mb-0 small">Select a conversation to begin.</p>
       </div>
+  </div>
 
-      <!-- "Jump to Bottom" button -->
+  <!-- NEW: Scrollable Messages Container -->
+  <div id="chat-messages-container" class="chat-messages position-relative" style="flex-grow: 1; overflow-y: auto;">
+      <!-- The message list and new messages will be swapped in here -->
+      <div class="text-center text-muted mt-5">
+          <p>Messages will appear here.</p>
+      </div>
+      <!-- "Jump to Bottom" button is now correctly associated with the messages container -->
       <button id="jump-to-bottom-btn"
             class="btn btn-primary btn-sm rounded-pill position-absolute bottom-0 start-50 translate-middle-x mb-3"
             style="display: none; z-index: 10;">
@@ -67,23 +65,17 @@
       </button>
   </div>
 
-  <!-- Message input form and typing indicator -->
+  <!-- Message input form (unchanged) -->
   <div class="chat-input-form bg-light">
-      <!-- Div for typing indicator -->
+      <!-- ... (the form and typing indicator are unchanged) ... -->
       <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
-      <!-- On submission, this form sends its data over the WebSocket -->
       <form ws-send id="message-form" autocomplete="off">
           <div class="input-group">
               <input id="chat-message-input" name="chat_message" class="form-control" placeholder="Type a message..." autofocus>
               <button type="submit" class="btn btn-primary">Send</button>
           </div>
       </form>
-
-      <div id="typing-sender"
-             ws-send
-             hx-trigger="typing-event"
-             style="display: none;">
-        </div>
+      <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
   </div>
 </main>
 
@@ -94,28 +86,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const scrollThreshold = 150;     // Pixels from bottom
 
     // --- Element References ---
-    const messagesContainer = document.getElementById('messages-container');
+    // This one was updated in our last change
+    const messagesContainer = document.getElementById('chat-messages-container'); 
+    
+    // These were here before and are still needed
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
     const messageInput = document.getElementById('chat-message-input');
     const messageForm = document.getElementById('message-form');
-    const typingSender = document.getElementById('typing-sender'); // The hidden div for sending typing events
+    const typingSender = document.getElementById('typing-sender');
     let typingTimer;
 
-    // --- Helper Functions ---
+    // --- Helper Functions (Unchanged) ---
     const isUserNearBottom = () => {
         const scrollableHeight = messagesContainer.scrollHeight - messagesContainer.clientHeight;
         return scrollableHeight - messagesContainer.scrollTop < scrollThreshold;
     };
 
-    // Scroll the window to the bottom of the screen
     const scrollToBottom = () => {
-        // A short timeout gives the DOM a moment to settle before we scroll
         setTimeout(() => {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }, 50);
     };
 
-    // Find the most recent message and scroll it into the chat window
     const scrollLastMessageIntoView = () => {
         const messageList = document.getElementById('message-list');
         if (messageList) {
@@ -126,56 +118,41 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // --- HTMX Event Listeners ---
+    // --- HTMX Event Listeners (All logic combined) ---
 
-    // Fired before HTMX swaps content into the DOM.
-    document.body.addEventListener('htmx:beforeSwap', (event) => {
-        // We only care about new messages being appended to the container.
-        if (event.detail.target.id === 'messages-container' && event.detail.swapSpec && event.detail.swapSpec.swapStyle === 'beforeend') {
-            // Check if we should scroll *before* the new content is added.
-            event.detail.shouldScroll = isUserNearBottom();
-        }
-    });
-
-    // Fired after HTMX swaps content into the DOM.
+    // For scrolling correctly when loading history (GET request)
     document.body.addEventListener('htmx:afterSwap', (event) => {
         const target = event.detail.target;
-
-        if (target.id === 'messages-container' && event.detail.requestConfig.verb === 'get') {
+        if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
             jumpToBottomBtn.style.display = 'none';
         }
     });
 
-    // Fires *before* a WebSocket message is processed. We decide IF we should scroll here.
+    // For scrolling correctly on incoming WebSocket messages
     document.body.addEventListener('htmx:wsBeforeMessage', (event) => {
-        // We attach our decision to the event object to pass it to the next listener.
         event.detail.shouldScroll = isUserNearBottom();
     });
 
-    // Fires *after* a WebSocket message has been processed and swapped into the DOM.
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
-        // We check for the flag we set in the `wsBeforeMessage` event.
-        // if (event.detail.shouldScroll) {
         if (isUserNearBottom()) {
             scrollLastMessageIntoView();
-            //scrollToBottom();
         } else {
-            // If we didn't scroll, the user is looking at history. Show the button.
             jumpToBottomBtn.style.display = 'block';
         }
     });
 
+    // --- THIS IS THE RESTORED SECTION ---
     // Fired after the main message form sends data over the WebSocket.
     messageForm.addEventListener('htmx:wsAfterSend', () => {
         // This correctly clears the form's input field.
         messageForm.reset();
         messageInput.focus();
     });
+    // --- END RESTORED SECTION ---
 
 
-    // --- Standard Browser Event Listeners for UI ---
-
+    // --- Standard Browser Event Listeners for UI (Unchanged) ---
     messagesContainer.addEventListener('scroll', () => {
         if (isUserNearBottom()) {
             jumpToBottomBtn.style.display = 'none';
@@ -187,16 +164,15 @@ document.addEventListener('DOMContentLoaded', () => {
         jumpToBottomBtn.style.display = 'none';
     });
 
-    // --- Typing Indicator Logic (Declarative Approach) ---
+    // --- Typing Indicator Logic (Unchanged) ---
     const sendTypingStatus = (isTyping) => {
-        const activeConversation = document.querySelector('#messages-container > div[data-conversation-id]');
+        const activeConversation = document.querySelector('#chat-messages-container > div[data-conversation-id]');
         if (activeConversation) {
             const conversationId = activeConversation.dataset.conversationId;
             const payload = {
                 type: isTyping ? 'typing_start' : 'typing_stop',
                 conversation_id: conversationId
             };
-            // Set the payload on our hidden div and trigger the event that sends it.
             typingSender.setAttribute('hx-vals', JSON.stringify(payload));
             htmx.trigger(typingSender, 'typing-event');
         }
@@ -208,7 +184,6 @@ document.addEventListener('DOMContentLoaded', () => {
         typingTimer = setTimeout(() => sendTypingStatus(false), doneTypingInterval);
     });
 
-    // Explicitly stop typing when the form is submitted
     messageForm.addEventListener('submit', () => {
         clearTimeout(typingTimer);
         sendTypingStatus(false);

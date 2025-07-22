@@ -1,0 +1,19 @@
+{# NEW FILE #}
+<!-- This content goes into the main hx-target -->
+<div class="h-100" data-conversation-id="channel_{{ channel.id }}">
+    <div ws-send
+         hx-trigger="load"
+         hx-vals='{"type": "subscribe", "conversation_id": "channel_{{ channel.id }}"}'>
+    </div>
+
+    <div id="message-list">
+        {% for message in messages %}
+            {% include 'partials/message.html' %}
+        {% else %}
+            <div class="text-center text-muted">
+                <h5>Welcome to #{{ channel.name }}</h5>
+                <p>This is the beginning of the #{{ channel.name }} channel.</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>

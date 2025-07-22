@@ -50,13 +50,14 @@ def seed_data():
             if created:
                 print("Channel '#general' created.")
 
-            project_channel, created = Channel.get_or_create(
+
+            announcements_channel, created = Channel.get_or_create(
                 workspace=workspace,
-                name='project-x',
-                defaults={'is_private': True, 'topic': 'Top secret project discussions.'}
+                name='announcements',
+                defaults={'is_private': False, 'topic': 'Company-wide announcements.'}
             )
             if created:
-                print("Channel '#project-x' created.")
+                print("Channel '#announcements' created.")
 
             # 5. Add members to channels
             # Add all users to #general
@@ -65,10 +66,11 @@ def seed_data():
             ChannelMember.get_or_create(user=users['user2'], channel=general_channel)
             print("Added all users to #general.")
 
-            # Add 'admin' and 'user1' to #project-x
-            ChannelMember.get_or_create(user=users['admin'], channel=project_channel)
-            ChannelMember.get_or_create(user=users['user1'], channel=project_channel)
-            print("Added 'admin' and 'user1' to #project-x.")
+            # Add all users to #announcements
+            ChannelMember.get_or_create(user=users['admin'], channel=announcements_channel)
+            ChannelMember.get_or_create(user=users['user1'], channel=announcements_channel)
+            ChannelMember.get_or_create(user=users['user2'], channel=announcements_channel)
+            print("Added all users to #announcements.")
 
             print("\nDatabase seeding complete!")
 

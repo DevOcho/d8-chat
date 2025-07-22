@@ -1,6 +1,6 @@
 from authlib.integrations.flask_client import OAuth
 from flask import url_for, session, redirect
-from .models import User, db
+from .models import User, db, Workspace, Channel, ChannelMember
 
 oauth = OAuth()
 
@@ -54,6 +54,24 @@ def handle_auth_callback():
                 sso_provider='authentik',
                 is_active=True
             )
+            print(f"New user '{user.username}' created via SSO.")
+            # Add the new user to default channels
+            try:
+                # Assuming a single, primary workspace for now
+                workspace = Workspace.get_or_none(Workspace.name == 'DevOcho')
+                if workspace:
+                    default_channels = Channel.select().where(
+                        (Channel.name == 'general') | (Channel.name == 'announcements'),
+                        Channel.workspace == workspace
+                    )
+                    for channel in default_channels:
+                        ChannelMember.create(user=user, channel=channel)
+                        print(f"Added '{user.username}' to default channel '#{channel.name}'.")
+                else:
+                    current_app.logger.warning("Could not find 'DevOcho' workspace to add new user to default channels.")
+            except Exception as e:
+                # Log the error but don't fail the user creation
+                current_app.logger.error(f"Failed to add new user to default channels: {e}")
         else:
             # User exists, update their details if necessary
             user.email = email

@@ -1,0 +1,10 @@
+<div id="chat-header-container" hx-swap-oob="true">
+    <div class="d-flex align-items-center p-3">
+        <!-- Placeholder for profile picture -->
+        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2" style="width: 24px; height: 24px; font-size: 0.8rem;">
+            {{ other_user.username[0]|upper }}
+        </div>
+        <h4 class="mb-0">{{ other_user.username }}</h4>
+    </div>
+    <hr>
+</div>

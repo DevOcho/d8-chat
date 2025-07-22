@@ -1,0 +1,10 @@
+<!-- This entire div is our "Out-of-Band" swap content -->
+<div id="chat-header-container" hx-swap-oob="true" class="p-3">
+    <h4 class="mb-0">#{{ channel.name }}</h4>
+    <small class="text-muted">
+        <!-- We'll pass members_count from the route -->
+        <span class="me-3" title="Members in channel"><i class="bi bi-people-fill me-1"></i>{{ members_count }} members</span>
+        <span>{{ channel.topic }}</span>
+    </small>
+    <hr>
+</div>

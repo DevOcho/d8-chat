@@ -105,13 +105,26 @@ def get_channel_chat(channel_id):
         defaults={'type': 'channel'}
     )
 
+    # Get the messages and count of the members for the template
     messages = (Message.select()
                 .where(Message.conversation == conversation)
                 .order_by(Message.created_at.asc()))
+    members_count = ChannelMember.select().where(ChannelMember.channel == channel).count()
+
+    # We will use a header and a message template to display with HTMX OOB swaps
+    header_html = render_template(
+        'partials/channel_header.html', 
+        channel=channel, 
+        members_count=members_count
+    )
+    messages_html = render_template(
+        'partials/channel_messages.html', 
+        channel=channel, 
+        messages=messages
+    )
 
     # Add the HX-Trigger header to fire the custom even on the client (scrolling-chat window)
-    html = render_template('partials/channel_chat.html', channel=channel, messages=messages)
-    response = make_response(html)
+    response = make_response(header_html + messages_html)
     response.headers['HX-Trigger'] = 'load-chat-history'
 
     return response
@@ -193,9 +206,12 @@ def get_dm_chat(other_user_id):
                 .where(Message.conversation == conversation)
                 .order_by(Message.created_at.asc()))
 
-    # HX-Trigger the chat window to load.
-    html = render_template('partials/dm_chat.html', messages=messages, other_user=other_user)
-    response = make_response(html)
+    # Header and message templates for a HTMX OOB Swap
+    header_html = render_template('partials/dm_header.html', other_user=other_user)
+    messages_html = render_template('partials/dm_messages.html', messages=messages, other_user=other_user)
+
+    # HX-Trigger the chat window to load (allows scrolling to new messages).
+    response = make_response(header_html + messages_html)
     response.headers['HX-Trigger'] = 'load-chat-history'
 
     return response

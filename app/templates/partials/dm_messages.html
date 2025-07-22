@@ -1,0 +1,18 @@
+{% set conversation_id = "dm_" ~ ([g.user.id, other_user.id]|sort|join('_')) %}
+
+<div class="h-100" data-conversation-id="{{ conversation_id }}">
+    <div ws-send
+         hx-trigger="load"
+         hx-vals='{"type": "subscribe", "conversation_id": "{{ conversation_id }}"}'>
+    </div>
+  
+    <div id="message-list">
+        {% for message in messages %}
+            {% include 'partials/message.html' %}
+        {% else %}
+            <div class="text-center text-muted">
+                <p>This is the beginning of your direct message history with {{ other_user.username }}.</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>
