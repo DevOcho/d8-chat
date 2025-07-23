@@ -1,0 +1,13 @@
+<!-- app/templates/partials/channel_list_item.html -->
+
+<!--
+    This snippet is designed to be added via an Out-of-Band swap.
+    The target #channel-list will have this appended to its end.
+-->
+<li hx-swap-oob="beforeend:#channel-list">
+    <a href="#" class="text-decoration-none text-light"
+       hx-get="/chat/channel/{{ channel.id }}"
+       hx-target="#messages-container">
+        # {{ channel.name }}
+    </a>
+</li>

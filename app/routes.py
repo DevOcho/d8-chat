@@ -1,11 +1,13 @@
 from flask import Blueprint, render_template, request, redirect, url_for, session, g, make_response
-from .models import User, Channel, ChannelMember, Message, Conversation
+from .models import User, Channel, ChannelMember, Message, Conversation, WorkspaceMember, db
 from .sso import oauth # Import the oauth object
 import functools
 import secrets
 from . import sock
 from .chat_manager import chat_manager
 import json
+from peewee import IntegrityError
+import re
 
 # Main blueprint for general app routes
 main_bp = Blueprint('main', __name__)
@@ -146,6 +148,61 @@ def invite_user_to_channel(channel_id):
 
     # Return a simple success message that replaces the form
     return f'<div class="text-success my-3">User has been invited!</div>'
+
+# --- Route to get the channel creation form ---
+@main_bp.route('/chat/channels/create', methods=['GET'])
+@login_required
+def get_create_channel_form():
+    """Renders the HTMX partial for the channel creation form."""
+    return render_template('partials/create_channel_form.html')
+
+
+# --- Route to handle channel creation ---
+@main_bp.route('/chat/channels/create', methods=['POST'])
+@login_required
+def create_channel():
+    """Processes the new channel form submission."""
+    channel_name = request.form.get('name', '').strip()
+    is_private = request.form.get('is_private') == 'on'
+
+    # --- Validation ---
+    # Sanitize name: lowercase, no spaces, limited special chars
+    channel_name = re.sub(r'[^a-zA-Z0-9_-]', '', channel_name).lower()
+
+    if not channel_name or len(channel_name) < 3:
+        error = "Name must be at least 3 characters long and contain only letters, numbers, underscores, or hyphens."
+        return render_template('partials/create_channel_form.html', error=error, name=channel_name, is_private=is_private), 400
+
+    # Assume user belongs to the first workspace they are a member of.
+    # In a multi-workspace app, this might come from the URL or session.
+    workspace_member = WorkspaceMember.get_or_none(user=g.user)
+    if not workspace_member:
+        return "You are not a member of any workspace.", 403
+    workspace = workspace_member.workspace
+
+    # --- Database Creation ---
+    try:
+        with db.atomic(): # Use a transaction
+            new_channel = Channel.create(
+                workspace=workspace,
+                name=channel_name,
+                is_private=is_private
+            )
+            # The creator automatically becomes a member
+            ChannelMember.create(user=g.user, channel=new_channel)
+
+    except IntegrityError:
+        # This happens if the UNIQUE constraint on (workspace, name) fails
+        error = f"A channel named '#{channel_name}' already exists."
+        return render_template('partials/create_channel_form.html', error=error, name=channel_name, is_private=is_private), 409
+
+    # --- HTMX Success Response ---
+    # 1. Render the new channel item to be appended to the list
+    new_channel_html = render_template('partials/channel_list_item.html', channel=new_channel)
+    # 2. Create a response and add a trigger to close the modal
+    response = make_response(new_channel_html)
+    response.headers['HX-Trigger'] = 'close-create-channel-modal'
+    return response
 
 
 @main_bp.route('/test-chat')

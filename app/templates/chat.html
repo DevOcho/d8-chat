@@ -11,8 +11,18 @@
     <h5 class="text-white">DevOcho</h5>
     <hr class="text-secondary">
 
-    <h6 class="mt-4 text-secondary">Channels</h6>
-    <ul class="list-unstyled">
+    <div class="d-flex justify-content-between align-items-center">
+        <h6 class="mt-4 text-secondary">Channels</h6>
+        <button class="btn btn-sm text-secondary"
+                data-bs-toggle="modal"
+                data-bs-target="#createChannelModal"
+                hx-get="{{ url_for('main.get_create_channel_form') }}"
+                hx-target="#createChannelModalContent"
+                title="Create a new channel">
+            +
+        </button>
+    </div>
+    <ul id="channel-list" class="list-unstyled">
         {% for channel in channels %}
         <li>
             <!-- This link will fetch channel content into the #chat-window div -->
@@ -87,6 +97,20 @@
   </div>
 </main>
 
+<!-- Bootstrap Modal to add channels -->
+<div class="modal fade" id="createChannelModal" tabindex="-1" aria-labelledby="createChannelModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content" id="createChannelModalContent">
+      <!-- The form partial from /chat/channels/create will be loaded here by HTMX -->
+      <div class="modal-body text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     // --- Configuration ---
@@ -100,6 +124,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const messageForm = document.getElementById('message-form');
     const typingSender = document.getElementById('typing-sender'); // The hidden div for sending typing events
     let typingTimer;
+
+    // --- Local Vars ---
+    let shouldScrollOnNextMessage = false;
 
     // --- Helper Functions ---
     const isUserNearBottom = () => {
@@ -141,23 +168,27 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.addEventListener('htmx:afterSwap', (event) => {
         const target = event.detail.target;
 
+        // Check if we just loaded new chat history via a GET request
         if (target.id === 'messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
             jumpToBottomBtn.style.display = 'none';
+
+            // Set focus to the chat input so the user can type immediately.
+            messageInput.focus(); 
         }
     });
 
     // Fires *before* a WebSocket message is processed. We decide IF we should scroll here.
     document.body.addEventListener('htmx:wsBeforeMessage', (event) => {
         // We attach our decision to the event object to pass it to the next listener.
-        event.detail.shouldScroll = isUserNearBottom();
+        shouldScrollOnNextMessage = isUserNearBottom();
     });
 
     // Fires *after* a WebSocket message has been processed and swapped into the DOM.
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
         // We check for the flag we set in the `wsBeforeMessage` event.
         // if (event.detail.shouldScroll) {
-        if (isUserNearBottom()) {
+        if (shouldScrollOnNextMessage) {
             scrollLastMessageIntoView();
             //scrollToBottom();
         } else {
@@ -213,6 +244,26 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(typingTimer);
         sendTypingStatus(false);
     });
+
+    // --- Logic to handle the create channel modal ---
+    const createChannelModalEl = document.getElementById('createChannelModal');
+    const createChannelModal = new bootstrap.Modal(createChannelModalEl);
+
+    // Listen for the custom event triggered by the HX-Trigger header
+    document.body.addEventListener('close-create-channel-modal', () => {
+        createChannelModal.hide();
+    });
+
+    // Reset the modal content when it's hidden to ensure the form is fresh next time
+    createChannelModalEl.addEventListener('hidden.bs.modal', function () {
+        document.getElementById('createChannelModalContent').innerHTML = `
+            <div class="modal-body text-center">
+                <div class="spinner-border" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>`;
+    });
+
 });
 </script>
 {% endblock %}

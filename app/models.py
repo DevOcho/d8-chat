@@ -41,7 +41,7 @@ class WorkspaceMember(BaseModel):
 class Channel(BaseModel):
     id = IdentityField()
     workspace = ForeignKeyField(Workspace, backref='channels')
-    name = CharField()
+    name = CharField(max_length=80)
     topic = TextField(null=True)
     is_private = BooleanField(default=False)
     class Meta:
