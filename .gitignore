@@ -205,3 +205,24 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Virtual Environments
+# This will ignore folders like venv/, env/, .venv/, etc.
+# and their contents (including the bin/ and lib/ folders inside)
+**/venv/
+**/env/
+**/.venv/
+pyvenv.cfg
+CACHEDIR.TAG
+
+# Other folders we don't want to track
+bin/
+lib/
+include/
+share/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
