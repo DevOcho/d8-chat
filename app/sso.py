@@ -1,6 +1,6 @@
 from authlib.integrations.flask_client import OAuth
 from flask import url_for, session, redirect
-from .models import User, db, Workspace, Channel, ChannelMember
+from .models import User, db, Workspace, Channel, ChannelMember, WorkspaceMember
 
 oauth = OAuth()
 
@@ -9,7 +9,7 @@ def init_sso(app):
     Initializes the OAuth client for SSO.
     """
     oauth.init_app(app)
-    
+
     # The 'name' must match the provider you register below
     oauth.register(
         name='authentik', # You can name this whatever you like
@@ -38,28 +38,49 @@ def handle_auth_callback():
     username = user_info.get('name', email) # Use name, fall back to email
 
     if not sso_id or not email:
-        # Handle error: essential info not provided
         return redirect(url_for('main.login_page', error="SSO provider did not return required information."))
 
-    # Find or create the user in the database
+   # --- Let's setup or create this user ---
+    # 1. Try to find the user by their unique SSO ID first. This is the most reliable.
     user = User.get_or_none(User.sso_id == sso_id)
 
     with db.atomic():
         if user is None:
-            # User does not exist, create a new one
-            user = User.create(
-                sso_id=sso_id,
-                email=email,
-                username=username,
-                sso_provider='authentik',
+            # 2. If not found, try to link to an existing user by email.
+            # This handles pre-seeded users logging in for the first time.
+            user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
+
+            if user:
+                # User found by email, link their account by setting the sso_id
+                print(f"Linking SSO ID to existing user '{user.username}' (found by email).")
+                user.sso_id = sso_id
+                user.sso_provider = 'authentik'
+                user.username = username # Update their name from SSO
+                user.email = email,
                 is_active=True
-            )
-            print(f"New user '{user.username}' created via SSO.")
-            # Add the new user to default channels
-            try:
-                # Assuming a single, primary workspace for now
-                workspace = Workspace.get_or_none(Workspace.name == 'DevOcho')
-                if workspace:
+                user.save()
+            else:
+                # 3. If still not found, this is a genuinely new user. Create them.
+                print(f"Creating a new user '{username}' from SSO login.")
+                user = User.create(
+                    sso_id=sso_id,
+                    email=email,
+                    username=username,
+                    sso_provider='authentik',
+                    is_active=True
+                )
+
+                # --- ADD TO WORKSPACE ---
+                # Find the default workspace.
+                default_workspace = Workspace.get_or_none(Workspace.name == 'DevOcho')
+                if default_workspace:
+                    # Add the new user to the workspace as a member.
+                    WorkspaceMember.create(
+                        user=user,
+                        workspace=default_workspace,
+                        role='member' # Assign a default role
+                    )
+                    print(f"Automatically added new user '{user.username}' to workspace '{default_workspace.name}'.")
                     default_channels = Channel.select().where(
                         (Channel.name == 'general') | (Channel.name == 'announcements'),
                         Channel.workspace == workspace
@@ -68,12 +89,10 @@ def handle_auth_callback():
                         ChannelMember.create(user=user, channel=channel)
                         print(f"Added '{user.username}' to default channel '#{channel.name}'.")
                 else:
-                    current_app.logger.warning("Could not find 'DevOcho' workspace to add new user to default channels.")
-            except Exception as e:
-                # Log the error but don't fail the user creation
-                current_app.logger.error(f"Failed to add new user to default channels: {e}")
+                    print(f"WARNING: Default workspace 'DevOcho' not found. Could not add new user '{user.username}'.")
+
         else:
-            # User exists, update their details if necessary
+            # User was found by sso_id, update their details just in case they changed.
             user.email = email
             user.username = username
             user.save()
@@ -81,5 +100,4 @@ def handle_auth_callback():
     # Store user ID in the session to log them in
     session['user_id'] = user.id
 
-    # Redirect to a protected page, e.g., a user profile or dashboard
     return redirect(url_for('main.profile'))
