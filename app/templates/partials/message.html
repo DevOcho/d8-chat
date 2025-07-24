@@ -10,6 +10,6 @@
             <strong class="me-2">{{ message.user.username }}</strong>
             <small class="text-muted">{{ message.created_at.strftime('%I:%M %p') }}</small>
         </div>
-        <p>{{ message.content }}</p>
+        <p style="white-space: pre-wrap;">{{ message.content }}</p>
     </div>
 </div>

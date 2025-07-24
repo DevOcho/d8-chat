@@ -90,14 +90,20 @@
       </button>
   </div>
 
-  <!-- Message input form (unchanged) -->
+  <!-- Message input form -->
   <div class="chat-input-form bg-light">
       <!-- ... (the form and typing indicator are unchanged) ... -->
       <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
       <form ws-send id="message-form" autocomplete="off">
           <div class="input-group">
-              <input id="chat-message-input" name="chat_message" class="form-control" placeholder="Type a message..." autofocus>
-              <button type="submit" class="btn btn-primary">Send</button>
+            <textarea id="chat-message-input" 
+                      name="chat_message" 
+                      class="form-control" 
+                      placeholder="Type a message..." 
+                      rows="1" 
+                      autofocus
+                      style="resize: none;"></textarea>
+              <button id="send-button" type="submit" class="btn btn-primary">Send</button>
           </div>
       </form>
       <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
@@ -137,6 +143,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Local Vars ---
     let shouldScrollOnNextMessage = false;
+    const initialTextareaHeight = messageInput.scrollHeight;
+
+    // --- TEXTAREA AUTO-RESIZE AND SEND LOGIC ---
+    const resizeTextarea = () => {
+        messageInput.style.height = 'auto'; // Reset height to recalculate
+        // Set height to scrollHeight, but not less than its initial height
+        const newHeight = Math.max(initialTextareaHeight, messageInput.scrollHeight);
+        messageInput.style.height = `${newHeight}px`;
+    };
+
+    messageInput.addEventListener('input', resizeTextarea);
+    
+    messageInput.addEventListener('keydown', (e) => {
+        // Send on Enter, but allow new lines with Shift+Enter
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault(); // Prevent new line in textarea
+            
+            // Don't send empty messages
+            if (messageInput.value.trim() !== '') {
+                 // Trigger the form submission
+                 htmx.trigger(messageForm, 'submit');
+            }
+        }
+    });
+
+    // Initial resize on page load
+    resizeTextarea();
 
     // --- Helper Functions ---
     const isUserNearBottom = () => {
@@ -191,15 +224,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // --- THIS IS THE RESTORED SECTION ---
     // Fired after the main message form sends data over the WebSocket.
     messageForm.addEventListener('htmx:wsAfterSend', () => {
         // This correctly clears the form's input field.
         messageForm.reset();
+        resizeTextarea();
         messageInput.focus();
     });
-    // --- END RESTORED SECTION ---
-
 
     // --- Standard Browser Event Listeners for UI (Unchanged) ---
     messagesContainer.addEventListener('scroll', () => {
@@ -213,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
         jumpToBottomBtn.style.display = 'none';
     });
 
-    // --- Typing Indicator Logic (Unchanged) ---
+    // --- Typing Indicator Logic ---
     const sendTypingStatus = (isTyping) => {
         const activeConversation = document.querySelector('#chat-messages-container > div[data-conversation-id]');
         if (activeConversation) {
