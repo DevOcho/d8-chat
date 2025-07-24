@@ -36,38 +36,51 @@
     <!-- DM list -->
     <h6 class="mt-4 text-secondary">Direct Messages</h6>
     <ul class="list-unstyled">
-        {% for user in direct_message_users %}
-        <li class="d-flex align-items-center">
-            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
-            <!-- MODIFIED: hx-target now points to our new messages container -->
-            <a href="#" class="text-decoration-none text-light"
-               hx-get="/chat/dm/{{ user.id }}"
-               hx-target="#chat-messages-container">
-                {{ user.username }}
-            </a>
-        </li>
-        {% endfor %}
+      <!-- Current User for talking to yourself -->
+      <li class="d-flex align-items-center">
+        <span id="status-dot-{{ g.user.id }}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;"></span>
+        <a href="#" class="text-decoration-none text-light"
+           hx-get="/chat/dm/{{ g.user.id }}"
+           hx-target="#chat-messages-container">
+            {{ g.user.username }} (you)
+        </a>
+      </li>
+      <!-- Other users -->
+      {% for user in direct_message_users %}
+      <li class="d-flex align-items-center">
+        <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
+        <a href="#" class="text-decoration-none text-light"
+           hx-get="/chat/dm/{{ user.id }}"
+           hx-target="#chat-messages-container">
+            {{ user.username }}
+        </a>
+      </li>
+      {% endfor %}
     </ul>
 </div>
 
 <!-- Main content area -->
-<!-- MODIFIED: This structure is new -->
 <main class="main-content" ws-connect="/ws/chat" hx-ext="ws">
 
-  <!-- NEW: Sticky Header Container -->
   <div id="chat-header-container" class="p-3 border-bottom bg-white" style="flex-shrink: 0;">
-      <!-- The header content will be swapped in here from the backend -->
+      <!-- The header content will be swapped in from the backend -->
       <div class="text-center text-muted">
           <h4 class="mb-0">Welcome, {{ g.user.username }}!</h4>
           <p class="mb-0 small">Select a conversation to begin.</p>
       </div>
   </div>
 
-  <!-- NEW: Scrollable Messages Container -->
-  <div id="chat-messages-container" class="chat-messages position-relative" style="flex-grow: 1; overflow-y: auto;">
+  <!-- Scrollable Messages Container -->
+  <div id="chat-messages-container" 
+       class="chat-messages position-relative" 
+       style="flex-grow: 1; overflow-y: auto;"
+       hx-get="/chat/dm/{{ g.user.id }}" 
+       hx-trigger="load">
       <!-- The message list and new messages will be swapped in here -->
       <div class="text-center text-muted mt-5">
-          <p>Messages will appear here.</p>
+        <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading your space...</span>
+        </div>
       </div>
       <!-- "Jump to Bottom" button is now correctly associated with the messages container -->
       <button id="jump-to-bottom-btn"

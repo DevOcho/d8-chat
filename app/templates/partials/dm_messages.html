@@ -11,7 +11,12 @@
             {% include 'partials/message.html' %}
         {% else %}
             <div class="text-center text-muted">
+              {% if other_user.id == g.user.id %}
+                <p><strong>This is your space.</strong></p>
+                <p class="small">Draft messages, list your to-dos, or keep links and files handy. You can also talk to yourself here, but please keep it civil.</p>
+              {% else %}
                 <p>This is the beginning of your direct message history with {{ other_user.username }}.</p>
+              {% endif %}
             </div>
         {% endfor %}
     </div>
