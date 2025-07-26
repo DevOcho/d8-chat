@@ -1,0 +1,24 @@
+<div class="message-toolbar">
+    <button class="btn btn-sm btn-light"
+            hx-get="/chat/message/{{ message.id }}/reply"
+            hx-target="#chat-input-container"
+            hx-swap="outerHTML"
+            data-action="reply" title="Reply">
+        <i class="bi bi-reply-fill"></i>
+    </button>
+    <button class="btn btn-sm btn-light"
+            hx-get="/chat/message/{{ message.id }}/edit"
+            hx-target="#message-{{ message.id }}"
+            hx-swap="outerHTML"
+            data-action="edit" title="Edit">
+        <i class="bi bi-pencil-square"></i>
+    </button>
+    <button class="btn btn-sm btn-light"
+            hx-delete="/chat/message/{{ message.id }}"
+            hx-target="#message-{{ message.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Are you sure you want to delete this message?"
+            data-action="delete" title="Delete">
+        <i class="bi bi-trash"></i>
+    </button>
+</div>

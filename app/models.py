@@ -3,7 +3,7 @@ import datetime
 from peewee import (
     Model, PostgresqlDatabase, TextField, CharField, BooleanField,
     DateTimeField, ForeignKeyField, BigIntegerField, IdentityField, SQL,
-    CompositeKey # <-- Import CompositeKey
+    CompositeKey
 )
 from urllib.parse import urlparse
 from config import Config
@@ -66,6 +66,8 @@ class Message(BaseModel):
     conversation = ForeignKeyField(Conversation, backref='messages')
     user = ForeignKeyField(User, backref='messages')
     content = TextField()
+    is_edited = BooleanField(default=False)
+    parent_message = ForeignKeyField('self', backref='replies', null=True)
 
 # Function to initialize the database connection
 def initialize_db():

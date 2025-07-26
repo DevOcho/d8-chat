@@ -217,6 +217,104 @@ def create_channel():
     response.headers['HX-Trigger'] = 'close-create-channel-modal'
     return response
 
+# --- MESSAGE EDIT AND DELETE ROUTES ---
+@main_bp.route('/chat/message/<int:message_id>', methods=['GET'])
+@login_required
+def get_message_view(message_id):
+    """Returns the standard, read-only view of a single message."""
+    message = Message.get_or_none(id=message_id)
+
+    if not message:
+        return "", 404
+
+    # This is used by the "Cancel" button on the edit form.
+    return render_template('partials/message.html', message=message)
+
+
+@main_bp.route('/chat/message/<int:message_id>/edit', methods=['GET'])
+@login_required
+def get_edit_message_form(message_id):
+    message = Message.get_or_none(id=message_id)
+    if not message or message.user.id != g.user.id:
+        return "", 403
+    return render_template('partials/edit_message_form.html', message=message)
+
+
+@main_bp.route('/chat/message/<int:message_id>', methods=['PUT'])
+@login_required
+def update_message(message_id):
+    """
+    Handles the submission of an edited message.
+    """
+    message = Message.get_or_none(id=message_id)
+    if not message or message.user.id != g.user.id:
+        return "Unauthorized", 403
+
+    new_content = request.form.get('content')
+    if new_content:
+        # Update the message in the database
+        message.content = new_content
+        message.is_edited = True
+        message.save()
+
+        # Get the conversation ID string for the broadcast
+        conv_id_str = message.conversation.conversation_id_str
+
+        # Render the updated message partial
+        updated_message_html = render_template('partials/message.html', message=message)
+
+        # Construct the OOB swap HTML for the broadcast. This tells all
+        # clients to replace the message's outer HTML with the updated version.
+        broadcast_html = f'<div id="message-{message.id}" hx-swap-oob="outerHTML">{updated_message_html}</div>'
+
+        # Broadcast the HTML fragment to all subscribers of the conversation
+        chat_manager.broadcast(conv_id_str, broadcast_html)
+
+    # The original hx-put request also needs a response. Return the updated partial.
+    return render_template('partials/message.html', message=message)
+
+
+@main_bp.route('/chat/message/<int:message_id>', methods=['DELETE'])
+@login_required
+def delete_message(message_id):
+    """
+    Deletes a message.
+    """
+    message = Message.get_or_none(id=message_id)
+    if not message or message.user.id != g.user.id:
+        return "Unauthorized", 403
+
+    # Get the conversation ID before deleting the message object
+    conv_id_str = message.conversation.conversation_id_str
+
+    # Delete the message from the database
+    message.delete_instance()
+
+    # Construct the OOB swap HTML to delete the element on all clients' screens
+    broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
+
+    # Broadcast the delete instruction
+    chat_manager.broadcast(conv_id_str, broadcast_html)
+
+    # The hx-delete request expects an empty response since the target is removed
+    return "", 204
+
+
+@main_bp.route('/chat/input/default')
+@login_required
+def get_default_chat_input():
+    """Serves the default chat input form."""
+    return render_template('partials/chat_input_default.html')
+
+
+@main_bp.route('/chat/message/<int:message_id>/reply')
+@login_required
+def get_reply_chat_input(message_id):
+    message_to_reply_to = Message.get_or_none(id=message_id)
+    if not message_to_reply_to:
+        return "Message not found", 404
+    return render_template('partials/chat_input_reply.html', message=message_to_reply_to)
+
 
 @main_bp.route('/test-chat')
 @login_required
@@ -274,7 +372,7 @@ def get_dm_chat(other_user_id):
     return response
 
 
-# --- MODIFIED: WebSocket Handler ---
+# --- WebSocket Handler ---
 @sock.route('/ws/chat')
 def chat(ws):
     print("INFO: WebSocket client connected.")
@@ -293,36 +391,50 @@ def chat(ws):
     try:
         while True:
             data = json.loads(ws.receive())
+            event_type = data.get("type")
 
-            # --- HANDLE TYPING INDICATORS ---
-            if data.get('type') == 'typing_start':
+            # --- HANDLE INCOMING MESSAGE TYPES ---
+            if event_type  == 'typing_start':
                 indicator_html = f'<div id="typing-indicator" hx-swap-oob="true"><p>{ws.user.username} is typing...</p></div>'
                 chat_manager.broadcast(data.get('conversation_id'), indicator_html, sender_ws=ws)
                 continue
 
-            if data.get('type') == 'typing_stop':
+            if event_type  == 'typing_stop':
                 indicator_html = '<div id="typing-indicator" hx-swap-oob="true"></div>'
                 chat_manager.broadcast(data.get('conversation_id'), indicator_html, sender_ws=ws)
                 continue
 
             # --- HANDLE SUBSCRIPTION ---
-            if data.get('type') == 'subscribe':
+            if event_type == 'subscribe':
                 conv_id_str = data.get('conversation_id')
                 if conv_id_str:
                     chat_manager.subscribe(conv_id_str, ws)
                 continue
 
-            # --- HANDLE CHAT MESSAGES ---
+            # --- HANDLE NEW CHAT MESSAGES ---
             chat_text = data.get('chat_message')
+            parent_id = data.get('parent_message_id')
             current_conversation_id_str = getattr(ws, 'channel_id', None)
             if not (chat_text and current_conversation_id_str): continue
 
             conversation = Conversation.get_or_none(conversation_id_str=current_conversation_id_str)
             if not conversation: continue
 
-            new_message = Message.create(user=ws.user, conversation=conversation, content=chat_text)
+            new_message = Message.create(
+                user=ws.user,
+                conversation=conversation,
+                content=chat_text,
+                parent_message=parent_id if parent_id else None)
+
+            # 1. Broadcast the new message HTML to EVERYONE in the channel.
             message_html = f"""<div id="message-list" hx-swap-oob="beforeend">{render_template('partials/message.html', message=new_message)}</div>"""
             chat_manager.broadcast(current_conversation_id_str, message_html)
+
+            # 2. If it was a reply, send a command ONLY to the original sender to reset their input form.
+            if parent_id:
+                input_html =render_template('partials/chat_input_default.html')
+                reset_input_command = f"""<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>"""
+                ws.send(reset_input_command)
 
     except Exception as e:
         print(f"ERROR: An exception occurred for user '{ws.user.username}': {e}")

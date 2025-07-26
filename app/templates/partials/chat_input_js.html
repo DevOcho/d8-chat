@@ -1,0 +1,88 @@
+<script>
+  // Use a self-executing function to avoid polluting the global scope
+  (function() {
+    // These elements are now guaranteed to exist because this script
+    // is loaded along with the form partial.
+    const messageForm = document.getElementById('message-form');
+    const messageInput = document.getElementById('chat-message-input');
+    const typingSender = document.getElementById('typing-sender');
+
+    if (!messageForm || !messageInput || !typingSender) {
+      console.error("Chat input script could not find required elements.");
+      return;
+    }
+
+    const doneTypingInterval = 1500; // ms
+    let typingTimer;
+    const initialTextareaHeight = messageInput.scrollHeight;
+
+    // --- TEXTAREA AUTO-RESIZE AND SEND LOGIC ---
+    const resizeTextarea = () => {
+        messageInput.style.height = 'auto'; // Reset height
+        const newHeight = Math.max(initialTextareaHeight, messageInput.scrollHeight);
+        messageInput.style.height = `${newHeight}px`;
+    };
+
+    messageInput.addEventListener('input', resizeTextarea);
+    resizeTextarea(); // Initial resize on load
+
+    messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            if (messageInput.value.trim() !== '') {
+                 htmx.trigger(messageForm, 'submit');
+            }
+        }
+
+        // edit message via the up arrow
+        if (e.key === 'ArrowUp' && messageInput.value.trim() === '') {
+            e.preventDefault();
+            const messageList = document.getElementById('message-list');
+            if (messageList) {
+                const userMessages = messageList.querySelectorAll('.message-container[data-user-id="{{ g.user.id }}"]');
+                const lastUserMessage = userMessages[userMessages.length - 1];
+
+                if (lastUserMessage) {
+                    const editButton = lastUserMessage.querySelector('.message-toolbar button[data-action="edit"]');
+                    if (editButton) {
+                        htmx.trigger(editButton, 'click');
+                    }
+                }
+            }
+        }
+    });
+
+    // --- Typing Indicator Logic ---
+    const sendTypingStatus = (isTyping) => {
+        const activeConversation = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+        if (activeConversation) {
+            const conversationId = activeConversation.dataset.conversationId;
+            const payload = {
+                type: isTyping ? 'typing_start' : 'typing_stop',
+                conversation_id: conversationId
+            };
+            typingSender.setAttribute('hx-vals', JSON.stringify(payload));
+            htmx.trigger(typingSender, 'typing-event');
+        }
+    };
+
+    messageInput.addEventListener('input', () => {
+        clearTimeout(typingTimer);
+        sendTypingStatus(true);
+        typingTimer = setTimeout(() => sendTypingStatus(false), doneTypingInterval);
+    });
+
+    messageForm.addEventListener('submit', () => {
+        clearTimeout(typingTimer);
+        sendTypingStatus(false);
+    });
+
+    // This is the most reliable event for clearing the input after a ws-send
+    messageForm.addEventListener('htmx:wsAfterSend', () => {
+        messageForm.reset();
+        resizeTextarea();
+        messageInput.focus();
+    });
+
+  })();
+</script>

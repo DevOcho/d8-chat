@@ -1,0 +1,28 @@
+<div id="chat-input-container" class="chat-input-form bg-light">
+    {# This is the quoted message UI #}
+    <div class="quoted-reply p-2 mb-2">
+        <strong>Replying to {{ message.user.username }}</strong>
+        <p class="mb-0 text-muted text-truncate">{{ message.content }}</p>
+        {# Cancel button swaps back to the default input form #}
+        <button class="btn-close"
+                aria-label="Close"
+                style="position: absolute; top: 5px; right: 10px;"
+                hx-get="/chat/input/default"
+                hx-target="#chat-input-container"
+                hx-swap="outerHTML"></button>
+    </div>
+
+    {# This is the actual message form #}
+    <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
+    <form ws-send id="message-form" autocomplete="off">
+        {# IMPORTANT: Hidden input to send the parent ID #}
+        <input type="hidden" name="parent_message_id" value="{{ message.id }}">
+        <div class="input-group">
+            <textarea id="chat-message-input" name="chat_message" class="form-control" placeholder="Reply..." rows="1" style="resize: none;"></textarea>
+            <button id="send-button" type="submit" class="btn btn-primary">Reply</button>
+        </div>
+    </form>
+    <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
+</div>
+
+{% include 'partials/chat_input_js.html' %}

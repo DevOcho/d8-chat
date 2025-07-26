@@ -91,22 +91,12 @@
   </div>
 
   <!-- Message input form -->
-  <div class="chat-input-form bg-light">
-      <!-- ... (the form and typing indicator are unchanged) ... -->
-      <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
-      <form ws-send id="message-form" autocomplete="off">
-          <div class="input-group">
-            <textarea id="chat-message-input" 
-                      name="chat_message" 
-                      class="form-control" 
-                      placeholder="Type a message..." 
-                      rows="1" 
-                      autofocus
-                      style="resize: none;"></textarea>
-              <button id="send-button" type="submit" class="btn btn-primary">Send</button>
+  <div hx-get="/chat/input/default" hx-trigger="load" hx-swap="outerHTML">
+      <div class="chat-input-form bg-light">
+          <div class="spinner-border spinner-border-sm" role="status">
+              <span class="visually-hidden">Loading input...</span>
           </div>
-      </form>
-      <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
+      </div>
   </div>
 </main>
 
@@ -127,49 +117,15 @@
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     // --- Configuration ---
-    const doneTypingInterval = 1500; // ms
     const scrollThreshold = 150;     // Pixels from bottom
 
     // --- Element References ---
-    // This one was updated in our last change
-    const messagesContainer = document.getElementById('chat-messages-container'); 
-    
-    // These were here before and are still needed
+    const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
-    const messageInput = document.getElementById('chat-message-input');
-    const messageForm = document.getElementById('message-form');
-    const typingSender = document.getElementById('typing-sender');
-    let typingTimer;
+    const messageInput = document.getElementById('chat-message-input'); // This will now be null initially, which is fine.
 
     // --- Local Vars ---
     let shouldScrollOnNextMessage = false;
-    const initialTextareaHeight = messageInput.scrollHeight;
-
-    // --- TEXTAREA AUTO-RESIZE AND SEND LOGIC ---
-    const resizeTextarea = () => {
-        messageInput.style.height = 'auto'; // Reset height to recalculate
-        // Set height to scrollHeight, but not less than its initial height
-        const newHeight = Math.max(initialTextareaHeight, messageInput.scrollHeight);
-        messageInput.style.height = `${newHeight}px`;
-    };
-
-    messageInput.addEventListener('input', resizeTextarea);
-    
-    messageInput.addEventListener('keydown', (e) => {
-        // Send on Enter, but allow new lines with Shift+Enter
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault(); // Prevent new line in textarea
-            
-            // Don't send empty messages
-            if (messageInput.value.trim() !== '') {
-                 // Trigger the form submission
-                 htmx.trigger(messageForm, 'submit');
-            }
-        }
-    });
-
-    // Initial resize on page load
-    resizeTextarea();
 
     // --- Helper Functions ---
     const isUserNearBottom = () => {
@@ -199,37 +155,38 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.addEventListener('htmx:afterSwap', (event) => {
         const target = event.detail.target;
 
-        // Check if we just loaded new chat history via a GET request
+        // Process code blocks for ANY new content swapped in
+        processCodeBlocks(target);
+
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
             jumpToBottomBtn.style.display = 'none';
 
-            // Set focus to the chat input so the user can type immediately.
-            messageInput.focus(); 
+            // We need to focus the new input, which might have just been swapped in
+            const newMmessageInput = document.getElementById('chat-message-input');
+            if (newMmessageInput) {
+                newMmessageInput.focus();
+            }
         }
     });
 
     // For scrolling correctly on incoming WebSocket messages
     document.body.addEventListener('htmx:wsBeforeMessage', (event) => {
-        // We attach our decision to the event object to pass it to the next listener.
         shouldScrollOnNextMessage = isUserNearBottom();
     });
 
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
-        // We check for the flag we set in the `wsBeforeMessage` event.
+        const messageList = document.getElementById('message-list');
+        if (messageList && messageList.lastElementChild) {
+            // I don't love this but AI suggested it
+            setTimeout(() => { processCodeBlocks(messageList.lastElementChild); }, 50);
+        }
+
         if (shouldScrollOnNextMessage) {
             scrollLastMessageIntoView();
         } else {
             jumpToBottomBtn.style.display = 'block';
         }
-    });
-
-    // Fired after the main message form sends data over the WebSocket.
-    messageForm.addEventListener('htmx:wsAfterSend', () => {
-        // This correctly clears the form's input field.
-        messageForm.reset();
-        resizeTextarea();
-        messageInput.focus();
     });
 
     // --- Standard Browser Event Listeners for UI (Unchanged) ---
@@ -244,41 +201,14 @@ document.addEventListener('DOMContentLoaded', () => {
         jumpToBottomBtn.style.display = 'none';
     });
 
-    // --- Typing Indicator Logic ---
-    const sendTypingStatus = (isTyping) => {
-        const activeConversation = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-        if (activeConversation) {
-            const conversationId = activeConversation.dataset.conversationId;
-            const payload = {
-                type: isTyping ? 'typing_start' : 'typing_stop',
-                conversation_id: conversationId
-            };
-            typingSender.setAttribute('hx-vals', JSON.stringify(payload));
-            htmx.trigger(typingSender, 'typing-event');
-        }
-    };
-
-    messageInput.addEventListener('input', () => {
-        clearTimeout(typingTimer);
-        sendTypingStatus(true);
-        typingTimer = setTimeout(() => sendTypingStatus(false), doneTypingInterval);
-    });
-
-    messageForm.addEventListener('submit', () => {
-        clearTimeout(typingTimer);
-        sendTypingStatus(false);
-    });
-
     // --- Logic to handle the create channel modal ---
     const createChannelModalEl = document.getElementById('createChannelModal');
     const createChannelModal = new bootstrap.Modal(createChannelModalEl);
 
-    // Listen for the custom event triggered by the HX-Trigger header
     document.body.addEventListener('close-create-channel-modal', () => {
         createChannelModal.hide();
     });
 
-    // Reset the modal content when it's hidden to ensure the form is fresh next time
     createChannelModalEl.addEventListener('hidden.bs.modal', function () {
         document.getElementById('createChannelModalContent').innerHTML = `
             <div class="modal-body text-center">
@@ -287,6 +217,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>`;
     });
+
+const processCodeBlocks = (container) => {
+        const MAX_HEIGHT = 300; // Max height in pixels before collapsing
+        const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');
+
+        codeBlocks.forEach(block => {
+            // Check if the content is taller than our max height
+            if (block.scrollHeight > MAX_HEIGHT) {
+                // Start the block in its collapsed state
+                block.classList.add('collapsible');
+
+                // Create the persistent toggler button
+                const toggler = document.createElement('div');
+                toggler.className = 'code-expander'; // We can reuse the existing style
+                toggler.innerText = 'Show more...';
+                block.appendChild(toggler);
+
+                // Add a permanent click event listener to the toggler
+                toggler.addEventListener('click', () => {
+                    // Toggle the class that controls the height
+                    block.classList.toggle('collapsible');
+
+                    // Update the button text based on the new state
+                    if (block.classList.contains('collapsible')) {
+                        toggler.innerText = 'Show more...';
+                    } else {
+                        toggler.innerText = 'Show less';
+                    }
+                });
+            }
+            // Mark the block as processed so we don't add multiple buttons
+            block.classList.add('code-processed');
+        });
+    };
+
+    // Run once on initial load for the first batch of messages
+    processCodeBlocks(document.body);
 
 });
 </script>

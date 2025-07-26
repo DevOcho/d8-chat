@@ -83,7 +83,7 @@ def handle_auth_callback():
                     print(f"Automatically added new user '{user.username}' to workspace '{default_workspace.name}'.")
                     default_channels = Channel.select().where(
                         (Channel.name == 'general') | (Channel.name == 'announcements'),
-                        Channel.workspace == workspace
+                        Channel.workspace == default_workspace
                     )
                     for channel in default_channels:
                         ChannelMember.create(user=user, channel=channel)
