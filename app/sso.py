@@ -1,6 +1,7 @@
 from authlib.integrations.flask_client import OAuth
-from flask import url_for, session, redirect
+from flask import url_for, session, redirect, render_template
 from .models import User, db, Workspace, Channel, ChannelMember, WorkspaceMember
+from .chat_manager import chat_manager
 
 oauth = OAuth()
 
@@ -70,7 +71,7 @@ def handle_auth_callback():
                     is_active=True
                 )
 
-                # --- ADD TO WORKSPACE ---
+                # --- ADD TO WORKSPACE and BROADCAST ---
                 # Find the default workspace.
                 default_workspace = Workspace.get_or_none(Workspace.name == 'DevOcho')
                 if default_workspace:
@@ -81,6 +82,12 @@ def handle_auth_callback():
                         role='member' # Assign a default role
                     )
                     print(f"Automatically added new user '{user.username}' to workspace '{default_workspace.name}'.")
+
+                    # Render the new user partial to be appended to everyone's DM list
+                    new_user_html = render_template('partials/dm_list_item.html', user=user)
+                    # Broadcast it to all connected clients
+                    chat_manager.broadcast_to_all(new_user_html)
+
                     default_channels = Channel.select().where(
                         (Channel.name == 'general') | (Channel.name == 'announcements'),
                         Channel.workspace == default_workspace

@@ -1,13 +1,14 @@
 from flask import Blueprint, render_template, request, redirect, url_for, session, g, make_response
-from .models import User, Channel, ChannelMember, Message, Conversation, WorkspaceMember, db
+from .models import User, Channel, ChannelMember, Message, Conversation, WorkspaceMember, db, UserConversationStatus
 from .sso import oauth # Import the oauth object
 import functools
 import secrets
 from . import sock
 from .chat_manager import chat_manager
 import json
-from peewee import IntegrityError
+from peewee import IntegrityError, fn
 import re
+import datetime
 
 # Main blueprint for general app routes
 main_bp = Blueprint('main', __name__)
@@ -72,23 +73,64 @@ def logout():
 def profile():
     return render_template('profile.html', user=g.user)
 
+
 # --- CHAT INTERFACE ROUTES ---
 @main_bp.route('/chat')
 @login_required
 def chat_interface():
     """Renders the main chat UI."""
     # Fetch channels the current user is a member of
-    user_channels = (Channel.select()
-                     .join(ChannelMember)
-                     .where(ChannelMember.user == g.user))
+    user_channels = (Channel.select(Channel, Conversation)
+                    .join(ChannelMember).where(ChannelMember.user == g.user)
+                    .join_from(Channel, Conversation,
+                     on=(Conversation.conversation_id_str == fn.CONCAT('channel_', Channel.id))))
 
     # Fetch all users for the Direct Messages list (excluding the current user)
     other_users = User.select().where(User.id != g.user.id)
 
+    # --- Calculate Unread Counts ---
+    unread_counts = {}
+    all_conversations = (Conversation
+                         .select()
+                         .join(UserConversationStatus)
+                         .where(UserConversationStatus.user == g.user))
+
+    # 1. Start with UserConversationStatus, not Conversation.
+    #    This gives us a list of the user's read statuses.
+    user_statuses = (UserConversationStatus.select()
+                     .where(UserConversationStatus.user == g.user))
+
+    # 2. Create a map of conversation ID -> last read timestamp for easy lookup.
+    last_read_map = {status.conversation.id: status.last_read_timestamp for status in user_statuses}
+
+    # 3. Gather all conversation IDs the user is a part of.
+    user_conv_ids = set(last_read_map.keys())
+    for channel in user_channels:
+        if channel.conversation: # Ensure conversation exists
+            user_conv_ids.add(channel.conversation.id)
+
+    # 4. Get all relevant Conversation objects in ONE query to avoid N+1 problem.
+    all_user_convs = Conversation.select().where(Conversation.id.in_(list(user_conv_ids)))
+    conv_id_to_str_map = {conv.id: conv.conversation_id_str for conv in all_user_convs}
+
+
+    # 5. Count unread messages for each conversation.
+    for conv_id, conv_id_str in conv_id_to_str_map.items():
+        last_read_time = last_read_map.get(conv_id, datetime.datetime.min)
+        count = (Message.select()
+                 .where(
+                     (Message.conversation_id == conv_id) &
+                     (Message.created_at > last_read_time) &
+                     (Message.user != g.user)
+                 ).count())
+        unread_counts[conv_id_str] = count
+
     return render_template('chat.html',
-                           channels=user_channels,
-                           direct_message_users=other_users,
-                           online_users=chat_manager.online_users)
+                       channels=user_channels,
+                       direct_message_users=other_users,
+                       online_users=chat_manager.online_users,
+                       unread_counts=unread_counts)
+
 
 @main_bp.route('/chat/channel/<int:channel_id>')
 @login_required
@@ -107,6 +149,12 @@ def get_channel_chat(channel_id):
         defaults={'type': 'channel'}
     )
 
+    # --- Mark conversation as read ---
+    status, _ = UserConversationStatus.get_or_create(user=g.user, conversation=conversation)
+    last_read_timestamp = status.last_read_timestamp
+    status.last_read_timestamp = datetime.datetime.now()
+    status.save()
+
     # Get the messages and count of the members for the template
     messages = (Message.select()
                 .where(Message.conversation == conversation)
@@ -115,18 +163,25 @@ def get_channel_chat(channel_id):
 
     # We will use a header and a message template to display with HTMX OOB swaps
     header_html = render_template(
-        'partials/channel_header.html', 
-        channel=channel, 
+        'partials/channel_header.html',
+        channel=channel,
         members_count=members_count
     )
     messages_html = render_template(
-        'partials/channel_messages.html', 
-        channel=channel, 
-        messages=messages
+        'partials/channel_messages.html',
+        channel=channel,
+        messages=messages,
+        last_read_timestamp=last_read_timestamp
     )
 
+    # After marking as read, send back a command to clear the badge
+    clear_badge_html = render_template('partials/clear_badge.html',
+                                       conv_id_str=conv_id_str,
+                                       hx_get_url=url_for('main.get_channel_chat', channel_id=channel.id),
+                                       link_text=f"# {channel.name}")
+
     # Add the HX-Trigger header to fire the custom even on the client (scrolling-chat window)
-    response = make_response(header_html + messages_html)
+    response = make_response(header_html + messages_html + clear_badge_html)
     response.headers['HX-Trigger'] = 'load-chat-history'
 
     return response
@@ -357,25 +412,38 @@ def get_dm_chat(other_user_id):
         defaults={'type': 'dm'}
     )
 
+    # --- Mark conversation as read ---
+    status, _ = UserConversationStatus.get_or_create(user=g.user, conversation=conversation)
+    last_read_timestamp = status.last_read_timestamp
+    status.last_read_timestamp = datetime.datetime.now()
+    status.save()
+
     messages = (Message.select()
                 .where(Message.conversation == conversation)
                 .order_by(Message.created_at.asc()))
 
     # Header and message templates for a HTMX OOB Swap
     header_html = render_template('partials/dm_header.html', other_user=other_user)
-    messages_html = render_template('partials/dm_messages.html', messages=messages, other_user=other_user)
+    messages_html = render_template('partials/dm_messages.html', messages=messages, other_user=other_user, last_read_timestamp=last_read_timestamp)
+
+    # Clear the new messages badge
+    clear_badge_html = render_template('partials/clear_badge.html',
+                                       conv_id_str=conv_id_str,
+                                       hx_get_url=url_for('main.get_dm_chat', other_user_id=other_user.id),
+                                       link_text=other_user.username)
 
     # HX-Trigger the chat window to load (allows scrolling to new messages).
-    response = make_response(header_html + messages_html)
+    response = make_response(header_html + messages_html + clear_badge_html)
     response.headers['HX-Trigger'] = 'load-chat-history'
 
     return response
 
 
-# --- WebSocket Handler ---
+# --- FULL AND CORRECTED WebSocket Handler ---
 @sock.route('/ws/chat')
 def chat(ws):
     print("INFO: WebSocket client connected.")
+    # Authenticate the user based on the session
     user = session.get('user_id') and User.get_or_none(id=session.get('user_id'))
     if not user:
         print("ERROR: Unauthenticated user tried to connect. Closing.")
@@ -383,28 +451,29 @@ def chat(ws):
         return
     ws.user = user
 
-    # Mark user online and broadcast
+    # Mark user as online and broadcast their presence to everyone
     chat_manager.set_online(user.id, ws)
     presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
     chat_manager.broadcast_to_all(presence_html)
 
     try:
+        # Main loop to listen for messages from this specific client
         while True:
             data = json.loads(ws.receive())
             event_type = data.get("type")
 
-            # --- HANDLE INCOMING MESSAGE TYPES ---
-            if event_type  == 'typing_start':
+            # --- HANDLE TYPING INDICATORS ---
+            if event_type == 'typing_start':
                 indicator_html = f'<div id="typing-indicator" hx-swap-oob="true"><p>{ws.user.username} is typing...</p></div>'
                 chat_manager.broadcast(data.get('conversation_id'), indicator_html, sender_ws=ws)
                 continue
 
-            if event_type  == 'typing_stop':
+            if event_type == 'typing_stop':
                 indicator_html = '<div id="typing-indicator" hx-swap-oob="true"></div>'
                 chat_manager.broadcast(data.get('conversation_id'), indicator_html, sender_ws=ws)
                 continue
 
-            # --- HANDLE SUBSCRIPTION ---
+            # --- HANDLE CHANNEL SUBSCRIPTION ---
             if event_type == 'subscribe':
                 conv_id_str = data.get('conversation_id')
                 if conv_id_str:
@@ -414,35 +483,105 @@ def chat(ws):
             # --- HANDLE NEW CHAT MESSAGES ---
             chat_text = data.get('chat_message')
             parent_id = data.get('parent_message_id')
-            current_conversation_id_str = getattr(ws, 'channel_id', None)
-            if not (chat_text and current_conversation_id_str): continue
+            conv_id_str = getattr(ws, 'channel_id', None)
 
-            conversation = Conversation.get_or_none(conversation_id_str=current_conversation_id_str)
-            if not conversation: continue
+            if not (chat_text and conv_id_str):
+                continue
 
+            conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
+            if not conversation:
+                continue
+
+            # Create the new message in the database
             new_message = Message.create(
                 user=ws.user,
                 conversation=conversation,
                 content=chat_text,
-                parent_message=parent_id if parent_id else None)
+                parent_message=parent_id if parent_id else None
+            )
 
-            # 1. Broadcast the new message HTML to EVERYONE in the channel.
+            # Immediately update the read timestamp for everyone currently viewing this conversation.
+            # This prevents unread counts from incrementing for users who are actively watching.
+            current_time = datetime.datetime.now()
+            if conv_id_str in chat_manager.active_connections:
+                # Use a transaction for efficiency if many users are in the channel
+                with db.atomic():
+                    for viewer_ws in chat_manager.active_connections[conv_id_str]:
+                        status, _ = UserConversationStatus.get_or_create(
+                            user=viewer_ws.user,
+                            conversation=conversation)
+                        status.last_read_timestamp = current_time
+                        status.save()
+
+            # 1. Broadcast the new message HTML to everyone in the conversation
             message_html = f"""<div id="message-list" hx-swap-oob="beforeend">{render_template('partials/message.html', message=new_message)}</div>"""
-            chat_manager.broadcast(current_conversation_id_str, message_html)
+            chat_manager.broadcast(conv_id_str, message_html)
 
-            # 2. If it was a reply, send a command ONLY to the original sender to reset their input form.
+            # 2. If it was a reply, reset the sender's input form
             if parent_id:
-                input_html =render_template('partials/chat_input_default.html')
+                input_html = render_template('partials/chat_input_default.html')
                 reset_input_command = f"""<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>"""
                 ws.send(reset_input_command)
 
-    except Exception as e:
-        print(f"ERROR: An exception occurred for user '{ws.user.username}': {e}")
-    finally:
-        # --- PRESENCE: Mark user offline and broadcast ---
-        chat_manager.set_offline(ws.user.id)
-        presence_html = f'<span id="status-dot-{ws.user.id}" class="me-2 rounded-circle bg-secondary" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
-        chat_manager.broadcast_to_all(presence_html)
+            # 3. Broadcast real-time unread notifications to other users
+            # Find all members of this conversation
+            if conversation.type == 'channel':
+                channel_id = conversation.conversation_id_str.split('_')[1]
+                channel = Channel.get_by_id(channel_id)
+                members = User.select().join(ChannelMember).where(ChannelMember.channel == channel)
+                #link_text = f"# {channel.name}"
+                #hx_get_url = url_for('main.get_channel_chat', channel_id=channel.id)
+            else: # It's a DM
+                user_ids = [int(uid) for uid in conversation.conversation_id_str.split('_')[1:]]
+                members = User.select().where(User.id.in_(user_ids))
+                #other_user_id = next(uid for uid in user_ids if uid != ws.user.id)
+                #other_user = User.get_by_id(other_user_id)
+                #link_text = other_user.username
+                #hx_get_url = url_for('main.get_dm_chat', other_user_id=other_user_id)
 
-        chat_manager.unsubscribe(ws)
-        print(f"INFO: Client connection closed for '{ws.user.username}'.")
+            # Loop through members to notify them
+            for member in members:
+                if member.id == ws.user.id:
+                    continue  # Don't notify the sender
+
+                # Check if the user is online but NOT viewing this conversation
+                is_viewing_channel = member.id in chat_manager.all_clients and getattr(chat_manager.all_clients[member.id], 'channel_id', None) == conv_id_str
+
+                if not is_viewing_channel:
+                    # Determine link text and URL based on conversation type
+                    if conversation.type == 'channel':
+                        channel = Channel.get_by_id(conversation.conversation_id_str.split('_')[1])
+                        link_text = f"# {channel.name}"
+                        hx_get_url = url_for('main.get_channel_chat', channel_id=channel.id)
+                    else: # It's a DM
+                        # The link for the recipient should always point to the SENDER.
+                        link_text = ws.user.username
+                        hx_get_url = url_for('main.get_dm_chat', other_user_id=ws.user.id)
+
+                    status, _ = UserConversationStatus.get_or_create(user=member, conversation=conversation)
+                    new_count = Message.select().where(
+                        (Message.conversation == conversation) &
+                        (Message.created_at > status.last_read_timestamp) &
+                        (Message.user != member)
+                    ).count()
+
+                    if new_count > 0 and member.id in chat_manager.all_clients:
+                        badge_html = render_template('partials/unread_badge.html',
+                                                     conv_id_str=conv_id_str,
+                                                     count=new_count,
+                                                     link_text=link_text,
+                                                     hx_get_url=hx_get_url)
+                        chat_manager.all_clients[member.id].send(badge_html)
+
+    except Exception as e:
+        print(f"ERROR: An exception occurred for user '{getattr(ws, 'user', 'unknown')}': {e}")
+    finally:
+        # This block runs when the client disconnects or an error occurs
+        if ws.user:
+            # Mark user as offline and broadcast their presence
+            chat_manager.set_offline(ws.user.id)
+            presence_html = f'<span id="status-dot-{ws.user.id}" class="me-2 rounded-circle bg-secondary" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
+            chat_manager.broadcast_to_all(presence_html)
+            # Clean up their subscription
+            chat_manager.unsubscribe(ws)
+            print(f"INFO: Client connection closed for '{ws.user.username}'.")

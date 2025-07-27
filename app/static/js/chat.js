@@ -119,6 +119,12 @@ document.addEventListener('DOMContentLoaded', () => {
             scrollLastMessageIntoView();
             jumpToBottomBtn.style.display = 'none';
         }
+
+       // After the new chat is loaded, find the input and focus it.
+       const messageInput = document.getElementById('chat-message-input');
+       if (messageInput) {
+           messageInput.focus();
+       }
     });
 
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {

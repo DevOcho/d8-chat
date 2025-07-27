@@ -21,12 +21,21 @@
     </div>
     <ul id="channel-list" class="list-unstyled">
         {% for channel in channels %}
+        {% set conv_id_str = "channel_" ~ channel.id %}
+        {% set count = unread_counts.get(conv_id_str, 0) %}
         <li>
-            <a href="#" class="text-decoration-none text-light"
+          <div class="d-flex justify-content-between align-items-center">
+            <a href="#" id="link-{{ conv_id_str }}" class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-light' }}"
                hx-get="/chat/channel/{{ channel.id }}"
                hx-target="#chat-messages-container">
                 # {{ channel.name }}
             </a>
+            <span id="unread-badge-{{ conv_id_str }}">
+              {% if count > 0 %}
+              <span class="badge rounded-pill bg-danger float-end">{{ count }}</span>
+              {% endif %}
+            </span>
+          </div>
         </li>
         {% else %}
         <li>No channels found.</li>
@@ -35,7 +44,7 @@
 
     <!-- DM list -->
     <h6 class="mt-4 text-secondary">Direct Messages</h6>
-    <ul class="list-unstyled">
+    <ul id="dm-list" class="list-unstyled">
       <!-- Current User for talking to yourself -->
       <li class="d-flex align-items-center">
         <span id="status-dot-{{ g.user.id }}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;"></span>
@@ -47,13 +56,25 @@
       </li>
       <!-- Other users -->
       {% for user in direct_message_users %}
-      <li class="d-flex align-items-center">
-        <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
-        <a href="#" class="text-decoration-none text-light"
-           hx-get="/chat/dm/{{ user.id }}"
-           hx-target="#chat-messages-container">
-            {{ user.username }}
-        </a>
+      {% set user_ids = [g.user.id, user.id] | sort %}
+      {% set conv_id_str = "dm_" ~ user_ids|join('_') %}
+      {% set count = unread_counts.get(conv_id, 0) %}
+      <li>
+        <div class="d-flex justify-content-between align-items-center">
+          <div class="d-flex align-items-center">
+            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
+            <a href="#" id="link-{{ conv_id_str }}" class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-light' }}"
+               hx-get="/chat/dm/{{ user.id }}"
+               hx-target="#chat-messages-container">
+                {{ user.username }}
+            </a>
+          </div>
+          <span id="unread-badge-{{ conv_id_str }}">
+            {% if count > 0 %}
+            <span class="badge rounded-pill bg-danger">{{ count }}</span>
+            {% endif %}
+          </span>
+        </div>
       </li>
       {% endfor %}
     </ul>

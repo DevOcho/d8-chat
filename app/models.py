@@ -69,6 +69,15 @@ class Message(BaseModel):
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField('self', backref='replies', null=True)
 
+class UserConversationStatus(BaseModel):
+    user = ForeignKeyField(User, backref='conversation_statuses')
+    conversation = ForeignKeyField(Conversation, backref='user_statuses')
+    last_read_timestamp = DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        # Ensures a user has only one status per conversation
+        primary_key = CompositeKey('user', 'conversation')
+
 # Function to initialize the database connection
 def initialize_db():
     """
