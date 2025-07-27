@@ -9,4 +9,7 @@
     <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
 </div>
 
-{% include 'partials/chat_input_js.html' %}
+{# This script will run as soon as the partial is loaded into the DOM #}
+<script>
+    document.body.dispatchEvent(new Event('chatInputLoaded'));
+</script>

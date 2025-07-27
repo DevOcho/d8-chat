@@ -60,7 +60,7 @@
 </div>
 
 <!-- Main content area -->
-<main class="main-content" ws-connect="/ws/chat" hx-ext="ws">
+<main class="main-content" ws-connect="/ws/chat" hx-ext="ws" data-current-user-id="{{ g.user.id }}">
 
   <div id="chat-header-container" class="p-3 border-bottom bg-white" style="flex-shrink: 0;">
       <!-- The header content will be swapped in from the backend -->
@@ -113,148 +113,8 @@
     </div>
   </div>
 </div>
+{% endblock %}
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    // --- Configuration ---
-    const scrollThreshold = 150;     // Pixels from bottom
-
-    // --- Element References ---
-    const messagesContainer = document.getElementById('chat-messages-container');
-    const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
-    const messageInput = document.getElementById('chat-message-input'); // This will now be null initially, which is fine.
-
-    // --- Local Vars ---
-    let shouldScrollOnNextMessage = false;
-
-    // --- Helper Functions ---
-    const isUserNearBottom = () => {
-        const scrollableHeight = messagesContainer.scrollHeight - messagesContainer.clientHeight;
-        return scrollableHeight - messagesContainer.scrollTop < scrollThreshold;
-    };
-
-    const scrollToBottom = () => {
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 50);
-    };
-
-    const scrollLastMessageIntoView = () => {
-        const messageList = document.getElementById('message-list');
-        if (messageList) {
-            const lastMessage = messageList.lastElementChild;
-            if (lastMessage) {
-                lastMessage.scrollIntoView({ behavior: "smooth", block: "nearest" });
-            }
-        }
-    };
-
-    // --- HTMX Event Listeners (All logic combined) ---
-
-    // For scrolling correctly when loading history (GET request)
-    document.body.addEventListener('htmx:afterSwap', (event) => {
-        const target = event.detail.target;
-
-        // Process code blocks for ANY new content swapped in
-        processCodeBlocks(target);
-
-        if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
-            scrollLastMessageIntoView();
-            jumpToBottomBtn.style.display = 'none';
-
-            // We need to focus the new input, which might have just been swapped in
-            const newMmessageInput = document.getElementById('chat-message-input');
-            if (newMmessageInput) {
-                newMmessageInput.focus();
-            }
-        }
-    });
-
-    // For scrolling correctly on incoming WebSocket messages
-    document.body.addEventListener('htmx:wsBeforeMessage', (event) => {
-        shouldScrollOnNextMessage = isUserNearBottom();
-    });
-
-    document.body.addEventListener('htmx:wsAfterMessage', (event) => {
-        const messageList = document.getElementById('message-list');
-        if (messageList && messageList.lastElementChild) {
-            // I don't love this but AI suggested it
-            setTimeout(() => { processCodeBlocks(messageList.lastElementChild); }, 50);
-        }
-
-        if (shouldScrollOnNextMessage) {
-            scrollLastMessageIntoView();
-        } else {
-            jumpToBottomBtn.style.display = 'block';
-        }
-    });
-
-    // --- Standard Browser Event Listeners for UI (Unchanged) ---
-    messagesContainer.addEventListener('scroll', () => {
-        if (isUserNearBottom()) {
-            jumpToBottomBtn.style.display = 'none';
-        }
-    });
-
-    jumpToBottomBtn.addEventListener('click', () => {
-        scrollToBottom();
-        jumpToBottomBtn.style.display = 'none';
-    });
-
-    // --- Logic to handle the create channel modal ---
-    const createChannelModalEl = document.getElementById('createChannelModal');
-    const createChannelModal = new bootstrap.Modal(createChannelModalEl);
-
-    document.body.addEventListener('close-create-channel-modal', () => {
-        createChannelModal.hide();
-    });
-
-    createChannelModalEl.addEventListener('hidden.bs.modal', function () {
-        document.getElementById('createChannelModalContent').innerHTML = `
-            <div class="modal-body text-center">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>`;
-    });
-
-const processCodeBlocks = (container) => {
-        const MAX_HEIGHT = 300; // Max height in pixels before collapsing
-        const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');
-
-        codeBlocks.forEach(block => {
-            // Check if the content is taller than our max height
-            if (block.scrollHeight > MAX_HEIGHT) {
-                // Start the block in its collapsed state
-                block.classList.add('collapsible');
-
-                // Create the persistent toggler button
-                const toggler = document.createElement('div');
-                toggler.className = 'code-expander'; // We can reuse the existing style
-                toggler.innerText = 'Show more...';
-                block.appendChild(toggler);
-
-                // Add a permanent click event listener to the toggler
-                toggler.addEventListener('click', () => {
-                    // Toggle the class that controls the height
-                    block.classList.toggle('collapsible');
-
-                    // Update the button text based on the new state
-                    if (block.classList.contains('collapsible')) {
-                        toggler.innerText = 'Show more...';
-                    } else {
-                        toggler.innerText = 'Show less';
-                    }
-                });
-            }
-            // Mark the block as processed so we don't add multiple buttons
-            block.classList.add('code-processed');
-        });
-    };
-
-    // Run once on initial load for the first batch of messages
-    processCodeBlocks(document.body);
-
-});
-</script>
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/chat.js') }}" defer></script>
 {% endblock %}

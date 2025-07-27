@@ -107,6 +107,7 @@
           max-height: 30vh;
       }
     </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/syntax.css') }}">
 
     <title>D8 - Chat</title>
@@ -122,5 +123,8 @@
 
     <!-- Bootstrap Bundle with Popper -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p" crossorigin="anonymous"></script>
+
+    {# custom scripts in different templates #}
+    {% block scripts %}{% endblock %}
 </body>
 </html>
