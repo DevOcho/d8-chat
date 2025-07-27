@@ -1,6 +1,6 @@
 from authlib.integrations.flask_client import OAuth
 from flask import url_for, session, redirect, render_template
-from .models import User, db, Workspace, Channel, ChannelMember, WorkspaceMember
+from .models import User, db, Workspace, Channel, ChannelMember, WorkspaceMember, Conversation, UserConversationStatus
 from .chat_manager import chat_manager
 
 oauth = OAuth()
@@ -42,61 +42,63 @@ def handle_auth_callback():
         return redirect(url_for('main.login_page', error="SSO provider did not return required information."))
 
    # --- Let's setup or create this user ---
-    # 1. Try to find the user by their unique SSO ID first. This is the most reliable.
+    # Try to find the user by their unique SSO ID first. This is the most reliable.
     user = User.get_or_none(User.sso_id == sso_id)
 
     with db.atomic():
         if user is None:
-            # 2. If not found, try to link to an existing user by email.
-            # This handles pre-seeded users logging in for the first time.
+            # If not found, let's create the user in the system and setup them up.
             user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
-
-            if user:
-                # User found by email, link their account by setting the sso_id
-                print(f"Linking SSO ID to existing user '{user.username}' (found by email).")
-                user.sso_id = sso_id
-                user.sso_provider = 'authentik'
-                user.username = username # Update their name from SSO
-                user.email = email,
+            print(f"Creating a new user '{username}' from SSO login.")
+            user = User.create(
+                sso_id=sso_id,
+                email=email,
+                username=username,
+                sso_provider='authentik',
                 is_active=True
-                user.save()
-            else:
-                # 3. If still not found, this is a genuinely new user. Create them.
-                print(f"Creating a new user '{username}' from SSO login.")
-                user = User.create(
-                    sso_id=sso_id,
-                    email=email,
-                    username=username,
-                    sso_provider='authentik',
-                    is_active=True
+            )
+
+            # 1. Add to Workspace and Broadcast
+            default_workspace = Workspace.get_or_none(Workspace.name == 'DevOcho')
+            if default_workspace:
+                WorkspaceMember.create(user=user, workspace=default_workspace, role='member')
+                print(f"-> Added '{user.username}' to workspace '{default_workspace.name}'.")
+                new_user_html = render_template('partials/dm_list_item.html', user=user)
+                chat_manager.broadcast_to_all(new_user_html)
+
+                # 2. Add to Default Channels
+                print("-> Searching for default channels...")
+                default_channels = Channel.select().where(
+                    (Channel.name.in_(['general', 'announcements'])) &
+                    (Channel.workspace == default_workspace)
                 )
 
-                # --- ADD TO WORKSPACE and BROADCAST ---
-                # Find the default workspace.
-                default_workspace = Workspace.get_or_none(Workspace.name == 'DevOcho')
-                if default_workspace:
-                    # Add the new user to the workspace as a member.
-                    WorkspaceMember.create(
-                        user=user,
-                        workspace=default_workspace,
-                        role='member' # Assign a default role
-                    )
-                    print(f"Automatically added new user '{user.username}' to workspace '{default_workspace.name}'.")
-
-                    # Render the new user partial to be appended to everyone's DM list
-                    new_user_html = render_template('partials/dm_list_item.html', user=user)
-                    # Broadcast it to all connected clients
-                    chat_manager.broadcast_to_all(new_user_html)
-
-                    default_channels = Channel.select().where(
-                        (Channel.name == 'general') | (Channel.name == 'announcements'),
-                        Channel.workspace == default_workspace
-                    )
+                if not default_channels.exists():
+                    print("-> WARNING: Default channels 'general' or 'announcements' not found!")
+                else:
                     for channel in default_channels:
                         ChannelMember.create(user=user, channel=channel)
-                        print(f"Added '{user.username}' to default channel '#{channel.name}'.")
-                else:
-                    print(f"WARNING: Default workspace 'DevOcho' not found. Could not add new user '{user.username}'.")
+                        print(f"-> Added '{user.username}' to default channel '#{channel.name}'.")
+
+                # 3. Proactively create all DM conversations and statuses
+                print("-> Proactively creating DM conversations for new user...")
+                all_other_users = User.select().where(User.id != user.id)
+                for other_user in all_other_users:
+                    user_ids = sorted([user.id, other_user.id])
+                    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
+
+                    conversation, conv_created = Conversation.get_or_create(conversation_id_str=conv_id_str, defaults={'type': 'dm'})
+                    if conv_created:
+                        print(f"   - Created DM conversation with {other_user.username}")
+
+                    # Create status for the NEW user
+                    UserConversationStatus.get_or_create(user=user, conversation=conversation)
+                    # Create status for the EXISTING user
+                    UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
+                print("-> DM conversation creation complete.")
+
+            else:
+                print(f"-> WARNING: Default workspace 'DevOcho' not found. Could not process new user '{user.username}'.")
 
         else:
             # User was found by sso_id, update their details just in case they changed.

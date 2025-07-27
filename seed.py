@@ -1,4 +1,4 @@
-from app.models import db, User, Workspace, WorkspaceMember, Channel, ChannelMember, initialize_db
+from app.models import db, User, Workspace, WorkspaceMember, Channel, ChannelMember, initialize_db, Conversation
 from peewee import IntegrityError
 
 def seed_data():
@@ -50,6 +50,12 @@ def seed_data():
             if created:
                 print("Channel '#general' created.")
 
+            # Proactively create the conversation for the general channel
+            Conversation.get_or_create(
+                conversation_id_str=f"channel_{general_channel.id}",
+                defaults={'type': 'channel'}
+            )
+            print("Conversation for #general created.")
 
             announcements_channel, created = Channel.get_or_create(
                 workspace=workspace,
@@ -58,6 +64,12 @@ def seed_data():
             )
             if created:
                 print("Channel '#announcements' created.")
+
+            Conversation.get_or_create(
+                conversation_id_str=f"channel_{announcements_channel.id}",
+                defaults={'type': 'channel'}
+            )
+            print("Conversation for #announcements created.")
 
             # 5. Add members to channels
             # Add all users to #general

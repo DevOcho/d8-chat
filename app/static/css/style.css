@@ -63,10 +63,20 @@ body, html {
 .quoted-reply p {
   margin-bottom: 0;
 }
+.codehilite {
+    max-width: 100%;
+    background: #27222;
+    color: #f8f8f2;
+    padding: 1em;         /* <-- ADD THIS LINE */
+    border-radius: 4px;   /* Optional: A nice touch to round the corners */
+}
+
 .codehilite.collapsible {
     position: relative; /* Required for the absolute positioning of the expander */
     max-height: 300px;  /* The max height for a collapsed block */
     overflow: hidden;   /* Hides the rest of the content */
+    padding: 1em;
+    border-radius: 4px;
 }
 .code-expander {
     position: absolute;
@@ -82,6 +92,20 @@ body, html {
     /* A gradient that fades from transparent to the code block's background color */
     background: linear-gradient(to bottom, rgba(39, 40, 34, 0), rgba(39, 40, 34, 1) 80%);
 }
+
+/*
+  When a code block is expanded (it does NOT have the .collapsible class),
+  this rule transforms the expander from a gradient overlay into a simple bar.
+*/
+.codehilite:not(.collapsible) .code-expander {
+    position: relative; /* Take it out of the absolute positioning flow */
+    height: auto;       /* Let its content define its height */
+    padding: 8px 0;     /* Give it some vertical padding */
+    background: #272822; /* Match the code block's background color */
+    padding: 1em;
+    border-radius: 4px;
+}
+
 .message-container .flex-grow-1 {
     min-width: 0;
 }
