@@ -79,24 +79,6 @@ def handle_auth_callback():
                     for channel in default_channels:
                         ChannelMember.create(user=user, channel=channel)
                         print(f"-> Added '{user.username}' to default channel '#{channel.name}'.")
-
-                # 3. Proactively create all DM conversations and statuses
-                print("-> Proactively creating DM conversations for new user...")
-                all_other_users = User.select().where(User.id != user.id)
-                for other_user in all_other_users:
-                    user_ids = sorted([user.id, other_user.id])
-                    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
-
-                    conversation, conv_created = Conversation.get_or_create(conversation_id_str=conv_id_str, defaults={'type': 'dm'})
-                    if conv_created:
-                        print(f"   - Created DM conversation with {other_user.username}")
-
-                    # Create status for the NEW user
-                    UserConversationStatus.get_or_create(user=user, conversation=conversation)
-                    # Create status for the EXISTING user
-                    UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
-                print("-> DM conversation creation complete.")
-
             else:
                 print(f"-> WARNING: Default workspace 'DevOcho' not found. Could not process new user '{user.username}'.")
 

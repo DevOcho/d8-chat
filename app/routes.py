@@ -79,40 +79,46 @@ def profile():
 @login_required
 def chat_interface():
     """Renders the main chat UI."""
+
+    # Local Vars
+    unread_counts = {}
+    dm_partner_ids = set()
+
     # Fetch channels the current user is a member of
     user_channels = (Channel.select(Channel, Conversation)
                     .join(ChannelMember).where(ChannelMember.user == g.user)
                     .join_from(Channel, Conversation,
                      on=(Conversation.conversation_id_str == fn.CONCAT('channel_', Channel.id))))
 
-    # Fetch all users for the Direct Messages list (excluding the current user)
-    other_users = User.select().where(User.id != g.user.id)
+    # 1. Find all DM conversations the current user is a part of.
+    dm_conversations = (Conversation.select()
+                        .join(UserConversationStatus)
+                        .where((UserConversationStatus.user == g.user) & (Conversation.type == 'dm')))
+
+    # 2. From those conversations, extract the IDs of the *other* users.
+    for conv in dm_conversations:
+        user_ids = [int(uid) for uid in conv.conversation_id_str.split('_')[1:]]
+        if len(user_ids) > 1:
+            partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
+            if partner_id:
+                dm_partner_ids.add(partner_id)
+
+    # 3. Fetch the User objects for the sidebar.
+    direct_message_users = User.select().where(User.id.in_(list(dm_partner_ids)))
 
     # --- Calculate Unread Counts ---
     unread_counts = {}
-    all_conversations = (Conversation
-                         .select()
-                         .join(UserConversationStatus)
-                         .where(UserConversationStatus.user == g.user))
-
-    # 1. Start with UserConversationStatus, not Conversation.
-    #    This gives us a list of the user's read statuses.
     user_statuses = (UserConversationStatus.select()
                      .where(UserConversationStatus.user == g.user))
-
-    # 2. Create a map of conversation ID -> last read timestamp for easy lookup.
     last_read_map = {status.conversation.id: status.last_read_timestamp for status in user_statuses}
 
-    # 3. Gather all conversation IDs the user is a part of.
     user_conv_ids = set(last_read_map.keys())
     for channel in user_channels:
-        if channel.conversation: # Ensure conversation exists
+        if channel.conversation:
             user_conv_ids.add(channel.conversation.id)
 
-    # 4. Get all relevant Conversation objects in ONE query to avoid N+1 problem.
     all_user_convs = Conversation.select().where(Conversation.id.in_(list(user_conv_ids)))
     conv_id_to_str_map = {conv.id: conv.conversation_id_str for conv in all_user_convs}
-
 
     # 5. Count unread messages for each conversation.
     for conv_id, conv_id_str in conv_id_to_str_map.items():
@@ -127,7 +133,7 @@ def chat_interface():
 
     return render_template('chat.html',
                        channels=user_channels,
-                       direct_message_users=other_users,
+                       direct_message_users=direct_message_users,
                        online_users=chat_manager.online_users,
                        unread_counts=unread_counts)
 
@@ -272,6 +278,29 @@ def create_channel():
     response.headers['HX-Trigger'] = 'close-create-channel-modal'
     return response
 
+
+@main_bp.route('/chat/dms/start', methods=['GET'])
+@login_required
+def get_start_dm_form():
+    """Gets the list of users a new DM can be started with."""
+    # 1. Get the IDs of users the current user ALREADY has a DM with.
+    dm_conversations = (Conversation.select()
+                        .join(UserConversationStatus)
+                        .where((UserConversationStatus.user == g.user) & (Conversation.type == 'dm')))
+
+    existing_partner_ids = {g.user.id} # Always exclude the user themselves
+    for conv in dm_conversations:
+        user_ids = [int(uid) for uid in conv.conversation_id_str.split('_')[1:]]
+        partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
+        if partner_id:
+            existing_partner_ids.add(partner_id)
+
+    # 2. Select all users whose IDs are NOT in our exclusion list.
+    users_to_start_dm = User.select().where(User.id.not_in(list(existing_partner_ids)))
+
+    return render_template('partials/start_dm_modal.html', users_to_start_dm=users_to_start_dm)
+
+
 # --- MESSAGE EDIT AND DELETE ROUTES ---
 @main_bp.route('/chat/message/<int:message_id>', methods=['GET'])
 @login_required
@@ -412,11 +441,22 @@ def get_dm_chat(other_user_id):
         defaults={'type': 'dm'}
     )
 
+    # Ensure a status record exists for the current user
+    status, created = UserConversationStatus.get_or_create(user=g.user, conversation=conversation)
+    last_read_timestamp = status.last_read_timestamp
+    status.last_read_timestamp = datetime.datetime.now()
+    status.save()
+
+    # Also ensure a status record exists for the other user
+    UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
+
+    '''
     # --- Mark conversation as read ---
     status, _ = UserConversationStatus.get_or_create(user=g.user, conversation=conversation)
     last_read_timestamp = status.last_read_timestamp
     status.last_read_timestamp = datetime.datetime.now()
     status.save()
+    '''
 
     messages = (Message.select()
                 .where(Message.conversation == conversation)
@@ -431,6 +471,15 @@ def get_dm_chat(other_user_id):
                                        conv_id_str=conv_id_str,
                                        hx_get_url=url_for('main.get_dm_chat', other_user_id=other_user.id),
                                        link_text=other_user.username)
+
+    # If a status was just created, it means this user wasn't in the DM list.
+    # So, we send an OOB swap to add them.
+    add_user_to_sidebar_html = ""
+    if created:
+        add_user_to_sidebar_html = render_template('partials/dm_list_item_oob.html',
+                                                   user=other_user,
+                                                   conv_id_str=conv_id_str,
+                                                   is_online=other_user.id in chat_manager.online_users)
 
     # HX-Trigger the chat window to load (allows scrolling to new messages).
     response = make_response(header_html + messages_html + clear_badge_html)
@@ -499,6 +548,24 @@ def chat(ws):
                 content=chat_text,
                 parent_message=parent_id if parent_id else None
             )
+
+            # Check if this is the first message in a DM conversation
+            if conversation.type == 'dm':
+                message_count = Message.select().where(Message.conversation == conversation).count()
+                if message_count == 1:
+                    # This is the first message. We need to update the recipient's sidebar.
+                    user_ids = [int(uid) for uid in conversation.conversation_id_str.split('_')[1:]]
+                    recipient_id = next((uid for uid in user_ids if uid != ws.user.id), None)
+
+                    if recipient_id and recipient_id in chat_manager.all_clients:
+                        # Render the sidebar item from the recipient's perspective
+                        # The 'user' is the person who sent the message (ws.user)
+                        add_sender_html = render_template('partials/dm_list_item_oob.html',
+                                                          user=ws.user,
+                                                          conv_id_str=conv_id_str,
+                                                          is_online=ws.user.id in chat_manager.online_users)
+                        # Send this command only to the recipient
+                        chat_manager.all_clients[recipient_id].send(add_sender_html)
 
             # Immediately update the read timestamp for everyone currently viewing this conversation.
             # This prevents unread counts from incrementing for users who are actively watching.

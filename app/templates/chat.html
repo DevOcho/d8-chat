@@ -43,7 +43,17 @@
     </ul>
 
     <!-- DM list -->
-    <h6 class="mt-4 text-secondary">Direct Messages</h6>
+    <div class="d-flex justify-content-between align-items-center">
+        <h6 class="mt-4 text-secondary">Direct Messages</h6>
+        <button class="btn btn-sm text-secondary"
+                data-bs-toggle="modal"
+                data-bs-target="#startDmModal"
+                hx-get="/chat/dms/start"
+                hx-target="#startDmModalContent"
+                title="Start a new message">
+            <i class="bi bi-plus-square"></i>
+        </button>
+    </div>
     <ul id="dm-list" class="list-unstyled">
       <!-- Current User for talking to yourself -->
       <li class="d-flex align-items-center">
@@ -126,6 +136,19 @@
   <div class="modal-dialog">
     <div class="modal-content" id="createChannelModalContent">
       <!-- The form partial from /chat/channels/create will be loaded here by HTMX -->
+      <div class="modal-body text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bootstrap Modal to Start a new DM -->
+<div class="modal fade" id="startDmModal" tabindex="-1" aria-labelledby="startDmModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content" id="startDmModalContent">
       <div class="modal-body text-center">
           <div class="spinner-border" role="status">
             <span class="visually-hidden">Loading...</span>
