@@ -1,0 +1,14 @@
+<li hx-swap-oob="beforeend:#dm-list">
+    <div class="d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle bg-secondary" style="width: 10px; height: 10px;"></span>
+            <a href="#" class="text-decoration-none text-light"
+               hx-get="/chat/dm/{{ user.id }}"
+               hx-target="#chat-messages-container">
+                {{ user.username }}
+            </a>
+        </div>
+        {# Placeholder for unread badge which will be updated by a separate broadcast #}
+        <span id="unread-badge-dm-{{ user.id }}"></span>
+    </div>
+</li>

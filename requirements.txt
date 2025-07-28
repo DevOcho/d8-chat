@@ -8,3 +8,6 @@ Authlib
 requests
 flask-sock
 simple-websocket
+Markdown
+Pygments
+bleach

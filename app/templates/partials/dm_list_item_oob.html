@@ -1,0 +1,13 @@
+<li hx-swap-oob="beforeend:#dm-list">
+    <div class="d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if is_online else 'bg-secondary' }}" style="width: 10px; height: 10px;"></span>
+            <a href="#" id="link-{{ conv_id_str }}" class="text-decoration-none text-light"
+               hx-get="/chat/dm/{{ user.id }}"
+               hx-target="#chat-messages-container">
+                {{ user.username }}
+            </a>
+        </div>
+        <span id="unread-badge-{{ conv_id_str }}"></span>
+    </div>
+</li>

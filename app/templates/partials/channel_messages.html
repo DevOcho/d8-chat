@@ -1,4 +1,3 @@
-{# NEW FILE #}
 <!-- This content goes into the main hx-target -->
 <div class="h-100" data-conversation-id="channel_{{ channel.id }}">
     <div ws-send
@@ -7,7 +6,14 @@
     </div>
 
     <div id="message-list">
+        {% set ns = namespace(first_unread_found=false) %}
         {% for message in messages %}
+            {# Check if this is the first unread message #}
+            {% if not ns.first_unread_found and message.created_at > last_read_timestamp and message.user_id != g.user.id %}
+                {% include 'partials/new_message_separator.html' %}
+                {# This change will now persist across the loop #}
+                {% set ns.first_unread_found = true %}
+            {% endif %}
             {% include 'partials/message.html' %}
         {% else %}
             <div class="text-center text-muted">

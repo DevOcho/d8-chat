@@ -1,0 +1,211 @@
+I want to create an AI prompt that will help me work with AI to code a slack clone.  I don't want video chats or phone calls.  Just regular chat stuff.  Direct messages, public and private channels with moderators, etc.  I want image support and emojies in the chat.  I'd like the same styles for the chat bar (press up to edit, /commands, etc.).  I'd also like a full administration panel that allows me to create users and set permissions on the users.  I don't want a link to invite users or self-signup.  This will be used by businesses so users never need to just show up.
+
+System Features:
+- SSO capabilities that would be compatible with Authentik and Google Workspace.  This will include groups/permissions and if the user exists in the SSO system it should be created in the chat.
+- Capabilities to support 20 to ~10,000 users
+- I'm probably missing things here that you could help me add.
+
+Technology:
+- I'd like to use Python, HTMX, Bootstrap (or another CSS framework if that would make it easier).
+- MySQL or Postgres for the database and I want to connect with Python Peewee and the associated tools (Playhouse, etc)
+- Image and file hosting via Minio
+- I'm ok with a microservices architecture pattern but I'd prefer a monolith to start
+- I want to host in both Docker Compose and Kubernetes setups.
+
+What else do you think I need to include for this prompt?
+
+-----------------------------------------------------------------------------------------------------------------
+
+### **AI Prompt for Building a Slack Clone**
+
+---
+
+### **Prompt 10: File Uploads with Minio**
+
+**Your Prompt to the AI:**
+"Integrate file and image uploading using Minio as the S3-compatible storage backend.
+
+1.  **Add to `requirements.txt`**: Add `minio`.
+2.  **Update `config.py`**: Add Minio configuration: `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, and `MINIO_BUCKET`.
+3.  **Create `app/files.py`**:
+    *   Initialize the Minio client.
+    *   Create a helper function that takes a file, generates a unique name, and uploads it to the Minio bucket.
+4.  **Update `app/routes.py`**:
+    *   Create a new route `POST /upload` that requires authentication.
+    *   This route will handle the file upload from a form, use the helper function to save it to Minio, and then create a `File` record in the database.
+5.  **Update `chat.html`**:
+    *   Add a file input button next to the message input.
+    *   When a file is sent, the message content posted to the backend should include the URL of the uploaded file.
+    *   Update the message display logic to render an `<img>` tag for images or a link for other file types."
+
+---
+
+### **Prompt 11: Containerize for Development with Docker Compose**
+
+**Your Prompt to the AI:**
+"Create a local development environment using Docker and Docker Compose. This will orchestrate the Flask application, PostgreSQL database, and Minio service.
+
+1.  **Create `Dockerfile`**: In the root directory, create a `Dockerfile` for the Flask application. It should:
+    *   Start from a Python base image (e.g., `python:3.13-slim`).
+    *   Set the working directory.
+    *   Copy `requirements.txt` and install the dependencies.
+    *   Copy the rest of the application code.
+    *   Expose the application port (e.g., 5000).
+    *   Specify the `CMD` to run the application using `gunicorn`.
+2.  **Create `docker-compose.yml`**: In the root directory, create this file to define the services:
+    *   **`app` service**: Builds from the `Dockerfile`. Mounts the local code as a volume for live reloading. Passes environment variables from the `.env` file. Depends on the `db` and `minio` services.
+    *   **`db` service**: Uses the official `postgres:15` image. Sets up a persistent volume for data. Defines the `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` environment variables.
+    *   **`minio` service**: Uses the `minio/minio` image. Sets the root user and password. Exposes the API and console ports.
+
+Provide instructions on how to run `docker-compose up` to start the environment and how to run the `init_db.py` and `seed.py` scripts inside the running `app` container."
+
+---
+
+### **Prompt 12: Convert to a Progressive Web App (PWA)**
+
+**Your Prompt to the AI:**
+"Now, let's enhance the user experience by converting the Flask application into a Progressive Web App (PWA). This will allow users to 'install' the app on their mobile devices and desktops, providing an app-like feel with offline capabilities.
+
+1.  **Create the Web App Manifest**:
+    *   In the `app/static/` directory, create a file named `manifest.json`.
+    *   Populate this file with the necessary PWA metadata. This tells the browser how to behave when the app is installed.
+
+    ```json
+    {
+      "name": "Enterprise Chat",
+      "short_name": "Chat",
+      "start_url": "/chat",
+      "display": "standalone",
+      "background_color": "#ffffff",
+      "theme_color": "#4a154b",
+      "description": "A real-time chat application for internal business use.",
+      "icons": [
+        {
+          "src": "/static/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        },
+        {
+          "src": "/static/icons/icon-512x512.png",
+          "sizes": "512x512",
+          "type": "image/png"
+        }
+      ]
+    }
+    ```
+
+2.  **Set Up Icon Directory**:
+    *   Create a new directory: `app/static/icons/`.
+    *   Note for the user: You will need to create two PNG icons, `icon-192x192.png` and `icon-512x512.png`, and place them in this directory.
+
+3.  **Create the Service Worker**:
+    *   In the `app/static/` directory, create a file named `service-worker.js`.
+    *   This script will run in the background to cache the core application assets, enabling offline access. Add the following code for a "cache-first" strategy:
+
+    ```javascript
+    const CACHE_NAME = 'slack-clone-v1';
+    const URLS_TO_CACHE = [
+      '/',
+      '/chat',
+      '/static/manifest.json',
+      // Add paths to your CSS and JS files here
+      // e.g., '/static/css/bootstrap.min.css',
+      // e.g., '/static/js/htmx.min.js',
+      '/static/icons/icon-192x192.png',
+      '/static/icons/icon-512x512.png'
+    ];
+
+    // Install event: cache the application shell
+    self.addEventListener('install', event => {
+      event.waitUntil(
+        caches.open(CACHE_NAME)
+          .then(cache => {
+            console.log('Opened cache');
+            return cache.addAll(URLS_TO_CACHE);
+          })
+      );
+    });
+
+    // Fetch event: serve from cache first, then network
+    self.addEventListener('fetch', event => {
+      event.respondWith(
+        caches.match(event.request)
+          .then(response => {
+            // Cache hit - return response
+            if (response) {
+              return response;
+            }
+            return fetch(event.request);
+          }
+        )
+      );
+    });
+    ```
+
+4.  **Integrate PWA into the Main Template**:
+    *   Modify `app/templates/base.html` to link the manifest and register the service worker.
+    *   In the `<head>` section, add the following lines:
+
+    ```html
+    <!-- Link to the Web App Manifest -->
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+
+    <!-- Theme color for the browser address bar on mobile -->
+    <meta name="theme-color" content="#4a154b">
+    ```
+    *   At the very end of the `<body>` section, add the JavaScript block to register the service worker:
+
+    ```html
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register("{{ url_for('static', filename='service-worker.js') }}")
+            .then(registration => {
+              console.log('ServiceWorker registration successful with scope: ', registration.scope);
+            })
+            .catch(err => {
+              console.log('ServiceWorker registration failed: ', err);
+            });
+        });
+      }
+    </script>
+    ```
+
+---
+
+### **Prompt 13: Generate a Comprehensive README File**
+
+**Your Prompt to the AI:**
+"Please generate a comprehensive `README.md` file for our 'Enterprise-Grade Monolithic Slack Clone' project. The file should be well-structured, easy to read, and contain all the necessary information for a new developer to understand, set up, and contribute to the project.
+
+The README should include the following sections, formatted with Markdown:
+
+1.  **Project Title**: Use `Enterprise-Grade Monolithic Slack Clone`.
+2.  **Introduction**: A brief paragraph describing the project. Mention that it's a real-time chat application built with Python (Flask) and HTMX, designed for internal business use.
+3.  **Core Features**: Create a bulleted list detailing the main functionalities. This list should be based on the original project description and include:
+    *   User Authentication & Authorization (SSO with no self-signup)
+    *   Real-time Chat (Public/Private Channels, DMs, Typing Indicators, Read Receipts)
+    *   Advanced Message Features (File/Image support, Emoji reactions, Edit last message)
+    *   Administration Panel (User, Permission, and Workspace Management)
+    *   Notifications, Search, User Presence, Threads, and User Profiles.
+4.  **Technology Stack**: A section listing the key technologies used. Create a table with two columns: 'Component' and 'Technology'. Include entries for Backend, Frontend, Database, Real-time, File Storage, and Deployment.
+5.  **Local Development Setup**: This is a critical section. Provide clear, step-by-step instructions for setting up the local development environment using Docker Compose.
+    *   Mention the prerequisites: `Docker` and `Docker Compose`.
+    *   Step 1: Clone the repository.
+    *   Step 2: Create and configure the `.env` file. Provide a template by copying the contents of `.env.example` and explain that the user needs to fill in the values.
+    *   Step 3: Build and run the services using the `docker-compose up --build` command. Explain what this command does.
+    *   Step 4: Initialize the database by showing the command to run the `init_db.py` script inside the running container: `docker-compose exec app python init_db.py`.
+    *   Step 5: (Optional) Seed the database with test data using the command: `docker-compose exec app python seed.py`.
+    *   Step 6: Access the application by directing the user to `http://localhost:5000`.
+6.  **SSO Configuration Guide**: This is another critical section. Explain how to set up the SSO integration with Authentik and Google Workspace.
+    *   Explain that the SSO provider details must be added to the `.env` file.
+    *   **For Authentik**:
+        *   Provide a brief guide on where to find the `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` within the Authentik Admin interface (e.g., "In Authentik, navigate to Applications -> Providers, select your OAuth2/OpenID Provider, and find the Client ID/Secret. The Issuer URL is your Authentik domain.").
+        *   Mention that the redirect URI to be configured in Authentik should be `http://localhost:5000/auth`.
+    *   **For Google Workspace**:
+        *   Provide a similar guide for Google Cloud Platform. (e.g., "In the Google Cloud Console, navigate to 'APIs & Services' -> 'Credentials'. Create an 'OAuth 2.0 Client ID' for a 'Web application'. The Client ID and Secret will be provided there.").
+        *   Specify the 'Authorized redirect URIs' to be added in the Google Cloud credential settings: `http://localhost:5000/auth`.
+7.  **Project Structure**: Briefly explain the purpose of the main directories and files, such as `app/`, `run.py`, `config.py`, `Dockerfile`, and `docker-compose.yml`. This helps new developers navigate the codebase.
+8.  **Contributing**: Add a small section encouraging contributions and outlining the basic workflow (e.g., "Fork the repo, create a new branch, make your changes, and open a pull request.").
+
+Please ensure the final output is a single, well-formatted Markdown file."

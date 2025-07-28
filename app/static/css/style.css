@@ -1,0 +1,114 @@
+body, html {
+  height: 100%;
+  overflow: hidden;
+}
+.main-layout {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+}
+.sidebar {
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+.workspace-sidebar {
+  width: 70px;
+  background-color: #3f0e40; /* Slack-like purple */
+}
+.channel-sidebar {
+  width: 260px;
+  background-color: #4a154b;
+  color: #d1d2d3;
+}
+.main-content {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.chat-messages {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+.chat-input-form {
+  flex-shrink: 0;
+  padding: 1rem;
+}
+.message-container {
+  position: relative;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+.message-toolbar {
+  position: absolute;
+  top: 0;
+  right: 0.5rem;
+  display: none;
+  background-color: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 0.25rem;
+  padding: 0.25rem;
+}
+.message-container:hover .message-toolbar {
+  display: block;
+}
+.quoted-reply {
+  position: relative;
+  background-color: #e9e9e9;
+  border-left: 4px solid #03a9f4; /* A nice blue color for the quote bar */
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.quoted-reply p {
+  margin-bottom: 0;
+}
+.codehilite {
+    max-width: 100%;
+    background: #27222;
+    color: #f8f8f2;
+    padding: 1em;         /* <-- ADD THIS LINE */
+    border-radius: 4px;   /* Optional: A nice touch to round the corners */
+}
+
+.codehilite.collapsible {
+    position: relative; /* Required for the absolute positioning of the expander */
+    max-height: 300px;  /* The max height for a collapsed block */
+    overflow: hidden;   /* Hides the rest of the content */
+    padding: 1em;
+    border-radius: 4px;
+}
+.code-expander {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    text-align: center;
+    padding-top: 20px;
+    cursor: pointer;
+    font-weight: bold;
+    color: #f8f8f2;
+    /* A gradient that fades from transparent to the code block's background color */
+    background: linear-gradient(to bottom, rgba(39, 40, 34, 0), rgba(39, 40, 34, 1) 80%);
+}
+
+/*
+  When a code block is expanded (it does NOT have the .collapsible class),
+  this rule transforms the expander from a gradient overlay into a simple bar.
+*/
+.codehilite:not(.collapsible) .code-expander {
+    position: relative; /* Take it out of the absolute positioning flow */
+    height: auto;       /* Let its content define its height */
+    padding: 8px 0;     /* Give it some vertical padding */
+    background: #272822; /* Match the code block's background color */
+    padding: 1em;
+    border-radius: 4px;
+}
+
+.message-container .flex-grow-1 {
+    min-width: 0;
+}
+#chat-message-input {
+    max-height: 30vh;
+}

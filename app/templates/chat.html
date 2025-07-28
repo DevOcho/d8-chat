@@ -21,12 +21,21 @@
     </div>
     <ul id="channel-list" class="list-unstyled">
         {% for channel in channels %}
+        {% set conv_id_str = "channel_" ~ channel.id %}
+        {% set count = unread_counts.get(conv_id_str, 0) %}
         <li>
-            <a href="#" class="text-decoration-none text-light"
+          <div class="d-flex justify-content-between align-items-center">
+            <a href="#" id="link-{{ conv_id_str }}" class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-light' }}"
                hx-get="/chat/channel/{{ channel.id }}"
                hx-target="#chat-messages-container">
                 # {{ channel.name }}
             </a>
+            <span id="unread-badge-{{ conv_id_str }}">
+              {% if count > 0 %}
+              <span class="badge rounded-pill bg-danger float-end">{{ count }}</span>
+              {% endif %}
+            </span>
+          </div>
         </li>
         {% else %}
         <li>No channels found.</li>
@@ -34,8 +43,18 @@
     </ul>
 
     <!-- DM list -->
-    <h6 class="mt-4 text-secondary">Direct Messages</h6>
-    <ul class="list-unstyled">
+    <div class="d-flex justify-content-between align-items-center">
+        <h6 class="mt-4 text-secondary">Direct Messages</h6>
+        <button class="btn btn-sm text-secondary"
+                data-bs-toggle="modal"
+                data-bs-target="#startDmModal"
+                hx-get="/chat/dms/start"
+                hx-target="#startDmModalContent"
+                title="Start a new message">
+            <i class="bi bi-plus-square"></i>
+        </button>
+    </div>
+    <ul id="dm-list" class="list-unstyled">
       <!-- Current User for talking to yourself -->
       <li class="d-flex align-items-center">
         <span id="status-dot-{{ g.user.id }}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;"></span>
@@ -47,20 +66,32 @@
       </li>
       <!-- Other users -->
       {% for user in direct_message_users %}
-      <li class="d-flex align-items-center">
-        <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
-        <a href="#" class="text-decoration-none text-light"
-           hx-get="/chat/dm/{{ user.id }}"
-           hx-target="#chat-messages-container">
-            {{ user.username }}
-        </a>
+      {% set user_ids = [g.user.id, user.id] | sort %}
+      {% set conv_id_str = "dm_" ~ user_ids|join('_') %}
+      {% set count = unread_counts.get(conv_id, 0) %}
+      <li>
+        <div class="d-flex justify-content-between align-items-center">
+          <div class="d-flex align-items-center">
+            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
+            <a href="#" id="link-{{ conv_id_str }}" class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-light' }}"
+               hx-get="/chat/dm/{{ user.id }}"
+               hx-target="#chat-messages-container">
+                {{ user.username }}
+            </a>
+          </div>
+          <span id="unread-badge-{{ conv_id_str }}">
+            {% if count > 0 %}
+            <span class="badge rounded-pill bg-danger">{{ count }}</span>
+            {% endif %}
+          </span>
+        </div>
       </li>
       {% endfor %}
     </ul>
 </div>
 
 <!-- Main content area -->
-<main class="main-content" ws-connect="/ws/chat" hx-ext="ws">
+<main class="main-content" ws-connect="/ws/chat" hx-ext="ws" data-current-user-id="{{ g.user.id }}">
 
   <div id="chat-header-container" class="p-3 border-bottom bg-white" style="flex-shrink: 0;">
       <!-- The header content will be swapped in from the backend -->
@@ -91,22 +122,12 @@
   </div>
 
   <!-- Message input form -->
-  <div class="chat-input-form bg-light">
-      <!-- ... (the form and typing indicator are unchanged) ... -->
-      <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
-      <form ws-send id="message-form" autocomplete="off">
-          <div class="input-group">
-            <textarea id="chat-message-input" 
-                      name="chat_message" 
-                      class="form-control" 
-                      placeholder="Type a message..." 
-                      rows="1" 
-                      autofocus
-                      style="resize: none;"></textarea>
-              <button id="send-button" type="submit" class="btn btn-primary">Send</button>
+  <div hx-get="/chat/input/default" hx-trigger="load" hx-swap="outerHTML">
+      <div class="chat-input-form bg-light">
+          <div class="spinner-border spinner-border-sm" role="status">
+              <span class="visually-hidden">Loading input...</span>
           </div>
-      </form>
-      <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
+      </div>
   </div>
 </main>
 
@@ -124,11 +145,10 @@
   </div>
 </div>
 
-<!-- Generic Bootstrap Modal for HTMX content -->
-<div class="modal fade" id="htmx-modal" tabindex="-1" aria-labelledby="htmx-modal-label" aria-hidden="true">
+<!-- Bootstrap Modal to Start a new DM -->
+<div class="modal fade" id="startDmModal" tabindex="-1" aria-labelledby="startDmModalLabel" aria-hidden="true">
   <div class="modal-dialog">
-    <div class="modal-content" id="htmx-modal-content">
-      <!-- The content from our partials will be loaded here by HTMX -->
+    <div class="modal-content" id="startDmModalContent">
       <div class="modal-body text-center">
           <div class="spinner-border" role="status">
             <span class="visually-hidden">Loading...</span>
@@ -137,171 +157,8 @@
     </div>
   </div>
 </div>
+{% endblock %}
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    // --- Configuration ---
-    const doneTypingInterval = 1500; // ms
-    const scrollThreshold = 150;     // Pixels from bottom
-
-    // --- Element References ---
-    // This one was updated in our last change
-    const messagesContainer = document.getElementById('chat-messages-container'); 
-    
-    // These were here before and are still needed
-    const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
-    const messageInput = document.getElementById('chat-message-input');
-    const messageForm = document.getElementById('message-form');
-    const typingSender = document.getElementById('typing-sender');
-    let typingTimer;
-
-    // --- Local Vars ---
-    let shouldScrollOnNextMessage = false;
-    const initialTextareaHeight = messageInput.scrollHeight;
-
-    // --- TEXTAREA AUTO-RESIZE AND SEND LOGIC ---
-    const resizeTextarea = () => {
-        messageInput.style.height = 'auto'; // Reset height to recalculate
-        // Set height to scrollHeight, but not less than its initial height
-        const newHeight = Math.max(initialTextareaHeight, messageInput.scrollHeight);
-        messageInput.style.height = `${newHeight}px`;
-    };
-
-    messageInput.addEventListener('input', resizeTextarea);
-    
-    messageInput.addEventListener('keydown', (e) => {
-        // Send on Enter, but allow new lines with Shift+Enter
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault(); // Prevent new line in textarea
-            
-            // Don't send empty messages
-            if (messageInput.value.trim() !== '') {
-                 // Trigger the form submission
-                 htmx.trigger(messageForm, 'submit');
-            }
-        }
-    });
-
-    // Initial resize on page load
-    resizeTextarea();
-
-    // --- Helper Functions ---
-    const isUserNearBottom = () => {
-        const scrollableHeight = messagesContainer.scrollHeight - messagesContainer.clientHeight;
-        return scrollableHeight - messagesContainer.scrollTop < scrollThreshold;
-    };
-
-    const scrollToBottom = () => {
-        setTimeout(() => {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }, 50);
-    };
-
-    const scrollLastMessageIntoView = () => {
-        const messageList = document.getElementById('message-list');
-        if (messageList) {
-            const lastMessage = messageList.lastElementChild;
-            if (lastMessage) {
-                lastMessage.scrollIntoView({ behavior: "smooth", block: "nearest" });
-            }
-        }
-    };
-
-    // --- HTMX Event Listeners (All logic combined) ---
-
-    // For scrolling correctly when loading history (GET request)
-    document.body.addEventListener('htmx:afterSwap', (event) => {
-        const target = event.detail.target;
-
-        // Check if we just loaded new chat history via a GET request
-        if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
-            scrollLastMessageIntoView();
-            jumpToBottomBtn.style.display = 'none';
-
-            // Set focus to the chat input so the user can type immediately.
-            messageInput.focus(); 
-        }
-    });
-
-    // For scrolling correctly on incoming WebSocket messages
-    document.body.addEventListener('htmx:wsBeforeMessage', (event) => {
-        // We attach our decision to the event object to pass it to the next listener.
-        shouldScrollOnNextMessage = isUserNearBottom();
-    });
-
-    document.body.addEventListener('htmx:wsAfterMessage', (event) => {
-        // We check for the flag we set in the `wsBeforeMessage` event.
-        if (shouldScrollOnNextMessage) {
-            scrollLastMessageIntoView();
-        } else {
-            jumpToBottomBtn.style.display = 'block';
-        }
-    });
-
-    // Fired after the main message form sends data over the WebSocket.
-    messageForm.addEventListener('htmx:wsAfterSend', () => {
-        // This correctly clears the form's input field.
-        messageForm.reset();
-        resizeTextarea();
-        messageInput.focus();
-    });
-
-    // --- Standard Browser Event Listeners for UI (Unchanged) ---
-    messagesContainer.addEventListener('scroll', () => {
-        if (isUserNearBottom()) {
-            jumpToBottomBtn.style.display = 'none';
-        }
-    });
-
-    jumpToBottomBtn.addEventListener('click', () => {
-        scrollToBottom();
-        jumpToBottomBtn.style.display = 'none';
-    });
-
-    // --- Typing Indicator Logic ---
-    const sendTypingStatus = (isTyping) => {
-        const activeConversation = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-        if (activeConversation) {
-            const conversationId = activeConversation.dataset.conversationId;
-            const payload = {
-                type: isTyping ? 'typing_start' : 'typing_stop',
-                conversation_id: conversationId
-            };
-            typingSender.setAttribute('hx-vals', JSON.stringify(payload));
-            htmx.trigger(typingSender, 'typing-event');
-        }
-    };
-
-    messageInput.addEventListener('input', () => {
-        clearTimeout(typingTimer);
-        sendTypingStatus(true);
-        typingTimer = setTimeout(() => sendTypingStatus(false), doneTypingInterval);
-    });
-
-    messageForm.addEventListener('submit', () => {
-        clearTimeout(typingTimer);
-        sendTypingStatus(false);
-    });
-
-    // --- Logic to handle the create channel modal ---
-    const createChannelModalEl = document.getElementById('createChannelModal');
-    const createChannelModal = new bootstrap.Modal(createChannelModalEl);
-
-    // Listen for the custom event triggered by the HX-Trigger header
-    document.body.addEventListener('close-create-channel-modal', () => {
-        createChannelModal.hide();
-    });
-
-    // Reset the modal content when it's hidden to ensure the form is fresh next time
-    createChannelModalEl.addEventListener('hidden.bs.modal', function () {
-        document.getElementById('createChannelModalContent').innerHTML = `
-            <div class="modal-body text-center">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>`;
-    });
-
-});
-</script>
+{% block scripts %}
+    <script src="{{ url_for('static', filename='js/chat.js') }}" defer></script>
 {% endblock %}

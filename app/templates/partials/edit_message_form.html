@@ -1,0 +1,50 @@
+<form id="edit-message-form-{{ message.id }}"
+      hx-put="/chat/message/{{ message.id }}"
+      hx-target="this"
+      hx-swap="outerHTML">
+    <textarea name="content" class="form-control mb-1">{{ message.content }}</textarea>
+    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+    <button type="button" class="btn btn-secondary btn-sm"
+            hx-get="/chat/message/{{ message.id }}"
+            hx-target="closest form"
+            hx-swap="outerHTML">
+        Cancel
+    </button>
+</form>
+
+<script>
+  // Use an IIFE to scope variables and prevent conflicts.
+  (function() {
+    const form = document.getElementById('edit-message-form-{{ message.id }}');
+    const textarea = form.querySelector('textarea');
+
+    if (!textarea) return; // Defensive check
+
+    // --- Auto-resize textarea ---
+    const resizeTextarea = () => {
+        textarea.style.height = 'auto'; // Reset height
+        textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+
+    // --- Focus, set cursor position, and resize on load ---
+    textarea.focus();
+    // Move cursor to the end of existing text.
+    const textLength = textarea.value.length;
+    textarea.setSelectionRange(textLength, textLength);
+    resizeTextarea(); // Initial resize
+
+    // --- Add Event Listeners ---
+    textarea.addEventListener('input', resizeTextarea);
+
+    textarea.addEventListener('keydown', function(e) {
+      // Submit on Enter, allow newlines with Shift+Enter
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault(); // Prevent newline in textarea
+        if (textarea.value.trim() !== '') {
+          // Use htmx.trigger to submit the form
+          htmx.trigger(form, 'submit');
+        }
+      }
+    });
+  })();
+</script>
