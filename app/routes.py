@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, redirect, url_for, session, g, make_response
-from .models import User, Channel, ChannelMember, Message, Conversation, WorkspaceMember, db
+from .models import User, Channel, ChannelMember, Message, Conversation, Workspace, WorkspaceMember, db
 from .sso import oauth # Import the oauth object
 import functools
 import secrets
@@ -131,6 +131,71 @@ def get_channel_chat(channel_id):
 
     return response
 
+@main_bp.route('/chat/channel/<int:channel_id>/members', methods=['GET'])
+@login_required
+def get_manage_members_view(channel_id):
+    """Renders the HTMX partial for the 'manage members' modal."""
+    channel = Channel.get_or_none(id=channel_id)
+    if not channel:
+        return "Channel not found", 404
+
+    # Verify user is a member of the channel they are trying to manage
+    if not ChannelMember.get_or_none(user=g.user, channel=channel):
+        return "You are not a member of this channel.", 403
+
+    # Find users who are NOT already members of this channel
+    subquery = ChannelMember.select(ChannelMember.user_id).where(ChannelMember.channel_id == channel_id)
+    users_to_invite = (User.select()
+                       .join(WorkspaceMember)
+                       .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace))
+
+    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
+
+    return render_template('partials/manage_members_modal.html', 
+                           channel=channel, 
+                           users_to_invite=users_to_invite, 
+                           current_members=current_members)
+
+
+@main_bp.route('/chat/channel/<int:channel_id>/members', methods=['POST'])
+@login_required
+def add_channel_member(channel_id):
+    """Processes adding a new member to a channel."""
+    user_id_to_add = request.form.get('user_id')
+    channel = Channel.get_or_none(id=channel_id)
+
+    if not user_id_to_add or not channel:
+        return "Invalid request", 400
+    
+    # Add the user to the channel
+    ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
+
+    # --- Powerful HTMX Response ---
+    # We will send back TWO pieces of OOB content:
+    # 1. The updated member count for the main chat header.
+    # 2. The refreshed content for the modal itself.
+
+    # Re-query the data needed for the modal partial
+    subquery = ChannelMember.select(ChannelMember.user_id).where(ChannelMember.channel_id == channel_id)
+    users_to_invite = (User.select()
+                       .join(WorkspaceMember)
+                       .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace))
+    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
+    
+    # Render the new state of the modal content
+    modal_html = render_template('partials/manage_members_modal.html', 
+                                 channel=channel, 
+                                 users_to_invite=users_to_invite, 
+                                 current_members=current_members)
+    
+    # Render just the new member count for the header
+    members_count = current_members.count()
+    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count">{members_count} members</span>'
+
+    # Combine them and send the response
+    return make_response(modal_html + header_count_html)
+
+'''
 @main_bp.route('/chat/channel/<int:channel_id>/invite', methods=['GET'])
 @login_required
 def get_invite_form(channel_id):
@@ -161,6 +226,7 @@ def invite_user_to_channel(channel_id):
 
     # Return a simple success message that replaces the form
     return f'<div class="text-success my-3">User has been invited!</div>'
+'''
 
 # --- Route to get the channel creation form ---
 @main_bp.route('/chat/channels/create', methods=['GET'])

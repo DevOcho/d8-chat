@@ -1,0 +1,39 @@
+<!-- This is the content that will be loaded into our generic modal -->
+<div id="manage-members-modal-content">
+    <div class="modal-header">
+        <h5 class="modal-title">Members of #{{ channel.name }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+        <!-- Form to add new members -->
+        <form hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}" 
+              hx-target="#manage-members-modal-content" 
+              hx-swap="innerHTML">
+            <div class="input-group mb-4">
+                <select name="user_id" class="form-select" required>
+                    <option value="" selected disabled>Choose a user to add...</option>
+                    {% for user in users_to_invite %}
+                    <option value="{{ user.id }}">{{ user.username }}</option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-success" type="submit">Add</button>
+            </div>
+             {% if users_to_invite|length == 0 %}
+                <p class="text-muted small">All workspace users are already in this channel.</p>
+             {% endif %}
+        </form>
+
+        <!-- List of current members -->
+        <h6 class="text-muted">Current Members ({{ current_members|length }})</h6>
+        <ul class="list-group list-group-flush">
+            {% for member in current_members %}
+            <li class="list-group-item d-flex align-items-center">
+                <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2" style="width: 24px; height: 24px; font-size: 0.8rem;">
+                    {{ member.user.username[0]|upper }}
+                </div>
+                {{ member.user.username }}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>
