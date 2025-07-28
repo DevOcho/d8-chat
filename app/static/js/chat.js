@@ -148,12 +148,29 @@ document.addEventListener('DOMContentLoaded', () => {
         jumpToBottomBtn.style.display = 'none';
     });
 
-    const createChannelModalEl = document.getElementById('createChannelModal');
-    if (createChannelModalEl) {
-        const createChannelModal = new bootstrap.Modal(createChannelModalEl);
-        document.body.addEventListener('close-create-channel-modal', () => createChannelModal.hide());
-        createChannelModalEl.addEventListener('hidden.bs.modal', () => {
-            document.getElementById('createChannelModalContent').innerHTML = `<div class="modal-body text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>`;
+    // --- Generic Modal Handling ---
+    const htmxModalEl = document.getElementById('htmx-modal');
+    if (htmxModalEl) {
+        const htmxModal = new bootstrap.Modal(htmxModalEl);
+
+        // Listen for our custom event to close the modal
+        // (e.g., after a successful form submission)
+        document.body.addEventListener('close-modal', () => {
+            htmxModal.hide();
+        });
+
+        // When the modal is hidden, reset its content to the loading spinner.
+        // This ensures it's clean for the next time it's opened.
+        htmxModalEl.addEventListener('hidden.bs.modal', () => {
+            const modalContent = document.getElementById('htmx-modal-content');
+            if (modalContent) {
+                modalContent.innerHTML = `
+                <div class="modal-body text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>`;
+            }
         });
     }
 

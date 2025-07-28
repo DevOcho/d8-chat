@@ -341,7 +341,7 @@ def create_channel():
     new_channel_html = render_template('partials/channel_list_item.html', channel=new_channel)
     # 2. Create a response and add a trigger to close the modal
     response = make_response(new_channel_html)
-    response.headers['HX-Trigger'] = 'close-create-channel-modal'
+    response.headers['HX-Trigger'] = 'close-modal'
     return response
 
 
