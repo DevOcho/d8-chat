@@ -112,3 +112,138 @@ body, html {
 #chat-message-input {
     max-height: 30vh;
 }
+
+/* Append these styles to the end of your existing style.css file */
+
+/* Override base styles for the login page */
+html.login-page,
+body.login-page {
+    overflow: auto; /* Allow scrolling on the login page if needed */
+}
+
+.login-page-container {
+    display: flex;
+    min-height: 100vh;
+    width: 100%;
+    background-color: #f8f9fa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Left side feature panel */
+.feature-panel {
+    flex-basis: 45%;
+    background-color: #1a1d21; /* Dark background */
+    color: #ffffff;
+    padding: 3rem 4rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.login-logo {
+    max-width: 250px;
+    height: auto;
+}
+
+.feature-list {
+    list-style: none;
+    padding: 0;
+}
+
+.feature-list li {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+}
+
+.feature-list li i {
+    color: #ec729c;
+    font-size: 1.5rem;
+    margin-right: 1rem;
+    width: 30px; /* Align icons nicely */
+}
+
+/* Right side login panel */
+.login-panel {
+    flex-basis: 55%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 2rem;
+    background-color: #ffffff;
+}
+
+.login-form-container {
+    max-width: 420px;
+    width: 100%;
+}
+
+/* Divider for SSO options */
+.sso-divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    color: #6c757d;
+    margin: 2rem 0;
+}
+
+.sso-divider::before,
+.sso-divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.sso-divider:not(:empty)::before {
+    margin-right: .5em;
+}
+
+.sso-divider:not(:empty)::after {
+    margin-left: .5em;
+}
+
+/* SSO Login Buttons */
+.btn-sso-authentik, .btn-sso-google {
+    font-size: 1rem;
+    padding: 0.75rem;
+    border: 1px solid #dee2e6;
+    background-color: #ffffff;
+    color: #212529;
+    text-align: center;
+}
+.btn-sso-authentik:hover, .btn-sso-google:hover {
+    background-color: #f8f9fa;
+    border-color: #adb5bd;
+}
+
+.btn-sso-authentik i, .btn-sso-google i {
+    margin-right: 0.5rem;
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 992px) {
+    .login-page-container {
+        flex-direction: column;
+    }
+
+    .feature-panel {
+        flex-basis: auto;
+        padding: 2rem;
+        text-align: center;
+    }
+
+    .feature-list li {
+        justify-content: center;
+    }
+
+    .login-logo {
+        margin-left: auto;
+        margin-right: auto;
+    }
+
+    .login-panel {
+        flex-basis: auto;
+        flex-grow: 1; /* Make it take remaining height */
+    }
+}

@@ -466,6 +466,36 @@ def get_reply_chat_input(message_id):
     return render_template('partials/chat_input_reply.html', message=message_to_reply_to)
 
 
+# --- PROFILE EDITING ROUTES ---
+@main_bp.route('/profile/address/view', methods=['GET'])
+@login_required
+def get_address_display():
+    """Returns the read-only address display partial."""
+    return render_template('partials/address_display.html', user=g.user)
+
+@main_bp.route('/profile/address/edit', methods=['GET'])
+@login_required
+def get_address_form():
+    """Returns the address editing form partial."""
+    return render_template('partials/address_form.html', user=g.user)
+
+@main_bp.route('/profile/address', methods=['PUT'])
+@login_required
+def update_address():
+    """Processes the address form submission."""
+    user = g.user
+    user.country = request.form.get('country')
+    user.city = request.form.get('city')
+    user.timezone = request.form.get('timezone')
+    user.save()
+
+    # IMPORTANT: Update the header and then return the display partial
+    header_html = render_template('partials/profile_header_oob.html', user=user)
+    display_html = render_template('partials/address_display.html', user=user)
+
+    return make_response(header_html + display_html)
+
+
 @main_bp.route('/test-chat')
 @login_required
 def test_chat():

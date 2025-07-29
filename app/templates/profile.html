@@ -1,13 +1,78 @@
 {% extends "base.html" %}
 
 {% block content %}
-    <h1>User Profile</h1>
-    <p>Welcome, <strong>{{ user.username }}</strong>!</p>
-    <ul>
-        <li><strong>Email:</strong> {{ user.email }}</li>
-        <li><strong>SSO ID:</strong> {{ user.sso_id }}</li>
-        <li><strong>SSO Provider:</strong> {{ user.sso_provider }}</li>
-    </ul>
-    <a href="{{ url_for('main.chat_interface') }}" class="btn btn-primary">Go to Chat</a>
-    <a href="{{ url_for('main.logout') }}" class="btn btn-danger">Logout</a>
+<div class="container-fluid p-4" style="background-color: #f4f7fa; height: 100vh;">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="h4">My Profile</h2>
+        <div>
+             <a href="{{ url_for('main.chat_interface') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-chat-dots-fill me-1"></i> Go to Chat
+            </a>
+            <a href="{{ url_for('main.logout') }}" class="btn btn-danger">
+                <i class="bi bi-box-arrow-right me-1"></i> Logout
+            </a>
+        </div>
+    </div>
+
+    <!-- Profile Header Card -->
+    <div id="profile-header-card" class="card mb-4 border-0 shadow-sm">
+        <div class="card-body p-3 d-flex align-items-center">
+            <div class="flex-shrink-0 me-3">
+                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center" style="width: 60px; height: 60px; font-size: 1.5rem;">
+                    {% if user.first_name and user.last_name %}
+                        {{ user.first_name[0]|upper }}{{ user.last_name[0]|upper }}
+                    {% else %}
+                        {{ user.username[0]|upper }}
+                    {% endif %}
+                </div>
+            </div>
+            <div class="flex-grow-1">
+                <h5 class="mb-0">{{ user.first_name or '' }} {{ user.last_name or user.username }}</h5>
+                <p class="mb-0 text-muted">{{ user.city or 'City' }}, {{ user.country or 'Country' }}</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Personal Information Card -->
+    <div class="card mb-4 border-0 shadow-sm">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+            <h6 class="mb-0">Personal Information (Set via SSO)</h6>
+        </div>
+        <div class="card-body p-4">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Name</label>
+                        <p>{{ user.display_name or 'Not set' }}</p>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label class="form-label text-muted">Email Address</label>
+                        <p>{{ user.email }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Address Card -->
+    <div id="address-card" class="card border-0 shadow-sm">
+        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+            <h6 class="mb-0">Address</h6>
+            <!-- This button now targets the *inner* wrapper -->
+            <button class="btn btn-warning btn-sm"
+                    hx-get="{{ url_for('main.get_address_form') }}"
+                    hx-target="#address-content-wrapper"
+                    hx-swap="innerHTML">
+                <i class="bi bi-pencil-fill me-1"></i> Edit
+            </button>
+        </div>
+        <!-- This is the new stable wrapper for our swaps -->
+        <div id="address-content-wrapper">
+            {% include 'partials/address_display.html' %}
+        </div>
+    </div>
+
+</div>
 {% endblock %}

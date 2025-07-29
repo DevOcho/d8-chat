@@ -13,7 +13,7 @@ def create_app(config_class=Config):
     """
     Creates and configures the Flask application.
     """
-    app = Flask(__name__)
+    app = Flask(__name__, static_folder="static", static_url_path="")
 
     # Load configuration from the config object
     app.config.from_object(config_class)

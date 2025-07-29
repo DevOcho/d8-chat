@@ -37,6 +37,7 @@ def handle_auth_callback():
     sso_id = user_info.get('sub') # 'sub' is the standard OIDC subject identifier
     email = user_info.get('email')
     username = user_info.get('name', email) # Use name, fall back to email
+    display_name = user_info.get('given_name')
 
     if not sso_id or not email:
         return redirect(url_for('main.login_page', error="SSO provider did not return required information."))
@@ -54,6 +55,7 @@ def handle_auth_callback():
                 sso_id=sso_id,
                 email=email,
                 username=username,
+                display_name=display_name,
                 sso_provider='authentik',
                 is_active=True
             )
@@ -86,6 +88,7 @@ def handle_auth_callback():
             # User was found by sso_id, update their details just in case they changed.
             user.email = email
             user.username = username
+            user.display_name = display_name
             user.save()
 
     # Store user ID in the session to log them in

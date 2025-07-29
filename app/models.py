@@ -31,6 +31,11 @@ class User(BaseModel):
     sso_provider = CharField(null=True)
     sso_id = CharField(null=True, unique=True)
     is_active = BooleanField(default=True)
+    display_name = CharField(null=True)
+    profile_picture_url = CharField(null=True)
+    country = CharField(null=True)
+    city = CharField(null=True)
+    timezone = CharField(null=True, default='AST')
 
 class WorkspaceMember(BaseModel):
     id = IdentityField()
