@@ -14,7 +14,7 @@
                 {# This change will now persist across the loop #}
                 {% set ns.first_unread_found = true %}
             {% endif %}
-            {% include 'partials/message.html' %}
+            {% include 'partials/message.html' with context %}
         {% else %}
             <div class="text-center text-muted">
                 <h5>Welcome to #{{ channel.name }}</h5>

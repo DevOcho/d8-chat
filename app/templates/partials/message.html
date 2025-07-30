@@ -1,20 +1,20 @@
-<div class="d-flex mb-1 message-container" id="message-{{ message.id }}" data-user-id="{{ message.user.id }}">
+{# Add the 'mentioned-message' class if this message ID is in our set #}
+<div class="d-flex mb-1 message-container {% if message.id in mention_message_ids %}mentioned-message{% endif %}" id="message-{{ message.id }}" data-user-id="{{ message.user.id }}">
     <div class="flex-shrink-0">
         <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center" style="width: 40px; height: 40px;">
-            {{ message.user.username[0]|upper }}
+          {{ (message.user.display_name or message.user.username)[0]|upper }}
         </div>
     </div>
     <div class="flex-grow-1 ms-3">
         <div>
-            <strong class="me-2">{{ message.user.username }}</strong>
+            <strong class="me-2">{{ message.user.display_name or message.user.username }}</strong>
             <small class="text-muted">{{ message.created_at.strftime('%I:%M %p') }}</small>
             {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
         </div>
 
-        {# --- THIS IS THE NEW REPLY LOGIC --- #}
         {% if message.parent_message %}
             <div class="quoted-reply p-2 mb-2">
-                <strong>{{ message.parent_message.user.username }}</strong>
+                <strong>{{ message.parent_message.user.display_name or message.parent_message.user.username }}</strong>
                 {# Truncate the original message to avoid long quotes #}
                 <p class="mb-0 text-muted">{{ message.parent_message.content | truncate(100) }}</p>
             </div>

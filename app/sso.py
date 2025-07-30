@@ -1,6 +1,6 @@
 from authlib.integrations.flask_client import OAuth
-from flask import url_for, session, redirect, render_template
-from .models import User, db, Workspace, Channel, ChannelMember, WorkspaceMember, Conversation, UserConversationStatus
+from flask import url_for, session, redirect, render_template, current_app
+from .models import User, db, Workspace, Channel, ChannelMember, WorkspaceMember, Conversation, UserConversationStatus, Mention
 from .chat_manager import chat_manager
 
 oauth = OAuth()
@@ -25,6 +25,9 @@ def handle_auth_callback():
     Handles the authentication callback from the SSO provider.
     Creates or updates a user and logs them in.
     """
+
+    current_app.logger.info(f"Session contents on callback: {dict(session)}") 
+
     # Fetch the token from the provider
     token = oauth.authentik.authorize_access_token()
 
@@ -36,7 +39,7 @@ def handle_auth_callback():
 
     sso_id = user_info.get('sub') # 'sub' is the standard OIDC subject identifier
     email = user_info.get('email')
-    username = user_info.get('name', email) # Use name, fall back to email
+    username = email.split('@')[0].lower().replace('.', '_')
     display_name = user_info.get('given_name')
 
     if not sso_id or not email:
@@ -65,8 +68,6 @@ def handle_auth_callback():
             if default_workspace:
                 WorkspaceMember.create(user=user, workspace=default_workspace, role='member')
                 print(f"-> Added '{user.username}' to workspace '{default_workspace.name}'.")
-                new_user_html = render_template('partials/dm_list_item.html', user=user)
-                chat_manager.broadcast_to_all(new_user_html)
 
                 # 2. Add to Default Channels
                 print("-> Searching for default channels...")

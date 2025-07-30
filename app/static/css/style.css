@@ -247,3 +247,46 @@ body.login-page {
         flex-grow: 1; /* Make it take remaining height */
     }
 }
+
+/* Append these styles to your style.css */
+
+/* Style for a message that mentions the current user */
+.mentioned-message {
+    background-color: #fffbeA; /* Subtle yellow */
+    border-left: 3px solid #ffd700; /* Gold-like left border */
+}
+
+/* Make sidebar links a bit dimmer by default for better contrast */
+.channel-sidebar a {
+    color: #a9a9a9; /* A muted gray color */
+    transition: color 0.2s ease-in-out;
+}
+
+/* Hover effect for all sidebar links */
+.channel-sidebar a:hover {
+    color: #ffffff;
+}
+
+/* Style for active/unread links (which get these classes via htmx) */
+.channel-sidebar a.fw-bold.text-white {
+    color: #ffffff !important;
+}
+
+/* Overwrite the clear_badge link style to be dim */
+.channel-sidebar a.text-secondary {
+    color: #a9a9a9 !important;
+}
+.channel-sidebar a.text-secondary:hover {
+    color: #ffffff !important;
+}
+
+/* Also update the DM list for consistency */
+#dm-list a.text-light {
+    color: #a9a9a9 !important;
+}
+#dm-list a.text-light:hover {
+    color: #ffffff !important;
+}
+#dm-list a.fw-bold.text-white {
+    color: #ffffff !important;
+}

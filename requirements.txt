@@ -1,5 +1,5 @@
 Flask
-peewee
+peewee==3.18.2
 psycopg2-binary
 pydantic
 python-dotenv

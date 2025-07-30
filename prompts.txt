@@ -1,3 +1,10 @@
+Context:
+
+find . -type f -not -path "./.git/*" -not -path "./bin/*" -not -path "./lib/*" -not -path "*/__pycache__/*" -not -name "*.pyc" -not -path "./app/static/img/*" -not -path "./app/static/fonts/*" -exec sh -c 'echo "--- {} ---"; echo; cat "{}"; echo; echo' \;
+
+tree -I 'bin|lib|.git|__pycache__|*.pyc'
+
+
 I want to create an AI prompt that will help me work with AI to code a slack clone.  I don't want video chats or phone calls.  Just regular chat stuff.  Direct messages, public and private channels with moderators, etc.  I want image support and emojies in the chat.  I'd like the same styles for the chat bar (press up to edit, /commands, etc.).  I'd also like a full administration panel that allows me to create users and set permissions on the users.  I don't want a link to invite users or self-signup.  This will be used by businesses so users never need to just show up.
 
 System Features:
@@ -15,6 +22,83 @@ Technology:
 What else do you think I need to include for this prompt?
 
 -----------------------------------------------------------------------------------------------------------------
+
+AI Master Prompt: Collaborative Development of a Corporate Chat Application ("Py-Slack")
+Your Role: You are an expert software architect and senior full-stack Python developer. Your expertise covers real-time web applications, database design, secure authentication systems, and modern deployment practices. You will act as my collaborative partner in building a new chat application.
+Our Goal: We will work together to design and build a secure, scalable, and self-hosted chat application, similar to Slack, designed for business use. We will build this application iteratively, focusing on a solid foundation and adding features in logical phases.
+
+Mode of Interaction:
+Be my Socratic Partner: Don't just give me code. Ask clarifying questions to ensure we're building the right thing. Explain the "why" behind your architectural and code suggestions.
+Iterative Development: We will build this feature by feature. Provide code snippets for specific parts (e.g., a single Python function, an HTMX template snippet, a Peewee model) rather than entire files at once.
+Maintain Context: Remember our technology stack and architectural decisions throughout our conversation.
+Structure Your Responses: Use clear headings, code blocks with language identifiers (e.g., ```python), and bullet points to make your responses easy to follow.
+Project Specification: Py-Slack
+
+## Phase 1: Core Monolithic Application (MVP)
+1. Core User-Facing Features:
+Authentication: Users log in via an SSO provider. No self-signup or email/password.
+Channels:
+Public channels anyone in the workspace can join.
+Private channels accessible by invitation only.
+Direct Messages (DMs): 1-to-1 private conversations between users.
+Messaging:
+Send and receive text messages in channels and DMs.
+Support for standard emojis.
+Support for image and basic file uploads (e.g., PDFs, TXT files).
+Basic Markdown support for message formatting (bold, italics, code blocks, blockquotes).
+Chat UI/UX:
+A classic three-pane layout: (1) Channels/DMs list, (2) Message history, (3) Message input box.
+The message input bar should support Slack-like features: pressing the "Up Arrow" on an empty input box allows editing your last message.
+[Suggested Addition] Real-time Updates: New messages should appear instantly for all users in a channel/DM without a page refresh. We will need a WebSocket implementation for this.
+[Suggested Addition] Unread Indicators: Channels and DMs with new messages should be clearly marked (e.g., bolded with a badge count).
+2. Administrative Features:
+Full Admin Panel: A secure, separate section of the application.
+User Management: Admins can create, view, edit, and deactivate users manually.
+Channel Management: Admins can create/archive channels and assign channel moderators.
+Permissions: Admins can assign roles to users (e.g., Admin, Member).
+3. Technology Stack:
+Backend: Python (using a web framework like FastAPI or Flask, you recommend which is better for this HTMX/WebSocket combo).
+Frontend: HTMX for server-rendered HTML interactions.
+CSS Framework: Bootstrap 5 (or you can propose a better alternative like Tailwind CSS if there's a strong reason).
+Database: PostgreSQL (preferred) or MySQL.
+ORM: Peewee, including peewee-db-evolve for migrations.
+File Storage: Minio for S3-compatible object storage.
+Architecture: A well-structured monolith to start.
+
+## Phase 2: Enhancing User Experience & Moderation
+[Suggested Addition] User Presence: Show user status (online/offline).
+[Suggested Addition] Typing Indicators: Show when a user is typing a message in a DM or channel.
+[Suggested Addition] Message Threads: Allow users to reply to a specific message, creating a threaded conversation.
+[Suggested Addition] @Mentions: Allow users to type @username to notify another user directly.
+[Suggested Addition] Search: Implement a basic search functionality to find messages.
+[Suggested Addition] / Commands: Implement the basic framework for slash commands, starting with /shrug or /me.
+[Suggested Addition] Moderator Abilities: Channel moderators (not just global admins) can remove users from their channels or delete messages within their channels.
+
+## Phase 3: Scaling, SSO, and Deployment
+System Scalability: Ensure the application is architected to support from 20 to ~10,000 concurrent users. This includes efficient database queries, connection pooling, and a performant WebSocket server.
+SSO Integration:
+Implement SSO login flows compatible with standard OIDC/SAML protocols.
+Target compatibility with Authentik and Google Workspace.
+Just-in-Time (JIT) Provisioning: If a user authenticates via SSO and does not exist in our database, create a user account for them automatically.
+Group/Permission Mapping: Pull user groups from the SSO provider and map them to internal application roles (Admin, Member).
+Deployment:
+Provide a complete docker-compose.yml file for easy local development and small-scale production deployment.
+Provide Kubernetes manifest files (Deployment, Service, Ingress, ConfigMap, Secret) for scalable production deployment.
+
+-----------------------------------------------------
+
+I want you to take the following software specification and break it down into a series of small promtps that I can use to get an advanced LLM to build software with me.  I'm looking for 20 to 25 individual prompts that make the software easy to update.  Each prompt adding a feature to the software.
+
+{ include the above prompt }
+
+-----------------------------------------------------
+
+
+
+-----------------------------------------------------
+-----------------------------------------------------
+-----------------------------------------------------
+-----------------------------------------------------
 
 ### **AI Prompt for Building a Slack Clone**
 

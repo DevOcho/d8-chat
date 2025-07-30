@@ -74,6 +74,18 @@ class Message(BaseModel):
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField('self', backref='replies', null=True)
 
+class Mention(BaseModel):
+    """
+    Tracks when a user is mentioned in a message.
+    This allows for targeted notifications.
+    """
+    user = ForeignKeyField(User, backref='mentions')
+    message = ForeignKeyField(Message, backref='mentions')
+
+    class Meta:
+        # A user can only be mentioned once per message
+        primary_key = CompositeKey('user', 'message')
+
 class UserConversationStatus(BaseModel):
     user = ForeignKeyField(User, backref='conversation_statuses')
     conversation = ForeignKeyField(Conversation, backref='user_statuses')

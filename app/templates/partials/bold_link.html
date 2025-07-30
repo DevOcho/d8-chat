@@ -1,0 +1,9 @@
+{# This only makes the link bold, without adding a badge #}
+<a hx-swap-oob="outerHTML:#link-{{ conv_id_str }}"
+   id="link-{{ conv_id_str }}"
+   href="#"
+   class="text-decoration-none fw-bold text-white"
+   hx-target="#chat-messages-container"
+   hx-get="{{ hx_get_url }}">
+    {{ link_text }}
+</a>

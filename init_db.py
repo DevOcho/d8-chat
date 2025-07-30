@@ -1,9 +1,9 @@
-from app.models import db, User, Workspace, WorkspaceMember, Channel, ChannelMember, Message, Conversation, UserConversationStatus, initialize_db
+from app.models import db, User, Workspace, WorkspaceMember, Channel, ChannelMember, Message, Conversation, UserConversationStatus, initialize_db, Mention
 from config import Config
 from playhouse.db_url import connect
 from urllib.parse import urlparse # Import the urlparse function
 
-ALL_MODELS = [User, Workspace, WorkspaceMember, Channel, ChannelMember, Message, Conversation, UserConversationStatus]
+ALL_MODELS = [User, Workspace, WorkspaceMember, Channel, ChannelMember, Message, Conversation, UserConversationStatus, Mention]
 
 def create_tables():
     """Connect to the database and create tables."""
