@@ -93,6 +93,115 @@ I want you to take the following software specification and break it down into a
 
 -----------------------------------------------------
 
+### Introduction for the User
+Before you start, use this first message to set the context with your LLM partner for the entire project:
+
+> **Initial Context-Setting Prompt:**
+> "Hello! We're going to build a corporate chat application called 'Py-Slack' together. I have a detailed specification that we'll follow. Your role is to be my expert software architect and senior full-stack Python developer. Please act as a Socratic partner: ask clarifying questions, explain the 'why' behind your suggestions, and provide code in small, iterative snippets. We will build this feature by feature. Let's start with the first step: setting up the project foundation."
+
+---
+
+### Phase 1: Core Monolithic Application (MVP)
+
+**Prompt 1: Project Setup and Technology Stack Decisions**
+"Let's begin. First, help me decide on the core web framework. The spec mentions FastAPI or Flask. Given our goal of using HTMX and WebSockets, which would you recommend and why? Once we decide, please outline the initial project directory structure and the `requirements.txt` or `pyproject.toml` file with the essential dependencies (the chosen framework, Peewee, peewee-db-evolve, and a WebSocket library)."
+*   **Tip for you:** This establishes the foundational choices and project layout.
+
+**Prompt 2: Database and ORM Configuration**
+"Great. Now, let's connect our application to a PostgreSQL database. Please provide the configuration code to connect our application to Postgres using Peewee. Also, show me how to set up `peewee-db-evolve` so we can manage database migrations. We will use environment variables for the database credentials."
+*   **Tip for you:** This step isolates the database connection logic, a critical piece of infrastructure.
+
+**Prompt 3: Core Database Models**
+"With the database connected, let's define our core data structures. Please provide the Peewee models for `User`, `Channel`, and `Message`. Ensure you define the relationships correctly (e.g., a Message has a foreign key to a User and a Channel)."
+*   **Tip for you:** This defines the "single source of truth" for your application's data.
+
+**Prompt 4: Basic Application Server and Admin Panel Shell**
+"Let's get something running. Please provide the minimal code to run a web server that responds with 'Hello, World!' on the root URL. Also, create a separate 'admin' section (using a Flask Blueprint or FastAPI APIRouter) that is accessible under `/admin`."
+*   **Tip for you:** This verifies the web server works and organizes the admin functionality separately from the start.
+
+**Prompt 5: Admin User Management (Create & View)**
+"Let's build the first admin feature: user management. Inside the `/admin` section, create a simple HTML page with a form to manually create a new `User` (we only need a username and role for now). Below the form, display a table of all existing users."
+*   **Tip for you:** This is your first end-to-end feature: a form, a handler, database interaction, and displaying results.
+
+**Prompt 6: Core Chat UI Layout**
+"Now for the main application. Let's create the classic three-pane chat UI using Bootstrap 5 and HTMX placeholders. Provide the base HTML template that defines the layout: a left sidebar for channels/DMs, a central pane for message history, and a bottom bar with a message input form. It doesn't need to be functional yet, just the static structure."
+*   **Tip for you:** This focuses purely on the frontend structure without any backend logic.
+
+**Prompt 7: Displaying Channels and DMs**
+"Let's populate the left sidebar. Create a route that fetches all public `Channel`s from the database and renders them as a list of links in the sidebar. We'll use HTMX to load this content into the sidebar pane."
+*   **Tip for you:** This introduces the first dynamic, data-driven UI component.
+
+**Prompt 8: Viewing Channel Messages**
+"When a user clicks a channel link in the sidebar, we need to show its messages. Using HTMX, make each channel link trigger a request to a new endpoint (e.g., `/channels/{channel_id}/messages`). This endpoint should fetch all messages for that channel and render them in the central message pane."
+*   **Tip for you:** This implements the core functionality of switching between conversations.
+
+**Prompt 9: Sending Messages (via HTMX)**
+"Let's make the message input form functional. The form should `POST` to an endpoint that creates a new `Message` record in the database. After a successful post, use an HTMX response to append the new message to the bottom of the current message list without a full page refresh."
+*   **Tip for you:** This completes the basic, non-real-time chat loop.
+
+**Prompt 10: Integrating WebSockets for Real-Time Messages**
+"Posting messages with HTMX is good, but it's not real-time for other users. Let's add WebSockets. Please guide me through setting up a WebSocket endpoint for a specific channel. When a message is sent, the server should broadcast it over the WebSocket to all connected clients in that channel, who will then append it to their UI."
+*   **Tip for you:** This is a major step. Focus on getting one-way server-to-client communication working first.
+
+**Prompt 11: Unread Message Indicators**
+"Users need to know when there are new messages. Let's implement unread indicators. How can we track if a channel has messages a user hasn't seen? Propose a simple mechanism (e.g., using a 'last read' timestamp) and show me how to modify the channel list to display a badge or bold the text for unread channels."
+*   **Tip for you:** This adds a crucial piece of UX that depends on both backend logic and frontend updates.
+
+**Prompt 12: File Uploads with Minio**
+"Let's add support for file uploads. Show me how to configure the application to connect to a Minio S3-compatible storage. Then, modify the message sending endpoint to handle a file upload, save it to Minio, and store the public-facing URL in the `Message` model."
+*   **Tip for you:** This integrates a third-party service and handles multipart form data.
+
+**Prompt 13: Basic Markdown Support**
+"Let's format messages. When rendering messages, let's add support for basic Markdown. Please integrate a Python Markdown library to process the message text before it's rendered as HTML, converting things like `*italic*`, `**bold**`, and ```code blocks```."
+*   **Tip for you:** This is a backend-focused display logic change.
+
+**Prompt 14: 'Edit Last Message' UI Feature**
+"Time for a nice UX touch. Let's implement the 'Up Arrow to Edit Last Message' feature. Please provide the necessary client-side JavaScript to detect this keypress on an empty input box. This should trigger an HTMX request to fetch the user's last message and place it in an 'edit' state."
+*   **Tip for you:** This is a client-side heavy feature that will require a corresponding backend endpoint to handle the message update.
+
+**Prompt 15: Admin Channel Management**
+"Let's return to the admin panel. Add functionality for an admin to create new public/private channels and to archive existing ones. This will involve a new form and handler in our `/admin` section."
+*   **Tip for you:** This builds out the administrative capabilities specified in the MVP.
+
+### Phase 2: Enhancing User Experience & Moderation
+
+**Prompt 16: User Presence (Online/Offline)**
+"Let's show who is online. Using our WebSocket connection, how can we track and broadcast user presence? Show me how to update the user's status to 'online' on connect and 'offline' on disconnect, and how to display this status next to their name in the UI."
+*   **Tip for you:** This leverages the existing WebSocket infrastructure for a new real-time feature.
+
+**Prompt 17: Typing Indicators**
+"Let's add typing indicators. This will also use WebSockets. Guide me through sending a 'start_typing' event from the client when a user starts typing in the input box, and a 'stop_typing' event after a short delay. The server should broadcast this to other users in the channel."
+*   **Tip for you:** This enhances the real-time feel of the conversation.
+
+**Prompt 18: Message Threads**
+"Replying in a thread is a key feature. First, let's update our `Message` model to support threading (e.g., a `parent_message` self-referencing foreign key). Then, update the UI to include a 'Reply' button on each message, which will correctly associate the new message as a reply."
+*   **Tip for you:** This involves both a database migration and significant UI changes.
+
+**Prompt 19: @Mentions and Notifications**
+"Let's implement @mentions. When a user types `@username`, we need to parse it on the backend when the message is saved. If a valid user is mentioned, how should we create a notification for them? Let's design a simple `Notification` model and the logic to create one."
+*   **Tip for you:** This involves text processing, database lookups, and creating a new notification system.
+
+**Prompt 20: Basic Message Search**
+"Users need to find old messages. Let's add a basic search feature. Create a search bar and a new endpoint that takes a search query. This endpoint should perform a simple text search (e.g., using `ILIKE` in PostgreSQL) on the `Message` table and display the results."
+*   **Tip for you:** This focuses on creating a new, read-only feature.
+
+### Phase 3: Scaling, SSO, and Deployment
+
+**Prompt 21: Initial SSO Integration (OIDC)**
+"This is a big one. Let's replace our manual user creation with a proper SSO login. We'll target an OIDC provider like Google or Authentik. Please guide me in integrating a library like `Authlib` to handle the OIDC flow, including the callback endpoint and session management."
+*   **Tip for you:** Start with just the login/logout flow. JIT provisioning can be next.
+
+**Prompt 22: Just-in-Time (JIT) User Provisioning**
+"Building on the SSO login, let's add JIT provisioning. When a user successfully authenticates via SSO for the first time, check if they exist in our `User` database. If not, create a new user account for them automatically using the information from the SSO provider (like email and name)."
+*   **Tip for you:** This automates user creation and is a critical part of the SSO spec.
+
+**Prompt 23: Dockerization for Development**
+"To make development easier, let's containerize the entire application. Please provide a `Dockerfile` for our Python application and a `docker-compose.yml` file that orchestrates the app, the PostgreSQL database, and the Minio service."
+*   **Tip for you:** This is a crucial step for reproducibility and preparing for production.
+
+**Prompt 24: Kubernetes Deployment Manifests**
+"For our final step, let's prepare for a scalable production deployment. Please provide a set of basic Kubernetes manifest files: a `Deployment` for the app, a `Service` to expose it, a `ConfigMap` for configuration, and a `Secret` for credentials. Explain the purpose of each file."
+*   **Tip for you:** This is the capstone prompt, taking your application from a local setup to a cloud-native deployment plan.
 
 
 -----------------------------------------------------

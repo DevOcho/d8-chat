@@ -9,6 +9,8 @@ import json
 from peewee import IntegrityError, fn
 import re
 import datetime
+from functools import reduce
+import operator
 
 # Main blueprint for general app routes
 main_bp = Blueprint('main', __name__)
@@ -166,18 +168,21 @@ def get_channel_chat(channel_id):
     # Get the IDs of the messages to highlight in the template.
     mention_message_ids = {m.message_id for m in mentions_to_clear}
 
-    # 3. If there are mentions, delete them using their composite primary key.
+    # If there are mentions, delete them using their composite primary key.
     if mentions_to_clear:
-        # Create a list of tuples, where each tuple is a composite key (user_id, message_id)
-        # We use m.user.id and m.message.id because we joined the Message table
-        mention_keys_to_delete = [(m.user.id, m.message.id) for m in mentions_to_clear]
+        # Create a list of individual expressions. Each expression is a complete
+        # condition for one row, e.g., (Mention.user == 1) & (Mention.message == 123)
+        expressions = [
+            (Mention.user == m.user_id) & (Mention.message == m.message_id)
+            for m in mentions_to_clear
+        ]
         
-        # Build and execute a delete query using Peewee's tuple `IN` clause,
-        # which correctly handles composite keys.
-        delete_query = Mention.delete().where(
-            (Mention.user, Mention.message).in_(mention_keys_to_delete)
-        )
-        delete_query.execute()
+        # Use reduce() with operator.or_ to chain the expressions together,
+        # creating a single WHERE clause like: (expr1) OR (expr2) OR ...
+        where_clause = reduce(operator.or_, expressions)
+        
+        # Execute the single DELETE query.
+        Mention.delete().where(where_clause).execute()
 
     # Mark conversation as read
     status, _ = UserConversationStatus.get_or_create(user=g.user, conversation=conversation)
