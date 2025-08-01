@@ -1,10 +1,25 @@
+<!-- app/templates/partials/chat_input_default.html -->
+
 <div id="chat-input-container" class="chat-input-form bg-light">
     <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
-    <form ws-send id="message-form" autocomplete="off">
-        <div class="input-group">
-            <textarea id="chat-message-input" name="chat_message" class="form-control" placeholder="Type a message..." rows="1" style="resize: none;"></textarea>
-            <button id="send-button" type="submit" class="btn btn-primary">Send</button>
+
+    <!-- The form now contains the TipTap editor structure -->
+    <form ws-send id="message-form" autocomplete="off" class="tiptap-form">
+        <!-- The Rich Text Editor Toolbar -->
+        <div id="tiptap-toolbar" class="d-flex align-items-center mb-1 border-bottom pb-1">
+            <button type="button" class="btn btn-sm btn-light" id="bold-btn" title="Bold"><i class="bi bi-type-bold"></i></button>
+            <button type="button" class="btn btn-sm btn-light" id="italic-btn" title="Italic"><i class="bi bi-type-italic"></i></button>
+            <button type="button" class="btn btn-sm btn-light" id="bullet-list-btn" title="Bullet List"><i class="bi bi-list-ul"></i></button>
+            <button type="button" class="btn btn-sm btn-light" id="ordered-list-btn" title="Numbered List"><i class="bi bi-list-ol"></i></button>
+            <button type="button" class="btn btn-sm btn-light" id="code-block-btn" title="Code Block"><i class="bi bi-code-slash"></i></button>
+            <button id="send-button" type="submit" class="btn btn-primary ms-auto">Send</button>
         </div>
+
+        <!-- This is where the editor will be mounted -->
+        <div id="editor-content"></div>
+
+        <!-- This hidden textarea will be updated by TipTap and submitted by HTMX -->
+        <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>
     </form>
     <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
 </div>
