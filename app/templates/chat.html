@@ -61,7 +61,7 @@
         <a href="#" class="text-decoration-none text-light"
            hx-get="/chat/dm/{{ g.user.id }}"
            hx-target="#chat-messages-container">
-            {{ g.user.username }} (you)
+            {{ g.user.display_name or g.user.username }} (you)
         </a>
       </li>
       <!-- Other users -->
@@ -76,7 +76,7 @@
             <a href="#" id="link-{{ conv_id_str }}" class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-secondary' }}"
                hx-get="/chat/dm/{{ user.id }}"
                hx-target="#chat-messages-container">
-                {{ user.username }}
+                {{ user.display_name or user.username }}
             </a>
           </div>
           <span id="unread-badge-{{ conv_id_str }}">

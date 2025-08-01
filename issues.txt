@@ -1,7 +1,5 @@
 Current issues with the slack_clone:
 
-When a user is @'d in a channel they can't enter the channel.
-
 We need a formatting text area similar to Quill.js
 
 We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.

@@ -3,7 +3,7 @@ peewee==3.18.2
 psycopg2-binary
 pydantic
 python-dotenv
-gunicorn
+uwsgi
 Authlib
 requests
 flask-sock

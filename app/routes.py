@@ -588,7 +588,7 @@ def get_dm_chat(other_user_id):
     clear_badge_html = render_template('partials/clear_badge.html',
                                        conv_id_str=conv_id_str,
                                        hx_get_url=url_for('main.get_dm_chat', other_user_id=other_user.id),
-                                       link_text=other_user.username)
+                                       link_text=other_user.display_name or other_user.username)
 
     # If a status was just created, it means this user wasn't in the DM list.
     # So, we send an OOB swap to add them.
@@ -721,7 +721,7 @@ def chat(ws):
                         notification_html = render_template('partials/bold_link.html', conv_id_str=conv_id_str, link_text=link_text, hx_get_url=hx_get_url)
 
                 else: # Logic for DM notifications
-                    link_text = ws.user.username
+                    link_text = ws.user.display_name or ws.user.username
                     hx_get_url = url_for('main.get_dm_chat', other_user_id=ws.user.id)
                     new_count = Message.select().where((Message.conversation == conversation) & (Message.created_at > status.last_read_timestamp) & (Message.user != member)).count()
                     if new_count > 0:

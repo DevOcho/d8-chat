@@ -5,9 +5,9 @@
             {{ other_user.username[0]|upper }}
         </div>
        {% if other_user.id == g.user.id %}
-            <h4 class="mb-0">{{ other_user.username }} (you)</h4>
+            <h4 class="mb-0">{{ other_user.display_name or other_user.username }} (you)</h4>
         {% else %}
-            <h4 class="mb-0">{{ other_user.username }}</h4>
+            <h4 class="mb-0">{{ other_user.display_name or other_user.username }}</h4>
         {% endif %}
     </div>
     <hr>
