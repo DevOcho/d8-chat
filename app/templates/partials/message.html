@@ -20,7 +20,7 @@
             </div>
         {% endif %}
 
-        <div class="message-content" style="white-space: pre-wrap; overflow-x: auto;">{{ message.content | sanitize_html }}</div>
+        <div class="message-content" style="white-space: pre-wrap; overflow-x: auto;">{{ message.content | markdown }}</div>
     </div>
     {% if g.user and g.user.id == message.user.id %}
         {% include 'partials/message_toolbar.html' %}

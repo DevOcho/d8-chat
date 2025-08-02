@@ -1,140 +1,96 @@
-/* app/static/js/chat.js */
+/* FINAL REFACTORED CODE: app/static/js/chat.js */
 
+// We wrap everything in a DOMContentLoaded listener to ensure the HTML is ready.
 document.addEventListener('DOMContentLoaded', () => {
     // --- Element References ---
     const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
     const mainContent = document.querySelector('main.main-content');
-    const currentUserId = mainContent ? mainContent.dataset.currentUserId : null;
+    const currentUserId = mainContent.dataset.currentUserId;
 
-    // Global variable to hold the editor instance
-    let editor;
-
+    /**
+     * This function finds the chat input form and attaches all necessary
+     * event listeners for resizing, typing indicators, and shortcuts.
+     * It is designed to be called every time a new input form is loaded.
+     */
     const initializeChatInput = () => {
-        // If an old editor instance exists, destroy it to prevent memory leaks
-        if (editor) {
-            editor.destroy();
-        }
-
-        const editorElement = document.getElementById('editor-content');
         const messageForm = document.getElementById('message-form');
-        const messageInput = document.getElementById('chat-message-input'); // The hidden textarea
+        const messageInput = document.getElementById('chat-message-input');
+        const typingSender = document.getElementById('typing-sender');
 
-        if (!messageForm || !editorElement || !messageInput) {
-            return; // Exit if the necessary elements aren't on the page
-        }
+        if (!messageForm || !messageInput || !typingSender) return;
 
-        // --- Access libraries from the global window object ---
-        const { Editor, StarterKit, CodeBlockLowlight, lowlight } = window.TipTap;
+        // --- Focus the input ---
+        messageInput.focus();
 
-        // --- Create the Editor Instance ---
-        editor = new Editor({
-            element: editorElement,
-            extensions: [
-                StarterKit.configure({
-                    heading: false,
-                    //blockquote: false,
-                    //horizontalRule: false,
-                    codeBlock: false,
-                }),
-                CodeBlockLowlight.configure({
-                    lowlight,
-                }),
-            ],
-            editorProps: {
-                attributes: {
-                    class: 'ProseMirror form-control', // Use Bootstrap's styling
-                },
-            },
-            // Use editorProps to add raw ProseMirror plugins and event handlers directly
-            editorProps: {
-                attributes: {
-                    class: 'ProseMirror form-control',
-                },
-                // This is the most direct way to handle keyboard shortcuts
-                handleKeyDown: (view, event) => {
-                    // --- ENTER TO SUBMIT (if shift is not pressed) ---
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        const messageForm = document.getElementById('message-form');
-                        // Use the global 'editor' instance
-                        if (messageForm && editor.getText().trim() !== '') {
-                            htmx.trigger(messageForm, 'submit');
-                        }
-                        return true; // We've handled this event
-                    }
+        const doneTypingInterval = 1500;
+        let typingTimer;
+        const initialTextareaHeight = messageInput.scrollHeight;
 
-                    // --- ARROW UP TO EDIT LAST MESSAGE (if editor is empty) ---
-                    if (event.key === 'ArrowUp' && editor.isEmpty) {
-                        event.preventDefault();
-                        if (!currentUserId) return false;
+        const resizeTextarea = () => {
+            messageInput.style.height = 'auto';
+            const newHeight = Math.max(initialTextareaHeight, messageInput.scrollHeight);
+            messageInput.style.height = `${newHeight}px`;
+        };
 
-                        const lastUserMessage = document.querySelector(`.message-container[data-user-id="${currentUserId}"]:last-of-type`);
-                        if (lastUserMessage) {
-                            const editButton = lastUserMessage.querySelector('.message-toolbar button[data-action="edit"]');
-                            if (editButton) {
-                                htmx.trigger(editButton, 'click');
-                            }
-                        }
-                        return true; // We've handled this event
-                    }
+        messageInput.addEventListener('input', resizeTextarea);
+        resizeTextarea();
 
-                    return false; // Let other handlers (like TipTap's own) run
-                },
-            },
-            // On every editor update, sync its HTML content to our hidden textarea
-            onUpdate: ({ editor }) => {
-                messageInput.value = editor.getHTML();
-            },
-        });
-
-        // --- Toolbar & Form Logic ---
-        const toolbar = document.getElementById('tiptap-toolbar');
-        toolbar.querySelector('#bold-btn').addEventListener('click', () => editor.chain().focus().toggleBold().run());
-        toolbar.querySelector('#italic-btn').addEventListener('click', () => editor.chain().focus().toggleItalic().run());
-        toolbar.querySelector('#bullet-list-btn').addEventListener('click', () => editor.chain().focus().toggleBulletList().run());
-        toolbar.querySelector('#ordered-list-btn').addEventListener('click', () => editor.chain().focus().toggleOrderedList().run());
-        toolbar.querySelector('#code-block-btn').addEventListener('click', () => editor.chain().focus().toggleCodeBlock().run());
-
-        // Update button active states based on cursor position
-        editor.on('transaction', () => {
-            toolbar.querySelector('#bold-btn').classList.toggle('active', editor.isActive('bold'));
-            toolbar.querySelector('#italic-btn').classList.toggle('active', editor.isActive('italic'));
-            toolbar.querySelector('#bullet-list-btn').classList.toggle('active', editor.isActive('bulletList'));
-            toolbar.querySelector('#ordered-list-btn').classList.toggle('active', editor.isActive('orderedList'));
-            toolbar.querySelector('#code-block-btn').classList.toggle('active', editor.isActive('codeBlock'));
-        });
-
-        // Sync content one last time before submitting the form via HTMX/WebSocket
-        messageForm.addEventListener('submit', () => {
-            messageInput.value = editor.getHTML();
-        });
-
-        // After the WebSocket sends the message, clear the editor
-        messageForm.addEventListener('htmx:wsAfterSend', () => {
-            if (editor) {
-                editor.commands.clearContent(true); // 'true' emits an update
-                editor.commands.focus();
+        messageInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (messageInput.value.trim() !== '') htmx.trigger(messageForm, 'submit');
+            }
+            if (e.key === 'ArrowUp' && messageInput.value.trim() === '') {
+                e.preventDefault();
+                const lastUserMessage = document.querySelector(`.message-container[data-user-id="${currentUserId}"]:last-of-type`);
+                if (lastUserMessage) {
+                    const editButton = lastUserMessage.querySelector('.message-toolbar button[data-action="edit"]');
+                    if (editButton) htmx.trigger(editButton, 'click');
+                }
             }
         });
 
-        // Focus the editor as soon as it's ready
-        editor.commands.focus();
+        const sendTypingStatus = (isTyping) => {
+            const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+            if (activeConv) {
+                const payload = { type: isTyping ? 'typing_start' : 'typing_stop', conversation_id: activeConv.dataset.conversationId };
+                typingSender.setAttribute('hx-vals', JSON.stringify(payload));
+                htmx.trigger(typingSender, 'typing-event');
+            }
+        };
+
+        messageInput.addEventListener('input', () => {
+            clearTimeout(typingTimer);
+            sendTypingStatus(true);
+            typingTimer = setTimeout(() => sendTypingStatus(false), doneTypingInterval);
+        });
+
+        messageForm.addEventListener('submit', () => {
+            clearTimeout(typingTimer);
+            sendTypingStatus(false);
+        });
+
+        messageForm.addEventListener('htmx:wsAfterSend', () => {
+            if (!document.querySelector('#chat-input-container .quoted-reply')) {
+                messageForm.reset();
+                resizeTextarea();
+                messageInput.focus();
+            }
+        });
     };
 
     // --- MAIN PAGE LOGIC ---
-    // Listen for our custom event to initialize/re-initialize the chat input scripts.
+    // Listen for our custom event to initialize the chat input scripts.
     document.body.addEventListener('chatInputLoaded', initializeChatInput);
 
-    // ... scroll/modal logic ...
     const isUserNearBottom = () => {
-        if (!messagesContainer) return false;
         return messagesContainer.scrollHeight - messagesContainer.clientHeight - messagesContainer.scrollTop < 150;
     };
 
     const scrollLastMessageIntoView = () => {
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
-        if (lastMessage) lastMessage.scrollIntoView({ behavior: "smooth", block: "end" });
+        if (lastMessage) lastMessage.scrollIntoView({ behavior: "smooth", block: "nearest" });
     };
 
     const processCodeBlocks = (container) => {
@@ -161,11 +117,14 @@ document.addEventListener('DOMContentLoaded', () => {
         processCodeBlocks(target);
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
-            if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
+            jumpToBottomBtn.style.display = 'none';
         }
-        if (editor) {
-            editor.commands.focus();
-        }
+
+       // After the new chat is loaded, find the input and focus it.
+       const messageInput = document.getElementById('chat-message-input');
+       if (messageInput) {
+           messageInput.focus();
+       }
     });
 
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
@@ -176,35 +135,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isUserNearBottom()) {
             scrollLastMessageIntoView();
         } else {
-            if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
+            jumpToBottomBtn.style.display = 'block';
         }
     });
 
-    if (messagesContainer) {
-        messagesContainer.addEventListener('scroll', () => {
-            if (isUserNearBottom() && jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
-        });
-    }
+    messagesContainer.addEventListener('scroll', () => {
+        if (isUserNearBottom()) jumpToBottomBtn.style.display = 'none';
+    });
 
-    if (jumpToBottomBtn) {
-        jumpToBottomBtn.addEventListener('click', () => {
-            if (messagesContainer) {
-                 messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
-            }
-            jumpToBottomBtn.style.display = 'none';
-        });
-    }
-    
+    jumpToBottomBtn.addEventListener('click', () => {
+        setTimeout(() => messagesContainer.scrollTop = messagesContainer.scrollHeight, 50);
+        jumpToBottomBtn.style.display = 'none';
+    });
+
+    // --- Generic Modal Handling ---
     const htmxModalEl = document.getElementById('htmx-modal');
     if (htmxModalEl) {
         const htmxModal = new bootstrap.Modal(htmxModalEl);
+
+        // Listen for our custom event to close the modal
+        // (e.g., after a successful form submission)
         document.body.addEventListener('close-modal', () => {
             htmxModal.hide();
         });
+
+        // When the modal is hidden, reset its content to the loading spinner.
+        // This ensures it's clean for the next time it's opened.
         htmxModalEl.addEventListener('hidden.bs.modal', () => {
             const modalContent = document.getElementById('htmx-modal-content');
             if (modalContent) {
-                modalContent.innerHTML = `<div class="modal-body text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>`;
+                modalContent.innerHTML = `
+                <div class="modal-body text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>`;
             }
         });
     }
