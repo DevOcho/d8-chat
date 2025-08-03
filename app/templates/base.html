@@ -8,7 +8,6 @@
     <!-- CSS & Icons -->
     <link rel="stylesheet" href="/css/local/bootstrap.min.css">
     <link rel="stylesheet" href="/css/local/bootstrap-icons.css">
-    <link rel="stylesheet" href="/css/local/toastui-editor.min.css">
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/syntax.css">
 
@@ -23,12 +22,10 @@
         {% endblock layout %}
     </div>
 
-    <!-- Bootstrap Bundle with Popper -->
+    <!-- Bootstrap, HTMX, and HTMX Websockets -->
     <script src="/js/local/bootstrap.bundle.min.js"></script>
     <script src="/js/local/htmx.min.js"></script>
-    <!--<script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>-->
     <script src="/js/local/htmx-ws.js"></script>
-    <script src="/js/local/toastui-editor-all.min.js"></script>
 
     {# custom scripts in different templates #}
     {% block scripts %}{% endblock %}
