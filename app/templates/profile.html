@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 
+{% block html_theme %}data-bs-theme="{{ theme }}"{% endblock %}
+
 {% block content %}
-<div class="container-fluid p-4" style="background-color: #f4f7fa; height: 100vh;">
+<div class="container-fluid p-4" style="height: 100vh;">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <h2 class="h4">My Profile</h2>
         <div>
@@ -19,7 +21,7 @@
 
     <!-- Personal Information Card -->
     <div class="card mb-4 border-0 shadow-sm">
-        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <div class="card-header d-flex justify-content-between align-items-center py-3">
             <h6 class="mb-0">Personal Information (Set via SSO)</h6>
         </div>
         <div class="card-body p-4">
@@ -40,9 +42,25 @@
         </div>
     </div>
 
+    <div class="card mb-4 border-0 shadow-sm">
+        <div class="card-header py-3">
+            <h6 class="mb-0">Theme</h6>
+        </div>
+        <div class="card-body p-4">
+            <p class="text-muted small">Choose how D8-Chat looks to you. Select a theme or sync with your system preference.</p>
+            <select class="form-select" id="theme-select" name="theme"
+                    hx-put="{{ url_for('main.update_theme') }}"
+                    hx-trigger="change">
+                <option value="light" {% if user.theme == 'light' %}selected{% endif %}>Light</option>
+                <option value="dark" {% if user.theme == 'dark' %}selected{% endif %}>Dark</option>
+                <option value="system" {% if user.theme == 'system' %}selected{% endif %}>Sync with system</option>
+            </select>
+        </div>
+    </div>
+
     <!-- Address Card -->
     <div id="address-card" class="card border-0 shadow-sm">
-        <div class="card-header bg-white d-flex justify-content-between align-items-center py-3">
+        <div class="card-header d-flex justify-content-between align-items-center py-3">
             <h6 class="mb-0">Address</h6>
             <!-- This button now targets the *inner* wrapper -->
             <button class="btn btn-warning btn-sm"

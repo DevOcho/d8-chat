@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" {% block html_theme %}{% endblock %}>
 <head>
     <!-- Required meta tags -->
     <meta charset="utf--8">
@@ -27,6 +27,25 @@
     <script src="/js/local/htmx.min.js"></script>
     <script src="/js/local/htmx-ws.js"></script>
     <script src="/js/local/turndown.js"></script>
+
+    {# Dark or Light Theme #}
+    <script>
+      // IIFE to handle system theme preference
+      (function () {
+        const htmlElement = document.documentElement;
+        const theme = htmlElement.getAttribute('data-bs-theme');
+
+        if (theme === 'system') {
+          const getSystemTheme = () => window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          htmlElement.setAttribute('data-bs-theme', getSystemTheme());
+
+          // Listen for changes in OS theme
+          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+            htmlElement.setAttribute('data-bs-theme', e.matches ? 'dark' : 'light');
+          });
+        }
+      })();
+    </script>
 
     {# custom scripts in different templates #}
     {% block scripts %}{% endblock %}

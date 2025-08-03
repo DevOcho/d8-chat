@@ -81,7 +81,7 @@ def logout():
 @main_bp.route('/profile')
 @login_required
 def profile():
-    return render_template('profile.html', user=g.user)
+    return render_template('profile.html', user=g.user, theme=g.user.theme)
 
 
 # --- CHAT INTERFACE ROUTES ---
@@ -145,7 +145,8 @@ def chat_interface():
                        channels=user_channels,
                        direct_message_users=direct_message_users,
                        online_users=chat_manager.online_users,
-                       unread_counts=unread_counts)
+                       unread_counts=unread_counts,
+                       theme=g.user.theme)
 
 
 @main_bp.route('/chat/channel/<int:channel_id>')
@@ -647,6 +648,22 @@ def update_presence_status():
         return render_template('partials/profile_header.html', user=user)
 
     return "Invalid status", 400
+
+
+@main_bp.route('/profile/theme', methods=['PUT'])
+@login_required
+def update_theme():
+    """Updates the user's theme preference."""
+    new_theme = request.form.get('theme')
+    if new_theme in ['light', 'dark', 'system']:
+        user = g.user
+        user.theme = new_theme
+        user.save()
+        # Instruct the browser to do a full reload to apply the new theme
+        response = make_response("")
+        response.headers['HX-Refresh'] = 'true'
+        return response
+    return "Invalid theme", 400
 
 
 # --- WebSocket Handler ---
