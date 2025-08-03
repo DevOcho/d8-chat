@@ -18,6 +18,13 @@ main_bp = Blueprint('main', __name__)
 # Admin blueprint for admin-specific routes
 admin_bp = Blueprint('admin', __name__)
 
+# A central map for presence status to Bootstrap CSS classes.
+STATUS_CLASS_MAP = {
+    'online': 'bg-success',
+    'away': 'bg-secondary',
+    'busy': 'bg-warning'  # Bootstrap's yellow
+}
+
 # This function runs before every request to load the logged-in user
 @main_bp.before_app_request
 def load_logged_in_user():
@@ -611,27 +618,30 @@ def get_dm_chat(other_user_id):
 @main_bp.route('/profile/status', methods=['PUT'])
 @login_required
 def update_presence_status():
-    """Updates the user's presence status."""
+    """Updates the user's presence status and broadcasts the change."""
     new_status = request.form.get('status')
-    valid_statuses = ['online', 'away', 'busy']
-
-    if new_status and new_status in valid_statuses:
-        # Update user in the database
+    if new_status and new_status in STATUS_CLASS_MAP:
         user = g.user
         user.presence_status = new_status
         user.save()
 
-        # --- Broadcast the change to all connected clients ---
-        status_map = {
-            'online': 'bg-success',
-            'away': 'bg-secondary',
-            'busy': 'bg-warning' # Use bootstrap's warning color for yellow
-        }
-        status_class = status_map.get(new_status, 'bg-secondary')
+        # --- Broadcast the changes to all connected clients ---
 
-        # This OOB swap will update the dot next to the user's name in everyone's DM list
-        presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
-        chat_manager.broadcast_to_all(presence_html)
+        # 1. Broadcast the update for the DM list dots (uses bg-* classes)
+        status_class = STATUS_CLASS_MAP.get(new_status, 'bg-secondary')
+        dm_list_presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
+        chat_manager.broadcast_to_all(dm_list_presence_html)
+
+        # 2. [THE FIX] Broadcast a SECOND, separate update for the sidebar profile button
+        #    This uses the custom presence-* classes.
+        profile_status_map = {'online': 'presence-online', 'away': 'presence-away', 'busy': 'presence-busy'}
+        profile_status_class = profile_status_map.get(new_status, 'presence-away')
+        sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user.id}" class="presence-indicator {profile_status_class}" hx-swap-oob="true"></span>'
+        chat_manager.broadcast_to_all(sidebar_presence_html)
+
+        # 3. Also update the indicator on the profile page itself (if other tabs are open)
+        profile_page_presence_html = f'<span id="profile-presence-indicator-{user.id}" class="presence-indicator {profile_status_class}" hx-swap-oob="true"></span>'
+        chat_manager.broadcast_to_all(profile_page_presence_html)
 
         # Return the updated profile header to the user who made the change
         return render_template('partials/profile_header.html', user=user)
@@ -651,7 +661,10 @@ def chat(ws):
     ws.user = user
 
     chat_manager.set_online(user.id, ws)
-    presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
+
+    # When a user connects, broadcast their ACTUAL saved status, not just "online".
+    status_class = STATUS_CLASS_MAP.get(user.presence_status, 'bg-secondary')
+    presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
     chat_manager.broadcast_to_all(presence_html)
 
     try:
@@ -707,12 +720,10 @@ def chat(ws):
                          .update(last_read_timestamp=current_time)
                          .where((UserConversationStatus.user == viewer_ws.user) & (UserConversationStatus.conversation == conversation))
                          .execute())
-            
-            # --- [FIX] Refactored message broadcasting to prevent OOB errors ---
-            
+
             # 1. Render the new message partial once.
             new_message_html = render_template('partials/message.html', message=new_message)
-            
+
             # 2. This is the OOB fragment to append the message to the viewer's list.
             message_to_broadcast = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
 
@@ -727,8 +738,6 @@ def chat(ws):
                 input_html = render_template('partials/chat_input_default.html')
                 message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
             ws.send(message_for_sender)
-            
-            # --- End of Fix ---
 
             if conversation.type == 'channel':
                 channel_id = conversation.conversation_id_str.split('_')[1]

@@ -15,7 +15,12 @@
                 <!-- User's Initial -->
                 <span>{{ (g.user.display_name or g.user.username)[0]|upper }}</span>
                 <!-- Presence Indicator Dot -->
-                <span class="presence-indicator"></span>
+                {% set status_class = 'presence-online' %}
+                {% if g.user.presence_status == 'away' %}{% set status_class = 'presence-away' %}
+                {% elif g.user.presence_status == 'busy' %}{% set status_class = 'presence-busy' %}
+                {% endif %}
+                <span id="sidebar-presence-indicator-{{ g.user.id }}"
+                      class="presence-indicator {{ status_class }}"></span>
             </div>
         </a>
     </div>
@@ -74,30 +79,47 @@
         </button>
     </div>
     <ul id="dm-list" class="list-unstyled">
-      <!-- Current User for talking to yourself -->
+      <!-- Current User (Self DM) -->
       {% set self_conv_id_str = "dm_" ~ g.user.id ~ "_" ~ g.user.id %}
       <li class="d-flex justify-content-between align-items-center">
         <div class="d-flex align-items-center">
-            <span id="status-dot-{{ g.user.id }}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;"></span>
+            <!-- [THE FIX] This logic now correctly checks the user's own status on load -->
+            {% set self_status_class = 'bg-success' %} {# Default to online #}
+            {% if g.user.presence_status == 'away' %}{% set self_status_class = 'bg-secondary' %}
+            {% elif g.user.presence_status == 'busy' %}{% set self_status_class = 'bg-warning' %}
+            {% endif %}
+            <span id="status-dot-{{ g.user.id }}" class="me-2 rounded-circle {{ self_status_class }}" style="width: 10px; height: 10px;"></span>
+
             <a href="#" class="text-decoration-none text-light"
-               id="link-{{ self_conv_id_str }}"  {# [FIX] Add the link ID #}
+               id="link-{{ self_conv_id_str }}"
                hx-get="/chat/dm/{{ g.user.id }}"
                hx-target="#chat-messages-container">
                 {{ g.user.display_name or g.user.username }} (you)
             </a>
         </div>
-        {# [FIX] Add the placeholder for the badge #}
         <span id="unread-badge-{{ self_conv_id_str }}"></span>
       </li>
+
       <!-- Other users -->
       {% for user in direct_message_users %}
       {% set user_ids = [g.user.id, user.id] | sort %}
       {% set conv_id_str = "dm_" ~ user_ids|join('_') %}
-      {% set count = unread_counts.get(conv_id, 0) %}
+      {% set count = unread_counts.get(conv_id_str, 0) %}
       <li>
         <div class="d-flex justify-content-between align-items-center">
           <div class="d-flex align-items-center">
-            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ 'bg-success' if online_users.get(user.id) else 'bg-secondary' }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
+            {% set status_class = 'bg-secondary' %} {# Default to offline (gray) #}
+            {% if online_users.get(user.id) %}
+                {% if user.presence_status == 'busy' %}
+                    {% set status_class = 'bg-warning' %} {# Yellow #}
+                {% elif user.presence_status == 'away' %}
+                    {% set status_class = 'bg-secondary' %} {# Gray #}
+                {% else %}
+                    {% set status_class = 'bg-success' %} {# Default online is green #}
+                {% endif %}
+            {% endif %}
+            <span id="status-dot-{{ user.id }}" class="me-2 rounded-circle {{ status_class }}" style="width: 10px; height: 10px; transition: background-color 0.3s ease;"></span>
+
             <a href="#" id="link-{{ conv_id_str }}" class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-secondary' }}"
                hx-get="/chat/dm/{{ user.id }}"
                hx-target="#chat-messages-container">
@@ -105,9 +127,7 @@
             </a>
           </div>
           <span id="unread-badge-{{ conv_id_str }}">
-            {% if count > 0 %}
-            <span class="badge rounded-pill bg-danger">{{ count }}</span>
-            {% endif %}
+            {% if count > 0 %}<span class="badge rounded-pill bg-danger">{{ count }}</span>{% endif %}
           </span>
         </div>
       </li>

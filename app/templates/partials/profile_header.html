@@ -21,7 +21,8 @@
                 {% elif user.presence_status == 'busy' %}
                     {% set status_class = 'presence-busy' %}
                 {% endif %}
-                <span class="presence-indicator {{ status_class }}"></span>
+                <span id="profile-presence-indicator-{{ user.id }}"
+                      class="presence-indicator {{ status_class }}"></span>
             </div>
 
             <!-- Dropdown Menu -->
