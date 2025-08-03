@@ -23,7 +23,7 @@ body, html {
   color: #d1d2d3;
 }
 .main-content,
-.container-fluid { /* [THE FIX] Apply base styles to both chat and profile containers */
+.container-fluid {
   flex-grow: 1;
   display: flex;
   flex-direction: column;
@@ -31,8 +31,8 @@ body, html {
   background-color: #ffffff;
 }
 .container-fluid {
-    background-color: #f4f7fa; /* Light grey for profile page background */
-    display: block; /* Profile page is not a flex container */
+    background-color: #f4f7fa;
+    display: block;
 }
 .chat-messages {
   flex-grow: 1;
@@ -81,7 +81,7 @@ body, html {
     border-radius: 4px;
 }
 
-/* --- Login Page Styles --- */
+/* --- [RESTORED] Login Page Styles --- */
 html.login-page, body.login-page { overflow: auto; }
 .login-page-container { display: flex; min-height: 100vh; width: 100%; background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 .feature-panel { flex-basis: 45%; background-color: #1a1d21; color: #ffffff; padding: 3rem 4rem; display: flex; flex-direction: column; justify-content: center; }
@@ -93,7 +93,12 @@ html.login-page, body.login-page { overflow: auto; }
 .login-form-container { max-width: 420px; width: 100%; }
 .sso-divider { display: flex; align-items: center; text-align: center; color: #6c757d; margin: 2rem 0; }
 .sso-divider::before, .sso-divider::after { content: ''; flex: 1; border-bottom: 1px solid #dee2e6; }
-@media (max-width: 992px) { .login-page-container { flex-direction: column; } .feature-panel, .login-panel { flex-basis: auto; } }
+.sso-divider:not(:empty)::before { margin-right: .5em; }
+.sso-divider:not(:empty)::after { margin-left: .5em; }
+.btn-sso-authentik, .btn-sso-google { font-size: 1rem; padding: 0.75rem; border: 1px solid #dee2e6; background-color: #ffffff; color: #212529; text-align: center; }
+.btn-sso-authentik:hover, .btn-sso-google:hover { background-color: #f8f9fa; border-color: #adb5bd; }
+.btn-sso-authentik i, .btn-sso-google i { margin-right: 0.5rem; }
+@media (max-width: 992px) { .login-page-container { flex-direction: column; } .feature-panel { flex-basis: auto; padding: 2rem; text-align: center; } .feature-list li { justify-content: center; } .login-logo { margin-left: auto; margin-right: auto; } .login-panel { flex-basis: auto; flex-grow: 1; } }
 
 /* --- General App Styles --- */
 .mentioned-message { background-color: #fffbeA; border-left: 3px solid #ffd700; }
@@ -143,14 +148,14 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     /* Main Layout */
     .workspace-sidebar { background-color: #1a1d21; }
     .channel-sidebar { background-color: #222529; }
-    .main-content, .chat-input-form { background-color: #2f3136; }
-    .container-fluid { background-color: #2f3136 !important; } /* [THE FIX] Override for profile page */
-    .chat-messages { background-color: #36393f; }
+    .main-content, .container-fluid { background-color: #2f3136 !important; }
+    .chat-messages, .chat-input-form { background-color: #363f4f; }
     
     /* WYSIWYG Editor */
     .wysiwyg-editor-container { background-color: #40444b; border-color: #2f3136; }
     .wysiwyg-toolbar, .wysiwyg-toolbar-bottom { background-color: #40444b; border-color: #2f3136 !important; }
     .wysiwyg-content, #markdown-toggle-view { background-color: #40444b; color: #dcddde; }
+    .wysiwyg-toolbar button:hover { background-color: #4e5258; }
     
     /* Send Button */
     #send-button.send-btn-dynamic { background-color: #40444b; color: #dcddde; }
