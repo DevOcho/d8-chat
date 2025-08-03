@@ -36,6 +36,7 @@ class User(BaseModel):
     country = CharField(null=True)
     city = CharField(null=True)
     timezone = CharField(null=True, default='AST')
+    presence_status = CharField(default='online') # 'online', 'away', or 'busy'
 
 class WorkspaceMember(BaseModel):
     id = IdentityField()

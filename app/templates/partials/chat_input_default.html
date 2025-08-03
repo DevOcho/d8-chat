@@ -1,9 +1,39 @@
 <div id="chat-input-container" class="chat-input-form bg-light">
     <div id="typing-indicator" class="text-muted small" style="height: 20px;"></div>
     <form ws-send id="message-form" autocomplete="off">
-        <div class="input-group">
-            <textarea id="chat-message-input" name="chat_message" class="form-control" placeholder="Type a message..." rows="1" style="resize: none;"></textarea>
-            <button id="send-button" type="submit" class="btn btn-primary">Send</button>
+        <div class="wysiwyg-editor-container">
+
+            <!-- Top Toolbar is now hidden by default -->
+            <div class="wysiwyg-toolbar toolbar-hidden">
+                <button type="button" data-command="bold" title="Bold (Ctrl+B)"><i class="bi bi-type-bold"></i></button>
+                <button type="button" data-command="italic" title="Italic (Ctrl+I)"><i class="bi bi-type-italic"></i></button>
+                <button type="button" data-command="strikethrough" title="Strikethrough"><i class="bi bi-type-strikethrough"></i></button>
+                <button type="button" data-command="insertUnorderedList" title="Bulleted List"><i class="bi bi-list-ul"></i></button>
+                <button type="button" data-command="insertOrderedList" title="Numbered List"><i class="bi bi-list-ol"></i></button>
+                <button type="button" data-command="formatBlock" data-value="blockquote" title="Quote"><i class="bi bi-quote"></i></button>
+                <button type="button" data-command="formatBlock" data-value="pre" title="Code Block"><i class="bi bi-code-slash"></i></button>
+            </div>
+
+            <!-- Rich editor is now hidden by default -->
+            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true"></div>
+
+            <!-- Markdown view is now visible by default -->
+            <textarea id="markdown-toggle-view" class="form-control" rows="1"></textarea>
+
+            <!-- Hidden textarea that will be sent to the server -->
+            <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>
+
+            <!-- Bottom Toolbar (always visible) -->
+            <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
+                 <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting"><i class="bi bi-type"></i></button>
+                 <button type="button" id="mention-btn" title="Mention User"><i class="bi bi-at"></i></button>
+                 <button type="button" id="emoji-btn" title="Add Emoji"><i class="bi bi-emoji-smile"></i></button>
+                 <div class="ms-auto d-flex align-items-center">
+                    <button id="send-button" type="submit" class="btn btn-primary send-btn-dynamic">
+                        <!-- Button content will be injected by JavaScript -->
+                    </button>
+                 </div>
+            </div>
         </div>
     </form>
     <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>

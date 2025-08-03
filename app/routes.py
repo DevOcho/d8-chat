@@ -585,7 +585,9 @@ def get_dm_chat(other_user_id):
     messages_html = render_template('partials/dm_messages.html', messages=messages, other_user=other_user, last_read_timestamp=last_read_timestamp)
 
     # Clear the new messages badge
-    clear_badge_html = render_template('partials/clear_badge.html',
+    clear_badge_html = ""
+    if other_user.id != g.user.id:
+        clear_badge_html = render_template('partials/clear_badge.html',
                                        conv_id_str=conv_id_str,
                                        hx_get_url=url_for('main.get_dm_chat', other_user_id=other_user.id),
                                        link_text=other_user.display_name or other_user.username)
@@ -605,9 +607,37 @@ def get_dm_chat(other_user_id):
 
     return response
 
-# In app/routes.py
 
-# ... (keep all other imports and routes the same) ...
+@main_bp.route('/profile/status', methods=['PUT'])
+@login_required
+def update_presence_status():
+    """Updates the user's presence status."""
+    new_status = request.form.get('status')
+    valid_statuses = ['online', 'away', 'busy']
+
+    if new_status and new_status in valid_statuses:
+        # Update user in the database
+        user = g.user
+        user.presence_status = new_status
+        user.save()
+
+        # --- Broadcast the change to all connected clients ---
+        status_map = {
+            'online': 'bg-success',
+            'away': 'bg-secondary',
+            'busy': 'bg-warning' # Use bootstrap's warning color for yellow
+        }
+        status_class = status_map.get(new_status, 'bg-secondary')
+
+        # This OOB swap will update the dot next to the user's name in everyone's DM list
+        presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
+        chat_manager.broadcast_to_all(presence_html)
+
+        # Return the updated profile header to the user who made the change
+        return render_template('partials/profile_header.html', user=user)
+
+    return "Invalid status", 400
+
 
 # --- WebSocket Handler ---
 @sock.route('/ws/chat')
@@ -677,14 +707,28 @@ def chat(ws):
                          .update(last_read_timestamp=current_time)
                          .where((UserConversationStatus.user == viewer_ws.user) & (UserConversationStatus.conversation == conversation))
                          .execute())
+            
+            # --- [FIX] Refactored message broadcasting to prevent OOB errors ---
+            
+            # 1. Render the new message partial once.
+            new_message_html = render_template('partials/message.html', message=new_message)
+            
+            # 2. This is the OOB fragment to append the message to the viewer's list.
+            message_to_broadcast = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
 
-            message_html = f"""<div id="message-list" hx-swap-oob="beforeend">{render_template('partials/message.html', message=new_message)}</div>"""
-            chat_manager.broadcast(conv_id_str, message_html)
+            # 3. Broadcast the message ONLY to other clients viewing the channel.
+            #    This prevents the oobErrorNoTarget by not sending to users who don't have #message-list rendered.
+            chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
 
+            # 4. The original sender also needs to receive the message.
+            #    We also check if they were replying, and if so, tack on the command to reset their input field.
+            message_for_sender = message_to_broadcast
             if parent_id:
                 input_html = render_template('partials/chat_input_default.html')
-                reset_input_command = f"""<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>"""
-                ws.send(reset_input_command)
+                message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+            ws.send(message_for_sender)
+            
+            # --- End of Fix ---
 
             if conversation.type == 'channel':
                 channel_id = conversation.conversation_id_str.split('_')[1]
@@ -694,40 +738,34 @@ def chat(ws):
                 user_ids = [int(uid) for uid in conv_id_str.split('_')[1:]]
                 members = User.select().where(User.id.in_(user_ids))
 
-            # --- REFACTORED NOTIFICATION LOGIC ---
             for member in members:
-                # Don't notify the sender or users who are not online
                 if member.id == ws.user.id or member.id not in chat_manager.all_clients:
                     continue
 
-                # Don't notify users who are already watching this conversation
                 member_ws = chat_manager.all_clients[member.id]
                 if getattr(member_ws, 'channel_id', None) == conv_id_str:
                     continue
 
                 status, _ = UserConversationStatus.get_or_create(user=member, conversation=conversation)
-                notification_html = None # Reset for each member
+                notification_html = None
 
                 if conversation.type == 'channel':
                     channel_model = Channel.get_by_id(conversation.conversation_id_str.split('_')[1])
                     link_text = f"# {channel_model.name}"
                     hx_get_url = url_for('main.get_channel_chat', channel_id=channel_model.id)
-
                     new_mention_count = Mention.select().join(Message).where((Message.created_at > status.last_read_timestamp) & (Mention.user == member) & (Message.conversation == conversation)).count()
                     if new_mention_count > 0:
                         total_mentions = Mention.select().join(Message).where((Mention.user == member) & (Message.conversation == conversation)).count()
                         notification_html = render_template('partials/unread_badge.html', conv_id_str=conv_id_str, count=total_mentions, link_text=link_text, hx_get_url=hx_get_url)
                     elif Message.select().where((Message.conversation == conversation) & (Message.created_at > status.last_read_timestamp)).exists():
                         notification_html = render_template('partials/bold_link.html', conv_id_str=conv_id_str, link_text=link_text, hx_get_url=hx_get_url)
-
-                else: # Logic for DM notifications
+                else:
                     link_text = ws.user.display_name or ws.user.username
                     hx_get_url = url_for('main.get_dm_chat', other_user_id=ws.user.id)
                     new_count = Message.select().where((Message.conversation == conversation) & (Message.created_at > status.last_read_timestamp) & (Message.user != member)).count()
                     if new_count > 0:
                         notification_html = render_template('partials/unread_badge.html', conv_id_str=conv_id_str, count=new_count, link_text=link_text, hx_get_url=hx_get_url)
 
-                # Send the notification if one was generated
                 if notification_html:
                     member_ws.send(notification_html)
 

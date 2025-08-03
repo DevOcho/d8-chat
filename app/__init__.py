@@ -35,35 +35,33 @@ def create_app(config_class=Config):
     def markdown_filter(content):
         """
         Converts Markdown content to sanitized HTML with syntax highlighting.
-        fenced_code = github style ``` code blocks ```
-        codehilite = syntax highlighting
         """
-        # 1. Define what HTML is allowed after conversion
         allowed_tags = [
             'p', 'pre', 'code', 'blockquote', 'strong', 'em', 'h1', 'h2', 'h3',
             'ul', 'ol', 'li', 'br', 'span', 'div'
         ]
         allowed_attrs = {
-            '*': ['class'], # Allow the 'class' attribute on any tag
+            '*': ['class'],
         }
 
-        # 2. Convert Markdown to HTML
+        # [THE DEFINITIVE FIX]
+        # 1. 'extra' runs first, correctly parsing block elements (quotes, lists).
+        # 2. 'nl2br' runs after, converting any remaining single newlines into <br> tags.
+        # This is the correct combination for chat-style markdown.
         html = markdown.markdown(
             content,
-            extensions=['fenced_code', 'codehilite'],
+            extensions=['extra', 'codehilite', 'nl2br'],
             extension_configs={
                 'codehilite': {
                     'css_class': 'codehilite',
                     'guess_lang': False,
-                    'linenums': False # Optional: set to True to show line numbers
+                    'linenums': False
                 }
             }
         )
 
-        # 3. Sanitize the HTML to prevent XSS attacks
         safe_html = bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs)
 
-        # Mark the output as safe to prevent auto-escaping
         return Markup(safe_html)
 
     # Import and register blueprints

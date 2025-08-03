@@ -1,8 +1,27 @@
 {% extends "base.html" %}
 
 {% block layout %}
-<!-- ... (sidebars are unchanged) ... -->
-<div class="sidebar workspace-sidebar p-3 text-center text-white">D8</div>
+<!-- workspaces -->
+<div class="sidebar workspace-sidebar p-2 text-center text-white">
+    <!-- Workspace Logo -->
+    <div class="workspace-logo mb-3">
+        D8
+    </div>
+
+    <!-- user profile and status indicator -->
+    <div class="profile-button-container mt-auto">
+        <a href="{{ url_for('main.profile') }}" title="View your profile">
+            <div class="profile-avatar">
+                <!-- User's Initial -->
+                <span>{{ (g.user.display_name or g.user.username)[0]|upper }}</span>
+                <!-- Presence Indicator Dot -->
+                <span class="presence-indicator"></span>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- channels -->
 <div class="sidebar channel-sidebar p-3">
     <h5 class="text-white">DevOcho</h5>
     <hr class="text-secondary">
@@ -56,13 +75,19 @@
     </div>
     <ul id="dm-list" class="list-unstyled">
       <!-- Current User for talking to yourself -->
-      <li class="d-flex align-items-center">
-        <span id="status-dot-{{ g.user.id }}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;"></span>
-        <a href="#" class="text-decoration-none text-light"
-           hx-get="/chat/dm/{{ g.user.id }}"
-           hx-target="#chat-messages-container">
-            {{ g.user.display_name or g.user.username }} (you)
-        </a>
+      {% set self_conv_id_str = "dm_" ~ g.user.id ~ "_" ~ g.user.id %}
+      <li class="d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center">
+            <span id="status-dot-{{ g.user.id }}" class="me-2 rounded-circle bg-success" style="width: 10px; height: 10px;"></span>
+            <a href="#" class="text-decoration-none text-light"
+               id="link-{{ self_conv_id_str }}"  {# [FIX] Add the link ID #}
+               hx-get="/chat/dm/{{ g.user.id }}"
+               hx-target="#chat-messages-container">
+                {{ g.user.display_name or g.user.username }} (you)
+            </a>
+        </div>
+        {# [FIX] Add the placeholder for the badge #}
+        <span id="unread-badge-{{ self_conv_id_str }}"></span>
       </li>
       <!-- Other users -->
       {% for user in direct_message_users %}

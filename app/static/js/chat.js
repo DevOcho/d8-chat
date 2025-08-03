@@ -1,96 +1,298 @@
-/* FINAL REFACTORED CODE: app/static/js/chat.js */
+/**
+ * D8-Chat Main JavaScript File
+ *
+ * This file handles two main responsibilities:
+ * 1. The WYSIWYG Chat Input Editor, encapsulated in the `Editor` object.
+ * 2. General page-level logic for the chat interface (scrolling, code blocks, modals).
+ */
 
-// We wrap everything in a DOMContentLoaded listener to ensure the HTML is ready.
-document.addEventListener('DOMContentLoaded', () => {
-    // --- Element References ---
-    const messagesContainer = document.getElementById('chat-messages-container');
-    const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
-    const mainContent = document.querySelector('main.main-content');
-    const currentUserId = mainContent.dataset.currentUserId;
+// --- 1. THE CHAT INPUT EDITOR ---
+const Editor = {
+    // This state object holds all variables and element references for the editor instance.
+    state: {},
 
     /**
-     * This function finds the chat input form and attaches all necessary
-     * event listeners for resizing, typing indicators, and shortcuts.
-     * It is designed to be called every time a new input form is loaded.
+     * Initializes the chat editor. Gathers elements and sets up all event listeners.
      */
-    const initializeChatInput = () => {
+    initialize: function() {
         const messageForm = document.getElementById('message-form');
-        const messageInput = document.getElementById('chat-message-input');
-        const typingSender = document.getElementById('typing-sender');
+        if (!messageForm) return;
 
-        if (!messageForm || !messageInput || !typingSender) return;
-
-        // --- Focus the input ---
-        messageInput.focus();
-
-        const doneTypingInterval = 1500;
-        let typingTimer;
-        const initialTextareaHeight = messageInput.scrollHeight;
-
-        const resizeTextarea = () => {
-            messageInput.style.height = 'auto';
-            const newHeight = Math.max(initialTextareaHeight, messageInput.scrollHeight);
-            messageInput.style.height = `${newHeight}px`;
+        const elements = {
+            messageForm: messageForm,
+            editor: document.getElementById('wysiwyg-editor'),
+            markdownView: document.getElementById('markdown-toggle-view'),
+            hiddenInput: document.getElementById('chat-message-input'),
+            topToolbar: document.querySelector('.wysiwyg-toolbar:not(.wysiwyg-toolbar-bottom)'),
+            formatToggleButton: document.getElementById('format-toggle-btn'),
+            sendButton: document.getElementById('send-button'),
+            typingSender: document.getElementById('typing-sender'),
+            blockquoteButton: document.querySelector('[data-command="formatBlock"][data-value="blockquote"]')
         };
 
-        messageInput.addEventListener('input', resizeTextarea);
-        resizeTextarea();
+        if (Object.values(elements).some(el => !el)) {
+            console.error("Chat Editor initialization failed: one or more required elements were not found.");
+            return;
+        }
 
-        messageInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (messageInput.value.trim() !== '') htmx.trigger(messageForm, 'submit');
+        const turndownService = new TurndownService({
+            headingStyle: 'atx',
+            codeBlockStyle: 'fenced',
+            br: '\n'
+        });
+        turndownService.addRule('strikethrough', {
+            filter: ['del', 's', 'strike'],
+            replacement: content => `~${content}~`
+        });
+
+        this.state = {
+            ...elements,
+            turndownService,
+            isMarkdownMode: true,
+            typingTimer: null
+        };
+
+        this.setupToolbarListener();
+        this.setupInputListeners();
+        this.setupKeydownListeners();
+        this.setupFormListeners();
+        this.setupToggleButtonListener();
+        this.updateView();
+    },
+
+    // --- [NEW HELPER FUNCTION] ---
+    /**
+     * Pre-processes raw markdown text to insert blank lines between blockquotes
+     * and subsequent paragraphs, making it compliant with the strict Markdown spec.
+     * @param {string} text The raw text from the markdown view.
+     * @returns {string} The processed text with necessary blank lines.
+     */
+    preprocessMarkdown: function(text) {
+        const lines = text.split('\n');
+        const processedLines = [];
+        for (let i = 0; i < lines.length; i++) {
+            processedLines.push(lines[i]);
+            // Check if the current line is a blockquote...
+            const isQuote = lines[i].trim().startsWith('>');
+            // ...and if the next line exists, is not empty, and is NOT a blockquote.
+            if (isQuote && (i + 1 < lines.length) && lines[i + 1].trim() !== '' && !lines[i + 1].trim().startsWith('>')) {
+                // If all conditions are met, insert a blank line.
+                processedLines.push('');
             }
-            if (e.key === 'ArrowUp' && messageInput.value.trim() === '') {
+        }
+        return processedLines.join('\n');
+    },
+
+    // --- UI Update Functions ---
+    updateView: function() {
+        // ... (this function is unchanged)
+        const { editor, markdownView, topToolbar, isMarkdownMode } = this.state;
+        if (isMarkdownMode) {
+            editor.style.display = 'none';
+            markdownView.style.display = 'block';
+            topToolbar.classList.add('toolbar-hidden');
+            markdownView.focus();
+        } else {
+            markdownView.style.display = 'none';
+            editor.style.display = 'block';
+            topToolbar.classList.remove('toolbar-hidden');
+            editor.focus();
+            this.resizeActiveInput();
+        }
+        this.updateSendButton();
+    },
+    updateSendButton: function() {
+        // ... (this function is unchanged)
+        const { sendButton, isMarkdownMode } = this.state;
+        if (isMarkdownMode) {
+            sendButton.innerHTML = `<span>Send</span><span class="send-shortcut"><i class="bi bi-arrow-return-left"></i></span>`;
+            sendButton.title = "Send (Enter)";
+        } else {
+            sendButton.innerHTML = `<span>Send</span><span class="send-shortcut"><kbd>Ctrl</kbd>+<i class="bi bi-arrow-return-left"></i></span>`;
+            sendButton.title = "Send (Ctrl+Enter)";
+        }
+    },
+    resizeActiveInput: function() {
+        // ... (this function is unchanged)
+        const { editor, markdownView, isMarkdownMode } = this.state;
+        const activeInput = isMarkdownMode ? markdownView : editor;
+        activeInput.style.height = 'auto';
+        activeInput.style.height = `${activeInput.scrollHeight}px`;
+    },
+    updateStateAndButtons: function() {
+        // ... (this function is unchanged)
+        const { editor, hiddenInput, turndownService, blockquoteButton, topToolbar } = this.state;
+        const htmlContent = editor.innerHTML;
+        const markdownContent = turndownService.turndown(htmlContent).trim();
+        hiddenInput.value = markdownContent;
+        const commands = ['bold', 'italic', 'strikethrough', 'insertUnorderedList', 'insertOrderedList'];
+        commands.forEach(cmd => {
+            const btn = topToolbar.querySelector(`[data-command="${cmd}"]`);
+            if (btn) btn.classList.toggle('active', document.queryCommandState(cmd));
+        });
+        if (blockquoteButton) {
+            blockquoteButton.classList.toggle('active', this.isSelectionInBlockquote());
+        }
+    },
+    isSelectionInBlockquote: function() {
+        // ... (this function is unchanged)
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return false;
+        let node = selection.getRangeAt(0).startContainer;
+        if (node.nodeType === 3) node = node.parentNode;
+        while (node && node.id !== 'wysiwyg-editor') {
+            if (node.nodeName === 'BLOCKQUOTE') return true;
+            node = node.parentNode;
+        }
+        return false;
+    },
+    sendTypingStatus: function(isTyping) {
+        // ... (this function is unchanged)
+        const { typingSender } = this.state;
+        const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+        if (activeConv) {
+            const payload = { type: isTyping ? 'typing_start' : 'typing_stop', conversation_id: activeConv.dataset.conversationId };
+            typingSender.setAttribute('hx-vals', JSON.stringify(payload));
+            htmx.trigger(typingSender, 'typing-event');
+        }
+    },
+
+    // --- Event Listener Setup Functions ---
+    setupToolbarListener: function() {
+        // ... (this function is unchanged)
+        this.state.topToolbar.addEventListener('mousedown', e => {
+            e.preventDefault();
+            const button = e.target.closest('button');
+            if (!button) return;
+            if (button.dataset.value === 'blockquote') {
+                const format = this.isSelectionInBlockquote() ? 'div' : 'blockquote';
+                document.execCommand('formatBlock', false, format);
+            } else {
+                const { command, value } = button.dataset;
+                document.execCommand(command, false, value);
+            }
+            this.state.editor.focus();
+            this.updateStateAndButtons();
+        });
+    },
+    setupInputListeners: function() {
+        // ... (this function is unchanged)
+        this.state.editor.addEventListener('input', () => {
+            this.updateStateAndButtons();
+            this.resizeActiveInput();
+            clearTimeout(this.state.typingTimer);
+            this.sendTypingStatus(true);
+            this.state.typingTimer = setTimeout(() => this.sendTypingStatus(false), 1500);
+        });
+        this.state.markdownView.addEventListener('input', () => {
+            this.resizeActiveInput();
+            clearTimeout(this.state.typingTimer);
+            this.sendTypingStatus(true);
+            this.state.typingTimer = setTimeout(() => this.sendTypingStatus(false), 1500);
+        });
+        document.addEventListener('selectionchange', () => {
+            if (document.activeElement === this.state.editor) {
+                this.updateStateAndButtons();
+            }
+        });
+    },
+    setupKeydownListeners: function() {
+        // ... (this function is unchanged)
+        const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
+        const keydownHandler = (e) => {
+            if (!this.state.isMarkdownMode && e.key === 'Enter' && !e.shiftKey) {
+                const selection = window.getSelection();
+                if (selection.rangeCount) {
+                    const range = selection.getRangeAt(0);
+                    const node = range.startContainer;
+                    if (this.isSelectionInBlockquote() && node.textContent.trim() === '' && range.startOffset === node.textContent.length) {
+                        e.preventDefault();
+                        document.execCommand('formatBlock', false, 'div');
+                        return;
+                    }
+                }
+            }
+            const currentContent = this.state.isMarkdownMode ? this.state.markdownView.value : this.state.editor.innerText;
+            if (e.key === 'ArrowUp' && currentContent.trim() === '') {
                 e.preventDefault();
                 const lastUserMessage = document.querySelector(`.message-container[data-user-id="${currentUserId}"]:last-of-type`);
                 if (lastUserMessage) {
                     const editButton = lastUserMessage.querySelector('.message-toolbar button[data-action="edit"]');
                     if (editButton) htmx.trigger(editButton, 'click');
                 }
+                return;
             }
-        });
-
-        const sendTypingStatus = (isTyping) => {
-            const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-            if (activeConv) {
-                const payload = { type: isTyping ? 'typing_start' : 'typing_stop', conversation_id: activeConv.dataset.conversationId };
-                typingSender.setAttribute('hx-vals', JSON.stringify(payload));
-                htmx.trigger(typingSender, 'typing-event');
+            if (e.key === 'Enter') {
+                if (this.state.isMarkdownMode && !e.shiftKey) {
+                    e.preventDefault();
+                    if (this.state.markdownView.value.trim() !== '') this.state.messageForm.requestSubmit();
+                } else if (!this.state.isMarkdownMode && e.ctrlKey) {
+                    e.preventDefault();
+                    if (this.state.editor.innerText.trim() !== '') this.state.messageForm.requestSubmit();
+                }
             }
         };
-
-        messageInput.addEventListener('input', () => {
-            clearTimeout(typingTimer);
-            sendTypingStatus(true);
-            typingTimer = setTimeout(() => sendTypingStatus(false), doneTypingInterval);
+        this.state.editor.addEventListener('keydown', keydownHandler);
+        this.state.markdownView.addEventListener('keydown', keydownHandler);
+    },
+    setupFormListeners: function() {
+        // This is the only function with a change
+        this.state.messageForm.addEventListener('submit', (e) => {
+            if (this.state.isMarkdownMode) {
+                // [THE FIX] Pre-process the markdown before assigning it to the hidden input
+                const rawMarkdown = this.state.markdownView.value;
+                this.state.hiddenInput.value = this.preprocessMarkdown(rawMarkdown);
+            } else {
+                this.updateStateAndButtons();
+            }
+            if (this.state.hiddenInput.value.trim() === '') {
+                e.preventDefault();
+                return;
+            }
+            clearTimeout(this.state.typingTimer);
+            this.sendTypingStatus(false);
         });
 
-        messageForm.addEventListener('submit', () => {
-            clearTimeout(typingTimer);
-            sendTypingStatus(false);
-        });
-
-        messageForm.addEventListener('htmx:wsAfterSend', () => {
+        this.state.messageForm.addEventListener('htmx:wsAfterSend', () => {
             if (!document.querySelector('#chat-input-container .quoted-reply')) {
-                messageForm.reset();
-                resizeTextarea();
-                messageInput.focus();
+                const { editor, markdownView, hiddenInput } = this.state;
+                editor.innerHTML = '';
+                markdownView.value = '';
+                hiddenInput.value = '';
+                editor.style.height = 'auto';
+                markdownView.style.height = 'auto';
+                this.state.isMarkdownMode ? markdownView.focus() : editor.focus();
             }
         });
-    };
+    },
+    setupToggleButtonListener: function() {
+        // ... (this function is unchanged)
+        this.state.formatToggleButton.addEventListener('click', () => {
+            this.state.isMarkdownMode = !this.state.isMarkdownMode;
+            this.updateView();
+        });
+    }
+};
 
-    // --- MAIN PAGE LOGIC ---
-    // Listen for our custom event to initialize the chat input scripts.
-    document.body.addEventListener('chatInputLoaded', initializeChatInput);
+
+// --- 2. GENERAL PAGE-LEVEL LOGIC ---
+
+document.addEventListener('DOMContentLoaded', () => {
+    // --- Element References ---
+    const messagesContainer = document.getElementById('chat-messages-container');
+    const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
+
+    // Listen for our custom event to initialize the chat editor scripts.
+    document.body.addEventListener('chatInputLoaded', () => Editor.initialize());
 
     const isUserNearBottom = () => {
+        if (!messagesContainer) return false;
         return messagesContainer.scrollHeight - messagesContainer.clientHeight - messagesContainer.scrollTop < 150;
     };
 
     const scrollLastMessageIntoView = () => {
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
-        if (lastMessage) lastMessage.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        if (lastMessage) lastMessage.scrollIntoView({ behavior: "smooth", block: "end" });
     };
 
     const processCodeBlocks = (container) => {
@@ -117,14 +319,8 @@ document.addEventListener('DOMContentLoaded', () => {
         processCodeBlocks(target);
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
-            jumpToBottomBtn.style.display = 'none';
+            if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
         }
-
-       // After the new chat is loaded, find the input and focus it.
-       const messageInput = document.getElementById('chat-message-input');
-       if (messageInput) {
-           messageInput.focus();
-       }
     });
 
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
@@ -135,42 +331,30 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isUserNearBottom()) {
             scrollLastMessageIntoView();
         } else {
-            jumpToBottomBtn.style.display = 'block';
+            if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
         }
     });
 
-    messagesContainer.addEventListener('scroll', () => {
-        if (isUserNearBottom()) jumpToBottomBtn.style.display = 'none';
-    });
+    if (messagesContainer) {
+        messagesContainer.addEventListener('scroll', () => {
+            if (isUserNearBottom() && jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
+        });
+    }
 
-    jumpToBottomBtn.addEventListener('click', () => {
-        setTimeout(() => messagesContainer.scrollTop = messagesContainer.scrollHeight, 50);
-        jumpToBottomBtn.style.display = 'none';
-    });
+    if (jumpToBottomBtn) {
+        jumpToBottomBtn.addEventListener('click', () => {
+            setTimeout(() => messagesContainer.scrollTop = messagesContainer.scrollHeight, 50);
+            jumpToBottomBtn.style.display = 'none';
+        });
+    }
 
-    // --- Generic Modal Handling ---
     const htmxModalEl = document.getElementById('htmx-modal');
     if (htmxModalEl) {
         const htmxModal = new bootstrap.Modal(htmxModalEl);
-
-        // Listen for our custom event to close the modal
-        // (e.g., after a successful form submission)
-        document.body.addEventListener('close-modal', () => {
-            htmxModal.hide();
-        });
-
-        // When the modal is hidden, reset its content to the loading spinner.
-        // This ensures it's clean for the next time it's opened.
+        document.body.addEventListener('close-modal', () => htmxModal.hide());
         htmxModalEl.addEventListener('hidden.bs.modal', () => {
             const modalContent = document.getElementById('htmx-modal-content');
-            if (modalContent) {
-                modalContent.innerHTML = `
-                <div class="modal-body text-center">
-                    <div class="spinner-border" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                </div>`;
-            }
+            if (modalContent) modalContent.innerHTML = `<div class="modal-body text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>`;
         });
     }
 
