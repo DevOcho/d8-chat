@@ -11,3 +11,4 @@ simple-websocket
 Markdown
 Pygments
 bleach
+emoji

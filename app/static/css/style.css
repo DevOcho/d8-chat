@@ -172,3 +172,17 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     .profile-avatar .presence-indicator { border-color: #1a1d21; }
     .profile-header-avatar .presence-indicator { border-color: #2f3136; }
 }
+
+/* --- Emoji Picker Styles --- */
+#emoji-picker-container {
+    position: absolute;
+    bottom: 100%; /* Position it right above the input container */
+    right: 0;
+    z-index: 1050; /* Ensure it appears above other elements */
+    margin-bottom: 5px; /* Add a little space */
+}
+
+/* The picker itself comes with a shadow, but we can style it if needed */
+emoji-picker {
+    --indicator-color: #ec729c; /* Change the selection indicator color */
+}

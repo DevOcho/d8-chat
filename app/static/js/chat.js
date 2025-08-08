@@ -27,7 +27,9 @@ const Editor = {
             formatToggleButton: document.getElementById('format-toggle-btn'),
             sendButton: document.getElementById('send-button'),
             typingSender: document.getElementById('typing-sender'),
-            blockquoteButton: document.querySelector('[data-command="formatBlock"][data-value="blockquote"]')
+            blockquoteButton: document.querySelector('[data-command="formatBlock"][data-value="blockquote"]'),
+            emojiButton: document.getElementById('emoji-btn'),
+            emojiPicker: document.querySelector('emoji-picker')
         };
 
         if (Object.values(elements).some(el => !el)) {
@@ -52,6 +54,7 @@ const Editor = {
             typingTimer: null
         };
 
+        this.setupEmojiPickerListeners();
         this.setupToolbarListener();
         this.setupInputListeners();
         this.setupKeydownListeners();
@@ -60,7 +63,6 @@ const Editor = {
         this.updateView();
     },
 
-    // --- [NEW HELPER FUNCTION] ---
     /**
      * Pre-processes raw markdown text to insert blank lines between blockquotes
      * and subsequent paragraphs, making it compliant with the strict Markdown spec.
@@ -83,9 +85,40 @@ const Editor = {
         return processedLines.join('\n');
     },
 
+    /* insert text into the chat window on clicks (mainly for emojis) */
+    insertText: function(text) {
+        const { editor, markdownView, isMarkdownMode } = this.state;
+        if (isMarkdownMode) {
+            // For the textarea, we can just insert at the cursor position
+            const start = markdownView.selectionStart;
+            const end = markdownView.selectionEnd;
+            const currentText = markdownView.value;
+            markdownView.value = currentText.substring(0, start) + text + currentText.substring(end);
+            markdownView.focus();
+            // Move cursor to after the inserted text
+            markdownView.selectionStart = markdownView.selectionEnd = start + text.length;
+        } else {
+            // For the contenteditable div, the 'insertText' command is the standard way
+            editor.focus();
+            document.execCommand('insertText', false, text);
+        }
+        // Manually trigger the input event so other functions (like resizing) run
+        const activeInput = isMarkdownMode ? markdownView : editor;
+        activeInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    },
+
+    /**
+     * Sets focus to the currently active input (either Markdown or WYSIWYG).
+     */
+    focusActiveInput: function() {
+        const { editor, markdownView, isMarkdownMode } = this.state;
+        const activeInput = isMarkdownMode ? markdownView : editor;
+        // The timeout ensures the browser has finished rendering before we try to focus.
+        setTimeout(() => activeInput.focus(), 0);
+    },
+
     // --- UI Update Functions ---
     updateView: function() {
-        // ... (this function is unchanged)
         const { editor, markdownView, topToolbar, isMarkdownMode } = this.state;
         if (isMarkdownMode) {
             editor.style.display = 'none';
@@ -97,12 +130,11 @@ const Editor = {
             editor.style.display = 'block';
             topToolbar.classList.remove('toolbar-hidden');
             editor.focus();
-            this.resizeActiveInput();
         }
+        this.resizeActiveInput();
         this.updateSendButton();
     },
     updateSendButton: function() {
-        // ... (this function is unchanged)
         const { sendButton, isMarkdownMode } = this.state;
         if (isMarkdownMode) {
             sendButton.innerHTML = `<span>Send</span><span class="send-shortcut"><i class="bi bi-arrow-return-left"></i></span>`;
@@ -135,7 +167,6 @@ const Editor = {
         }
     },
     isSelectionInBlockquote: function() {
-        // ... (this function is unchanged)
         const selection = window.getSelection();
         if (!selection.rangeCount) return false;
         let node = selection.getRangeAt(0).startContainer;
@@ -147,7 +178,6 @@ const Editor = {
         return false;
     },
     sendTypingStatus: function(isTyping) {
-        // ... (this function is unchanged)
         const { typingSender } = this.state;
         const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
         if (activeConv) {
@@ -158,8 +188,25 @@ const Editor = {
     },
 
     // --- Event Listener Setup Functions ---
+    setupEmojiPickerListeners: function() {
+        const { emojiButton, emojiPicker } = this.state;
+        const pickerContainer = document.getElementById('emoji-picker-container');
+
+        // Toggle picker visibility when the button is clicked
+        emojiButton.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent the document click listener from firing immediately
+            const isHidden = pickerContainer.style.display === 'none';
+            pickerContainer.style.display = isHidden ? 'block' : 'none';
+        });
+
+        // Insert the selected emoji's unicode character when an emoji is picked
+        emojiPicker.addEventListener('emoji-click', event => {
+            this.insertText(event.detail.unicode);
+            // Hide picker after selection
+            pickerContainer.style.display = 'none';
+        });
+    },
     setupToolbarListener: function() {
-        // ... (this function is unchanged)
         this.state.topToolbar.addEventListener('mousedown', e => {
             e.preventDefault();
             const button = e.target.closest('button');
@@ -176,7 +223,6 @@ const Editor = {
         });
     },
     setupInputListeners: function() {
-        // ... (this function is unchanged)
         this.state.editor.addEventListener('input', () => {
             this.updateStateAndButtons();
             this.resizeActiveInput();
@@ -197,7 +243,6 @@ const Editor = {
         });
     },
     setupKeydownListeners: function() {
-        // ... (this function is unchanged)
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const keydownHandler = (e) => {
             if (!this.state.isMarkdownMode && e.key === 'Enter' && !e.shiftKey) {
@@ -236,10 +281,9 @@ const Editor = {
         this.state.markdownView.addEventListener('keydown', keydownHandler);
     },
     setupFormListeners: function() {
-        // This is the only function with a change
         this.state.messageForm.addEventListener('submit', (e) => {
             if (this.state.isMarkdownMode) {
-                // [THE FIX] Pre-process the markdown before assigning it to the hidden input
+                // Pre-process the markdown before assigning it to the hidden input
                 const rawMarkdown = this.state.markdownView.value;
                 this.state.hiddenInput.value = this.preprocessMarkdown(rawMarkdown);
             } else {
@@ -266,7 +310,6 @@ const Editor = {
         });
     },
     setupToggleButtonListener: function() {
-        // ... (this function is unchanged)
         this.state.formatToggleButton.addEventListener('click', () => {
             this.state.isMarkdownMode = !this.state.isMarkdownMode;
             this.updateView();
@@ -284,6 +327,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Listen for our custom event to initialize the chat editor scripts.
     document.body.addEventListener('chatInputLoaded', () => Editor.initialize());
+    // Global click listener to hide the emoji picker if clicked outside
+    document.addEventListener('click', (e) => {
+        const pickerContainer = document.getElementById('emoji-picker-container');
+        if (pickerContainer && pickerContainer.style.display === 'block') {
+            // Hide if the click is outside the picker AND not on the toggle button
+            if (!pickerContainer.contains(e.target) && !e.target.closest('#emoji-btn')) {
+                pickerContainer.style.display = 'none';
+            }
+        }
+    });
 
     const isUserNearBottom = () => {
         if (!messagesContainer) return false;
@@ -320,6 +373,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
             if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
+
+            // [THE FIX]
+            // After a new channel/DM is loaded into the main view,
+            // we programmatically refocus the chat input for the user.
+            // This restores the expected behavior of being able to type immediately.
+            Editor.focusActiveInput();
         }
     });
 

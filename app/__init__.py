@@ -6,6 +6,7 @@ from .sso import init_sso
 import markdown
 from markupsafe import Markup
 import bleach
+import emoji # Import the new library
 
 sock = Sock() # Create a Sock instance
 
@@ -36,6 +37,11 @@ def create_app(config_class=Config):
         """
         Converts Markdown content to sanitized HTML with syntax highlighting.
         """
+        # First, convert emoji shortcodes (e.g., :joy:) into unicode characters.
+        # The 'alias' language allows for common shortcodes like :D
+        content_with_emojis = emoji.emojize(content, language='alias')
+
+        # Define the tags and attributes that we will allow in the final HTML
         allowed_tags = [
             'p', 'pre', 'code', 'blockquote', 'strong', 'em', 'h1', 'h2', 'h3',
             'ul', 'ol', 'li', 'br', 'span', 'div'
@@ -44,12 +50,9 @@ def create_app(config_class=Config):
             '*': ['class'],
         }
 
-        # [THE DEFINITIVE FIX]
-        # 1. 'extra' runs first, correctly parsing block elements (quotes, lists).
-        # 2. 'nl2br' runs after, converting any remaining single newlines into <br> tags.
-        # This is the correct combination for chat-style markdown.
+        # Setup the markdown
         html = markdown.markdown(
-            content,
+            content_with_emojis, # Use the emoji-processed content
             extensions=['extra', 'codehilite', 'nl2br'],
             extension_configs={
                 'codehilite': {
