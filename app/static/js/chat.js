@@ -6,6 +6,57 @@
  * 2. General page-level logic for the chat interface (scrolling, code blocks, modals).
  */
 
+// Object to manage all notification-related logic
+const NotificationManager = {
+    audio: new Audio('/audio/notification.mp3'), // Pre-load the audio file
+
+    initialize: function() {
+        if (!("Notification" in window)) {
+            console.log("This browser does not support desktop notification");
+            return;
+        }
+
+        const button = document.getElementById('enable-notifications-btn');
+        if (!button) return;
+
+        if (Notification.permission === "default") {
+            button.style.display = 'block';
+            button.addEventListener('click', this.requestPermission);
+        }
+    },
+
+    requestPermission: function() {
+        Notification.requestPermission().then(permission => {
+            const button = document.getElementById('enable-notifications-btn');
+            if (button) button.style.display = 'none';
+        });
+    },
+
+    playSound: function() {
+        this.audio.play().catch(error => {
+            // Autoplay was prevented. This can happen if the user hasn't interacted
+            // with the page yet. It's often not a critical error to show.
+            console.log("Audio play failed:", error);
+        });
+    },
+
+    showNotification: function(data) {
+        if (Notification.permission === "granted") {
+            // Play the sound when showing the notification
+            this.playSound();
+
+            const notification = new Notification(data.title, {
+                body: data.body,
+                icon: data.icon,
+                tag: data.tag
+            });
+            notification.onclick = () => {
+                window.focus();
+            };
+        }
+    }
+};
+
 // --- 1. THE CHAT INPUT EDITOR ---
 const Editor = {
     // This state object holds all variables and element references for the editor instance.
@@ -321,6 +372,8 @@ const Editor = {
 // --- 2. GENERAL PAGE-LEVEL LOGIC ---
 
 document.addEventListener('DOMContentLoaded', () => {
+    NotificationManager.initialize();
+
     // --- Element References ---
     const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
@@ -383,14 +436,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
+        try {
+            const data = JSON.parse(event.detail.message);
+            if (typeof data === 'object' && data.type) {
+                if (data.type === 'notification') {
+                    NotificationManager.showNotification(data);
+                } else if (data.type === 'sound') {
+                    NotificationManager.playSound();
+                }
+                return; // Message was a JSON payload, stop processing.
+            }
+        } catch (e) {
+            // Not JSON, fall through to process as HTML.
+        }
+
+        // Process as an HTML swap for the message list
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
         if (lastMessage) {
             setTimeout(() => processCodeBlocks(lastMessage), 50);
         }
+
         if (isUserNearBottom()) {
             scrollLastMessageIntoView();
         } else {
-            if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
+            if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
         }
     });
 

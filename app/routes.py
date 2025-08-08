@@ -765,16 +765,21 @@ def chat(ws):
                 members = User.select().where(User.id.in_(user_ids))
 
             for member in members:
+                # Don't notify the person who sent the message or users who aren't connected
                 if member.id == ws.user.id or member.id not in chat_manager.all_clients:
                     continue
 
                 member_ws = chat_manager.all_clients[member.id]
+
+                # If the user is actively viewing this conversation, do nothing.
                 if getattr(member_ws, 'channel_id', None) == conv_id_str:
                     continue
 
+                # This user is eligible for notifications. Get their status record.
                 status, _ = UserConversationStatus.get_or_create(user=member, conversation=conversation)
-                notification_html = None
 
+                # 1. Handle UI badge/bolding updates (this part is mostly the same)
+                notification_html = None
                 if conversation.type == 'channel':
                     channel_model = Channel.get_by_id(conversation.conversation_id_str.split('_')[1])
                     link_text = f"# {channel_model.name}"
@@ -785,7 +790,7 @@ def chat(ws):
                         notification_html = render_template('partials/unread_badge.html', conv_id_str=conv_id_str, count=total_mentions, link_text=link_text, hx_get_url=hx_get_url)
                     elif Message.select().where((Message.conversation == conversation) & (Message.created_at > status.last_read_timestamp)).exists():
                         notification_html = render_template('partials/bold_link.html', conv_id_str=conv_id_str, link_text=link_text, hx_get_url=hx_get_url)
-                else:
+                else: # DM
                     link_text = ws.user.display_name or ws.user.username
                     hx_get_url = url_for('main.get_dm_chat', other_user_id=ws.user.id)
                     new_count = Message.select().where((Message.conversation == conversation) & (Message.created_at > status.last_read_timestamp) & (Message.user != member)).count()
@@ -794,6 +799,29 @@ def chat(ws):
 
                 if notification_html:
                     member_ws.send(notification_html)
+
+                # 2. Handle Desktop Notification with Cooldown
+                now = datetime.datetime.now()
+                send_notification = False
+                if status.last_notified_timestamp is None or (now - status.last_notified_timestamp) > datetime.timedelta(seconds=60):
+                    send_notification = True
+
+                if send_notification:
+                    notification_payload = {
+                        "type": "notification",
+                        "title": f"New message from {new_message.user.display_name or new_message.user.username}",
+                        "body": new_message.content,
+                        "icon": url_for('static', filename='favicon.ico', _external=True),
+                        "tag": conv_id_str
+                    }
+                    member_ws.send(json.dumps(notification_payload))
+                    # Update the timestamp in the database
+                    status.last_notified_timestamp = now
+                    status.save()
+                else:
+                    # 3. If notification is on cooldown, just send a sound trigger
+                    sound_payload = {"type": "sound"}
+                    member_ws.send(json.dumps(sound_payload))
 
     except Exception as e:
         print(f"ERROR: An exception occurred for user '{getattr(ws, 'user', 'unknown')}': {e}")

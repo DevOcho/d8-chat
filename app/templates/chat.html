@@ -45,6 +45,10 @@
             <i class="bi bi-plus-square"></i>
         </button>
     </div>
+    <!-- Button to request notification permissions -->
+    <button id="enable-notifications-btn" class="btn btn-sm text-secondary w-100 text-start" style="display: none;">
+        <i class="bi bi-bell-fill me-1"></i> Enable Notifications
+    </button>
     <ul id="channel-list" class="list-unstyled">
         {% for channel in channels %}
         {% set conv_id_str = "channel_" ~ channel.id %}
