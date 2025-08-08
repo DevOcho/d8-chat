@@ -1,9 +1,10 @@
 Context:
 
-find . -type f -not -path "./.git/*" -not -path "./bin/*" -not -path "./lib/*" -not -path "*/__pycache__/*" -not -name "*.pyc" -not -path "./app/static/img/*" -not -path "./app/static/fonts/*" -exec sh -c 'echo "--- {} ---"; echo; cat "{}"; echo; echo' \;
+find . -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" \) -not -path "*/local/*" -exec sh -c 'echo "File: {}"; cat {}; echo' \;
 
 tree -I 'bin|lib|.git|__pycache__|*.pyc'
 
+initial prompt:
 
 I want to create an AI prompt that will help me work with AI to code a slack clone.  I don't want video chats or phone calls.  Just regular chat stuff.  Direct messages, public and private channels with moderators, etc.  I want image support and emojies in the chat.  I'd like the same styles for the chat bar (press up to edit, /commands, etc.).  I'd also like a full administration panel that allows me to create users and set permissions on the users.  I don't want a link to invite users or self-signup.  This will be used by businesses so users never need to just show up.
 

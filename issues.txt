@@ -1,12 +1,12 @@
 Current issues with the slack_clone:
 
-We need a formatting text area similar to Quill.js
+Can't reply to other people's messages.  Only to your own.
 
 We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.
 
 We need to make links clickable
 
-Desktop notifications!
+Reactions to messages would be nice.
 
 I also think we are going to need to implement threads but I only want them in channels.  I like the WhatsApp reply feature more than threads so maybe that's a better overall experience in Direct messages.
 
@@ -16,9 +16,9 @@ I want to add the @ feature for channels, where the message is highlighted (wher
 
 We need to be able to upload files
 
-We need emojis and gifs
+We need gifs
 
-We need a dark mode.
+---
 
 We need a help screen or perhaps a full docs for the options in the chat.
 

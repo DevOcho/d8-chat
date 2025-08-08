@@ -52,5 +52,48 @@ def create_tables():
         db.create_tables(ALL_MODELS)
         print("Tables created successfully.")
 
+
+def init_data():
+    """Create the initialization data"""
+
+    # Create the workspace
+    workspace, created = Workspace.get_or_create(name='DevOcho')
+    if created:
+        print(f"Workspace '{workspace.name}' created.")
+    else:
+        print(f"Workspace '{workspace.name}' already exists.")
+
+    # Create the initial channels
+    general_channel, created = Channel.get_or_create(
+        workspace=workspace,
+        name='general',
+        defaults={'is_private': False, 'topic': 'General announcements and discussions.'}
+    )
+    if created:
+        print("Channel '#general' created.")
+
+    # Proactively create the conversation for the general channel
+    Conversation.get_or_create(
+        conversation_id_str=f"channel_{general_channel.id}",
+        defaults={'type': 'channel'}
+    )
+    print("Conversation for #general created.")
+
+    announcements_channel, created = Channel.get_or_create(
+        workspace=workspace,
+        name='announcements',
+        defaults={'is_private': False, 'topic': 'Company-wide announcements.'}
+    )
+    if created:
+        print("Channel '#announcements' created.")
+
+    Conversation.get_or_create(
+        conversation_id_str=f"channel_{announcements_channel.id}",
+        defaults={'type': 'channel'}
+    )
+    print("Conversation for #announcements created.")
+
+
 if __name__ == '__main__':
     create_tables()
+    init_data()

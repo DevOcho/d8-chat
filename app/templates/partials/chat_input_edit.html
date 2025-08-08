@@ -1,27 +1,34 @@
 <div id="chat-input-container" class="chat-input-form">
-    <form ws-send id="message-form" autocomplete="off">
-        <input type="hidden" name="parent_message_id" value="{{ message.id }}">
-        <div class="wysiwyg-editor-container">
+    <!--
+      This form has two key HTMX attributes:
+      1. hx-put/hx-target: Submits the form via PUT to update the original message in the chat history.
+      2. hx-on::after-request: A hook that fires after the PUT is complete. If it was successful,
+         it triggers a separate GET request to load the default chat input, effectively exiting "edit mode".
+    -->
+    <form hx-put="/chat/message/{{ message.id }}"
+          hx-target="#message-{{ message.id }}"
+          hx-swap="outerHTML"
+          hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/default', {target: '#chat-input-container', swap: 'outerHTML'})"
+          id="message-form"
+          autocomplete="off">
 
-            <!-- Quoted Message UI -->
-            <div class="quoted-reply p-2 rounded">
+        <div class="wysiwyg-editor-container">
+            <!-- Editing Block UI -->
+            <div class="editing-block p-2 rounded">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <strong class="d-block">Replying to {{ message.user.display_name or message.user.username }}</strong>
+                        <strong class="d-block">Editing Message</strong>
                         <p class="mb-0 text-muted">{{ message.content | truncate(150, True) }}</p>
                     </div>
-                    <!-- This button cancels the reply and loads the default input -->
-                    <button type="button" class="btn-close" aria-label="Cancel Reply" title="Cancel Reply"
+                    <button type="button" class="btn-close" aria-label="Cancel Edit" title="Cancel Edit"
                             hx-get="/chat/input/default"
                             hx-target="#chat-input-container"
                             hx-swap="outerHTML"></button>
                 </div>
             </div>
 
-            <!-- Typing indicator placeholder -->
             <div id="typing-indicator" class="text-muted small" style="height: 20px; padding-left: 0.75rem;"></div>
 
-            <!-- Top Toolbar (for WYSIWYG mode) -->
             <div class="wysiwyg-toolbar toolbar-hidden">
                 <button type="button" data-command="bold" title="Bold (Ctrl+B)"><i class="bi bi-type-bold"></i></button>
                 <button type="button" data-command="italic" title="Italic (Ctrl+I)"><i class="bi bi-type-italic"></i></button>
@@ -32,28 +39,25 @@
                 <button type="button" data-command="formatBlock" data-value="pre" title="Code Block"><i class="bi bi-code-slash"></i></button>
             </div>
 
-            <!-- [THE FIX] Rich editor is explicitly hidden -->
             <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true" style="display: none;"></div>
 
-            <!-- [THE FIX] Markdown view is explicitly visible -->
-            <textarea id="markdown-toggle-view" class="form-control" placeholder="Write a reply..." rows="1" style="display: block;"></textarea>
+            <!-- The textarea is pre-populated with the existing message content -->
+            <textarea id="markdown-toggle-view" class="form-control" rows="1" style="display: block;">{{ message.content }}</textarea>
 
-            <!-- Hidden textarea for form submission -->
-            <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>
+            <!-- This hidden input will hold the final markdown content for submission -->
+            <textarea id="chat-message-input" name="content" style="display: none;">{{ message.content }}</textarea>
 
-            <!-- Bottom Toolbar (always visible) -->
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                  <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting"><i class="bi bi-type"></i></button>
                  <button type="button" id="mention-btn" title="Mention User"><i class="bi bi-at"></i></button>
                  <button type="button" id="emoji-btn" title="Add Emoji"><i class="bi bi-emoji-smile"></i></button>
                  <div class="ms-auto d-flex align-items-center">
                     <button id="send-button" type="submit" class="btn btn-primary send-btn-dynamic">
-                        <!-- Button content will be injected by JavaScript -->
+                        Save Changes
                     </button>
                  </div>
             </div>
         </div>
-        <!-- Emoji picker container -->
         <div id="emoji-picker-container" class="position-relative" style="display: none;">
             <emoji-picker class="light"></emoji-picker>
         </div>
@@ -61,7 +65,7 @@
     <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
 </div>
 
-{# This script will trigger the main Editor object to initialize on these new elements #}
+{# This script triggers our main Editor object in chat.js to initialize these new elements #}
 <script>
     document.body.dispatchEvent(new Event('chatInputLoaded'));
 </script>

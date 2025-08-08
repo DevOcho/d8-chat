@@ -163,6 +163,18 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     
     /* Blockquotes */
     .message-content blockquote, .wysiwyg-content blockquote { border-left-color: cornflowerblue; color: #b9bbbe; }
+
+    .quoted-reply {
+        background-color: #2f3136; /* A darker background that fits the theme */
+        color: #b9bbbe; /* A light, readable text color */
+    }
+
+    /* Dark mode style for editing block */
+    .editing-block {
+        background-color: #494a2b; /* Dark yellow/olive */
+        border-left-color: #ffc107; /* Keep the amber color for visibility */
+        color: #b9bbbe;
+    }
     
     /* Profile Page Cards */
     .card { background-color: #36393f; border-color: #40444b; }

@@ -666,6 +666,19 @@ def update_theme():
     return "Invalid theme", 400
 
 
+@main_bp.route('/chat/message/<int:message_id>/load_for_edit')
+@login_required
+def load_message_for_edit(message_id):
+    """
+    Loads the main chat input component configured for editing a specific message.
+    """
+    message = Message.query.get_or_404(message_id)
+    # Security check: only the author of the message can load it for editing.
+    if message.user_id != g.user.id:
+        abort(403) # Forbidden
+    return render_template('partials/chat_input_edit.html', message=message)
+
+
 # --- WebSocket Handler ---
 @sock.route('/ws/chat')
 def chat(ws):

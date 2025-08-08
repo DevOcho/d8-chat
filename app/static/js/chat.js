@@ -186,24 +186,25 @@ const Editor = {
         this.updateSendButton();
     },
     updateSendButton: function() {
-        const { sendButton, isMarkdownMode } = this.state;
+        const { sendButton, isMarkdownMode, messageForm } = this.state;
+        const isReply = messageForm.querySelector('[name="parent_message_id"]');
+        const sendText = isReply ? "Reply" : "Send";
+
         if (isMarkdownMode) {
-            sendButton.innerHTML = `<span>Send</span><span class="send-shortcut"><i class="bi bi-arrow-return-left"></i></span>`;
-            sendButton.title = "Send (Enter)";
+            sendButton.innerHTML = `<span>${sendText}</span><span class="send-shortcut"><i class="bi bi-arrow-return-left"></i></span>`;
+            sendButton.title = `${sendText} (Enter)`;
         } else {
-            sendButton.innerHTML = `<span>Send</span><span class="send-shortcut"><kbd>Ctrl</kbd>+<i class="bi bi-arrow-return-left"></i></span>`;
-            sendButton.title = "Send (Ctrl+Enter)";
+            sendButton.innerHTML = `<span>${sendText}</span><span class="send-shortcut"><kbd>Ctrl</kbd>+<i class="bi bi-arrow-return-left"></i></span>`;
+            sendButton.title = `${sendText} (Ctrl+Enter)`;
         }
     },
     resizeActiveInput: function() {
-        // ... (this function is unchanged)
         const { editor, markdownView, isMarkdownMode } = this.state;
         const activeInput = isMarkdownMode ? markdownView : editor;
         activeInput.style.height = 'auto';
         activeInput.style.height = `${activeInput.scrollHeight}px`;
     },
     updateStateAndButtons: function() {
-        // ... (this function is unchanged)
         const { editor, hiddenInput, turndownService, blockquoteButton, topToolbar } = this.state;
         const htmlContent = editor.innerHTML;
         const markdownContent = turndownService.turndown(htmlContent).trim();
@@ -348,15 +349,26 @@ const Editor = {
             this.sendTypingStatus(false);
         });
 
+        // --- [THE FIX] ---
+        // This is the new, more robust logic for handling form clearing after send.
         this.state.messageForm.addEventListener('htmx:wsAfterSend', () => {
-            if (!document.querySelector('#chat-input-container .quoted-reply')) {
+            const isReply = this.state.messageForm.querySelector('[name="parent_message_id"]');
+
+            // If it was a reply, the cleanest way to reset the UI is to
+            // reload the default input partial from the server.
+            if (isReply) {
+                htmx.ajax('GET', '/chat/input/default', {
+                    target: '#chat-input-container',
+                    swap: 'outerHTML'
+                });
+            } else {
+                // Otherwise, just clear the existing editor's fields.
                 const { editor, markdownView, hiddenInput } = this.state;
                 editor.innerHTML = '';
                 markdownView.value = '';
                 hiddenInput.value = '';
-                editor.style.height = 'auto';
-                markdownView.style.height = 'auto';
-                this.state.isMarkdownMode ? markdownView.focus() : editor.focus();
+                this.resizeActiveInput(); // Reset height
+                this.focusActiveInput();
             }
         });
     },
@@ -427,10 +439,6 @@ document.addEventListener('DOMContentLoaded', () => {
             scrollLastMessageIntoView();
             if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
 
-            // [THE FIX]
-            // After a new channel/DM is loaded into the main view,
-            // we programmatically refocus the chat input for the user.
-            // This restores the expected behavior of being able to type immediately.
             Editor.focusActiveInput();
         }
     });
