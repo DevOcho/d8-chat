@@ -6,6 +6,7 @@
             data-action="reply" title="Reply">
         <i class="bi bi-reply-fill"></i>
     </button>
+    {% if g.user.id == message.user.id %}
     <button class="btn btn-sm btn-light"
             hx-get="/chat/message/{{ message.id }}/load_for_edit"
             hx-target="#chat-input-container"
@@ -21,4 +22,5 @@
             data-action="delete" title="Delete">
         <i class="bi bi-trash"></i>
     </button>
+    {% endif %}
 </div>

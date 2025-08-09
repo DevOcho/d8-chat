@@ -1,6 +1,12 @@
+Current prompt:
+
+You've been assiting me in building a slack clone application and I'd like to continue adding features and fixing bugs in it.  We are using Python Flask, Python Peewee, HTMX, Bootstrap, websockets, etc.  You can use the code I will provide to gain additional context on the technology.  For example, the requirements.txt file to see the python modules installed.  I prefer short code snippets with explanations of where they go (line number suggestions when possible).  I also understand that occasionally it's easier to give me entire sections or files.  If you do that please give me the entire code and not most of it with commented out sections.  I can make copy paste errors if I don't realize you only want me to make small changes but give me large sections of code.
+
+Here is the code for context as well as a `tree` command to show you what I left out:
+
 Context:
 
-find . -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" \) -not -path "*/local/*" -exec sh -c 'echo "File: {}"; cat {}; echo' \;
+find . -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.txt" \) -not -path "*/local/*" -not -path "*/lib/*" -not -path "*/bin/*" -not -name "prompts.txt" -exec sh -c 'echo "File: {}"; cat {}; echo' \;find . -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.txt" \) -not -path "*/local/*" -not -path "*/lib/*" -not -path "*/bin/*" -not -name "prompts.txt" -exec sh -c 'echo "File: {}"; cat {}; echo' \;
 
 tree -I 'bin|lib|.git|__pycache__|*.pyc'
 

@@ -22,7 +22,7 @@
 
         <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
     </div>
-    {% if g.user and g.user.id == message.user.id %}
+    {% if g.user %}
         {% include 'partials/message_toolbar.html' %}
     {% endif %}
 </div>

@@ -165,7 +165,10 @@ const Editor = {
         const { editor, markdownView, isMarkdownMode } = this.state;
         const activeInput = isMarkdownMode ? markdownView : editor;
         // The timeout ensures the browser has finished rendering before we try to focus.
-        setTimeout(() => activeInput.focus(), 0);
+        if (activeInput && typeof activeInput.focus === 'function') {
+            // The timeout ensures the browser has finished rendering before we try to focus.
+            setTimeout(() => activeInput.focus(), 0);
+        }
     },
 
     // --- UI Update Functions ---
