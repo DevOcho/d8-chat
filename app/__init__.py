@@ -23,13 +23,11 @@ def create_app(config_class=Config):
     if not app.config['SECRET_KEY']:
         raise ValueError("A SECRET_KEY must be set in the configuration.")
 
+    initialize_db(app)
+
     # Initialize SSO
     init_sso(app)
     sock.init_app(app) # Initialize Sock with the app
-
-    # Initialize the database connection
-    with app.app_context():
-        initialize_db()
 
     # --- Register custom template filter for Markdown ---
     @app.template_filter('markdown')

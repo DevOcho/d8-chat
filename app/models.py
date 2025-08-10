@@ -1,14 +1,32 @@
 # app/models.py
+# This should work for both SQLite and PostgreSQL
 import datetime
+import os
+
 from peewee import (
-    Model, PostgresqlDatabase, TextField, CharField, BooleanField,
-    DateTimeField, ForeignKeyField, BigIntegerField, IdentityField, SQL,
+    Model, Proxy, TextField, CharField, BooleanField,
+    DateTimeField, ForeignKeyField, BigIntegerField, IdentityField, AutoField, SQL,
     CompositeKey
 )
+from playhouse.db_url import connect
 from urllib.parse import urlparse
 from config import Config
 
-db = PostgresqlDatabase(None)
+db = Proxy()
+
+IS_RUNNING_TESTS = 'PYTEST_CURRENT_TEST' in os.environ
+PrimaryKeyField = AutoField if IS_RUNNING_TESTS else IdentityField
+
+def initialize_db(app):
+    """
+    Initializes the database connection using the URI from the app's config.
+    This function should be called from the app factory.
+    """
+    db_url = app.config['DATABASE_URI']
+    # The `connect` function from playhouse correctly handles different
+    # database schemes (postgres, sqlite, etc.)
+    database = connect(db_url)
+    db.initialize(database)
 
 class BaseModel(Model):
     created_at = DateTimeField(default=datetime.datetime.now)
@@ -20,11 +38,11 @@ class BaseModel(Model):
         return super(BaseModel, self).save(*args, **kwargs)
 
 class Workspace(BaseModel):
-    id = IdentityField()
+    id = PrimaryKeyField()
     name = CharField(unique=True)
 
 class User(BaseModel):
-    id = IdentityField()
+    id = PrimaryKeyField()
     username = CharField(unique=True)
     email = CharField(unique=True)
     password_hash = CharField(null=True)
@@ -41,13 +59,13 @@ class User(BaseModel):
     wysiwyg_enabled = BooleanField(default=False, null=False)
 
 class WorkspaceMember(BaseModel):
-    id = IdentityField()
+    id = PrimaryKeyField()
     user = ForeignKeyField(User, backref='workspaces')
     workspace = ForeignKeyField(Workspace, backref='members')
     role = CharField(default='member')
 
 class Channel(BaseModel):
-    id = IdentityField()
+    id = PrimaryKeyField()
     workspace = ForeignKeyField(Workspace, backref='channels')
     name = CharField(max_length=80)
     topic = TextField(null=True)
@@ -56,20 +74,20 @@ class Channel(BaseModel):
         constraints = [SQL('UNIQUE(workspace_id, name)')]
 
 class ChannelMember(BaseModel):
-    id = IdentityField()
+    id = PrimaryKeyField()
     user = ForeignKeyField(User, backref='channels')
     channel = ForeignKeyField(Channel, backref='members')
 
 # This table will represent a "chat room", which can be a channel or a DM
 class Conversation(BaseModel):
-    id = IdentityField()
+    id = PrimaryKeyField()
     # A conversation_id string like "channel_1" or "dm_4_5"
     conversation_id_str = CharField(unique=True)
     # The type of conversation
     type = CharField() # 'channel' or 'dm'
 
 class Message(BaseModel):
-    id = IdentityField()
+    id = PrimaryKeyField()
     # Every message belongs to a single Conversation
     conversation = ForeignKeyField(Conversation, backref='messages')
     user = ForeignKeyField(User, backref='messages')
@@ -98,23 +116,3 @@ class UserConversationStatus(BaseModel):
     class Meta:
         # Ensures a user has only one status per conversation
         primary_key = CompositeKey('user', 'conversation')
-
-# Function to initialize the database connection
-def initialize_db():
-    """
-    Initializes the database connection using the DATABASE_URL from config.
-    """
-    # Parse the DATABASE_URL to get connection details
-    parsed_url = urlparse(Config.DATABASE_URL)
-
-    # The database name is the part of the path after the leading '/'
-    db_name = parsed_url.path[1:]
-
-    # Initialize the database proxy with the parsed details
-    db.init(
-        database=db_name,
-        user=parsed_url.username,
-        password=parsed_url.password,
-        host=parsed_url.hostname,
-        port=parsed_url.port
-    )

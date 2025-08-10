@@ -14,3 +14,4 @@ bleach
 emoji
 pytest
 pytest-flask
+pytest-cov

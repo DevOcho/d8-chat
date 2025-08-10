@@ -6,7 +6,7 @@ Here is the code for context as well as a `tree` command to show you what I left
 
 Context:
 
-find . -type f \( -name "*.html" -o -name "*.css" -o -name "*.js" -o -name "*.txt" \) -not -path "*/local/*" -not -path "*/lib/*" -not -path "*/bin/*" -not -name "prompts.txt" -not -name "issues.txt" -exec sh -c 'echo "File: {}"; cat {}; echo' \;
+find . -type f \( -name "*.html" -o -name "*.ini" -o -name "*.py" -o -name "*.css" -o -name "*.js" -o -name "*.txt" \) -not -path "*/local/*" -not -path "*/lib/*" -not -path "*/bin/*" -not -name "prompts.txt" -not -name "issues.txt" -exec sh -c 'echo "File: {}"; cat {}; echo' \;
 
 tree -I 'bin|lib|.git|__pycache__|*.pyc'
 

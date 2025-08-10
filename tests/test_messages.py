@@ -1,0 +1,133 @@
+import pytest
+from app.models import User, Channel, ChannelMember, Conversation, Message
+
+@pytest.fixture
+def setup_conversation(test_db):
+    """
+    A fixture that sets up a common scenario for message tests.
+    It creates a second user, a channel, adds both users, and has user1 post a message.
+    Returns a dictionary of the created objects.
+    """
+    # The default 'testuser' (id=1) already exists from conftest.
+    user1 = User.get_by_id(1)
+    # Create a second user for authorization tests.
+    user2 = User.create(id=2, username='anotheruser', email='another@example.com')
+
+    # Create a channel and its corresponding conversation record.
+    channel = Channel.create(workspace_id=1, name='test-channel')
+    conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel.id}",
+        type='channel'
+    )
+
+    # Add both users as members of the channel.
+    ChannelMember.create(user=user1, channel=channel)
+    ChannelMember.create(user=user2, channel=channel)
+
+    # User 1 posts an initial message.
+    message = Message.create(
+        user=user1,
+        conversation=conv,
+        content='Original message content'
+    )
+    return {
+        'user1': user1,
+        'user2': user2,
+        'message': message
+    }
+
+def test_update_message_success(logged_in_client, setup_conversation):
+    """
+    GIVEN a user who has posted a message
+    WHEN the user submits an edit for their own message
+    THEN the message should be updated in the database and show "(edited)".
+    """
+    message = setup_conversation['message']
+    new_content = 'This is the edited content.'
+
+    response = logged_in_client.put(
+        f'/chat/message/{message.id}',
+        data={'content': new_content}
+    )
+
+    assert response.status_code == 200
+    assert new_content.encode() in response.data
+    assert b'(edited)' in response.data
+
+    # Verify the change in the database
+    updated_message = Message.get_by_id(message.id)
+    assert updated_message.content == new_content
+    assert updated_message.is_edited is True
+
+def test_update_message_unauthorized(logged_in_client, setup_conversation):
+    """
+    GIVEN a message posted by user1
+    WHEN user2 tries to edit that message
+    THEN they should receive a 403 Forbidden error.
+    """
+    # Log in as the second user.
+    with logged_in_client.session_transaction() as sess:
+        sess['user_id'] = 2
+
+    message = setup_conversation['message']
+    original_content = message.content
+    response = logged_in_client.put(
+        f'/chat/message/{message.id}',
+        data={'content': 'unauthorized edit attempt'}
+    )
+
+    assert response.status_code == 403
+
+    # Verify the message was NOT changed in the database
+    db_message = Message.get_by_id(message.id)
+    assert db_message.content == original_content
+    assert db_message.is_edited is False
+
+def test_delete_message_success(logged_in_client, setup_conversation):
+    """
+    GIVEN a user who has posted a message
+    WHEN the user deletes their own message
+    THEN the message should be removed from the database.
+    """
+    message = setup_conversation['message']
+    message_id = message.id
+    assert Message.get_or_none(id=message_id) is not None
+
+    response = logged_in_client.delete(f'/chat/message/{message_id}')
+
+    assert response.status_code == 204  # 204 No Content is standard for successful DELETE
+    assert Message.get_or_none(id=message_id) is None
+
+def test_delete_message_unauthorized(logged_in_client, setup_conversation):
+    """
+    GIVEN a message posted by user1
+    WHEN user2 tries to delete that message
+    THEN they should receive a 403 Forbidden error.
+    """
+    # Log in as the second user.
+    with logged_in_client.session_transaction() as sess:
+        sess['user_id'] = 2
+
+    message = setup_conversation['message']
+    response = logged_in_client.delete(f'/chat/message/{message.id}')
+
+    assert response.status_code == 403
+    assert Message.get_or_none(id=message.id) is not None # Verify it was not deleted
+
+def test_get_reply_chat_input(logged_in_client, setup_conversation):
+    """
+    WHEN a user clicks the 'reply' button on a message
+    THEN the correct reply-context input form should be returned.
+    """
+    message = setup_conversation['message']
+    user = setup_conversation['user1']
+    response = logged_in_client.get(f'/chat/message/{message.id}/reply')
+
+    assert response.status_code == 200
+
+    expected_reply_string = f"Replying to {user.display_name}".encode()
+    assert expected_reply_string in response.data
+
+    assert b'Original message content' in response.data
+    # Check for the hidden input that tracks the parent message
+    assert f'name="parent_message_id" value="{message.id}"'.encode() in response.data
