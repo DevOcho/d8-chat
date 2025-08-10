@@ -14,11 +14,11 @@
                 <button type="button" data-command="formatBlock" data-value="pre" title="Code Block"><i class="bi bi-code-slash"></i></button>
             </div>
 
-            <!-- Rich editor is now hidden by default -->
-            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true"></div>
+            <!-- Rich editor -->
+            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true" style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %};"></div>
 
-            <!-- Markdown view is now visible by default -->
-            <textarea id="markdown-toggle-view" class="form-control" rows="1"></textarea>
+            <!-- Markdown view -->
+            <textarea id="markdown-toggle-view" class="form-control" rows="1" style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %};"></textarea>
 
             <!-- Hidden textarea that will be sent to the server -->
             <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>

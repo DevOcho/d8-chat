@@ -88,6 +88,8 @@ const Editor = {
             return;
         }
 
+        const isMarkdownMode = !!(elements.markdownView && elements.markdownView.style.display !== 'none');
+
         const turndownService = new TurndownService({
             headingStyle: 'atx',
             codeBlockStyle: 'fenced',
@@ -101,7 +103,7 @@ const Editor = {
         this.state = {
             ...elements,
             turndownService,
-            isMarkdownMode: true,
+            isMarkdownMode,
             typingTimer: null
         };
 
@@ -204,8 +206,13 @@ const Editor = {
     resizeActiveInput: function() {
         const { editor, markdownView, isMarkdownMode } = this.state;
         const activeInput = isMarkdownMode ? markdownView : editor;
-        activeInput.style.height = 'auto';
-        activeInput.style.height = `${activeInput.scrollHeight}px`;
+        // trying to do the height calculation after the htmx update
+        setTimeout(() => {
+            if (activeInput) {
+                activeInput.style.height = 'auto';
+                activeInput.style.height = `${activeInput.scrollHeight}px`;
+            }
+        }, 0);
     },
     updateStateAndButtons: function() {
         const { editor, hiddenInput, turndownService, blockquoteButton, topToolbar } = this.state;
@@ -379,6 +386,12 @@ const Editor = {
         this.state.formatToggleButton.addEventListener('click', () => {
             this.state.isMarkdownMode = !this.state.isMarkdownMode;
             this.updateView();
+
+            const wysiwygIsEnabled = !this.state.isMarkdownMode;
+            htmx.ajax('PUT', '/chat/user/preference/wysiwyg', {
+                values: { 'wysiwyg_enabled': wysiwygIsEnabled },
+                swap: 'none' // We don't need to swap any HTML content
+            });
         });
     }
 };

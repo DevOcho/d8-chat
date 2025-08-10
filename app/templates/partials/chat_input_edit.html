@@ -39,10 +39,11 @@
                 <button type="button" data-command="formatBlock" data-value="pre" title="Code Block"><i class="bi bi-code-slash"></i></button>
             </div>
 
-            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true" style="display: none;"></div>
+            <!-- Rich Text Format -->
+            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true" style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %};"></div>
 
-            <!-- The textarea is pre-populated with the existing message content -->
-            <textarea id="markdown-toggle-view" class="form-control" rows="1" style="display: block;">{{ message.content }}</textarea>
+            <!-- Markdow Format -->
+            <textarea id="markdown-toggle-view" class="form-control" rows="1" style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %};">{{ message.content }}</textarea>
 
             <!-- This hidden input will hold the final markdown content for submission -->
             <textarea id="chat-message-input" name="content" style="display: none;">{{ message.content }}</textarea>

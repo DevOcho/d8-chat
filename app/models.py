@@ -38,6 +38,7 @@ class User(BaseModel):
     timezone = CharField(null=True, default='AST')
     presence_status = CharField(default='online') # 'online', 'away', or 'busy'
     theme = CharField(default='system') # 'light', 'dark', or 'system'
+    wysiwyg_enabled = BooleanField(default=False, null=False)
 
 class WorkspaceMember(BaseModel):
     id = IdentityField()

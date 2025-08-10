@@ -1,7 +1,5 @@
 Current issues with the slack_clone:
 
-Can't reply to other people's messages.  Only to your own.
-
 We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.
 
 We need to make links clickable

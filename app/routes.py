@@ -43,6 +43,17 @@ def login_required(view):
         return view(**kwargs)
     return wrapped_view
 
+# --- Helpers ---
+def to_html(text):
+    """
+    Converts markdown text to HTML, using the same extensions as the
+    Jinja filter for consistency.
+    """
+    return markdown.markdown(text, extensions=[
+        'fenced_code', 'codehilite', 'sane_lists', 'nl2br'
+    ])
+
+# --- Routes ---
 @main_bp.route('/')
 def index():
     return render_template('index.html')
@@ -666,16 +677,48 @@ def update_theme():
     return "Invalid theme", 400
 
 
+@main_bp.route('/chat/user/preference/wysiwyg', methods=['PUT'])
+@login_required
+def set_wysiwyg_preference():
+    """Updates the user's preference for the WYSIWYG editor."""
+    # The value comes from our JS, default to 'false' if not provided
+    enabled_str = request.form.get('wysiwyg_enabled', 'false')
+    enabled = enabled_str.lower() == 'true'
+
+    # Update the user record only if the value has changed
+    if g.user.wysiwyg_enabled != enabled:
+        user = User.get_by_id(g.user.id)
+        user.wysiwyg_enabled = enabled
+        user.save()
+        # g.user is a snapshot from the start of the request,
+        # so we update it too for the current request context.
+        g.user.wysiwyg_enabled = enabled
+
+    # Return a 204 No Content response, as HTMX doesn't need to swap anything
+    return '', 204
+
+
 @main_bp.route('/chat/message/<int:message_id>/load_for_edit')
 @login_required
 def load_message_for_edit(message_id):
     """
     Loads the main chat input component configured for editing a specific message.
     """
-    message = Message.query.get_or_404(message_id)
-    # Security check: only the author of the message can load it for editing.
-    if message.user_id != g.user.id:
-        abort(403) # Forbidden
+    try:
+        message = Message.get_by_id(message_id)
+        if message.user_id != g.user.id:
+            return "Unauthorized", 403
+
+        # Convert markdown to HTML for the WYSIWYG view
+        message_content_html = to_html(message.content)
+
+        return render_template(
+            'partials/chat_input_edit.html',
+            message=message,
+            message_content_html=message_content_html
+        )
+    except Message.DoesNotExist:
+        return "Message not found", 404
     return render_template('partials/chat_input_edit.html', message=message)
 
 

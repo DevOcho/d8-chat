@@ -32,11 +32,11 @@
                 <button type="button" data-command="formatBlock" data-value="pre" title="Code Block"><i class="bi bi-code-slash"></i></button>
             </div>
 
-            <!-- [THE FIX] Rich editor is explicitly hidden -->
-            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true" style="display: none;"></div>
+            <!-- Rich editor -->
+            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true" style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %};"></div>
 
-            <!-- [THE FIX] Markdown view is explicitly visible -->
-            <textarea id="markdown-toggle-view" class="form-control" placeholder="Write a reply..." rows="1" style="display: block;"></textarea>
+            <!-- Markdown view -->
+            <textarea id="markdown-toggle-view" class="form-control" placeholder="Write a reply..." rows="1" style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %};"></textarea>
 
             <!-- Hidden textarea for form submission -->
             <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>
