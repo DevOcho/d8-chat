@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, g
 from flask_sock import Sock
 from config import Config
 from .models import initialize_db
@@ -43,11 +43,14 @@ def create_app(config_class=Config):
 
         # Define the tags and attributes that we will allow in the final HTML
         allowed_tags = [
-            'p', 'pre', 'code', 'blockquote', 'strong', 'em', 'h1', 'h2', 'h3',
-            'ul', 'ol', 'li', 'br', 'span', 'div'
+            'p', 'br', 'strong', 'em', 'del', 'ul', 'ol', 'li', 'blockquote',
+            'pre', 'code', 'span', 'div', 'a',
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'table', 'thead', 'tbody', 'tr', 'th', 'td'
         ]
         allowed_attrs = {
             '*': ['class'],
+            'a': ['href', 'rel', 'target'],
         }
 
         # Setup the markdown
@@ -63,9 +66,18 @@ def create_app(config_class=Config):
             }
         )
 
-        safe_html = bleach.clean(html, tags=allowed_tags, attributes=allowed_attrs)
+        # Clickable links
+        def set_link_attrs(attrs, new=False):
+            attrs[(None, 'target')] = '_blank'
+            attrs[(None, 'rel')] = 'noopener noreferrer'
+            return attrs
+        linkified_html = bleach.linkify(html, callbacks=[set_link_attrs], skip_tags=['pre'])
+
+        # Santize HTML
+        safe_html = bleach.clean(linkified_html, tags=allowed_tags, attributes=allowed_attrs)
 
         return Markup(safe_html)
+
 
     # Import and register blueprints
     from .routes import main_bp, admin_bp

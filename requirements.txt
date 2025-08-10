@@ -12,3 +12,5 @@ Markdown
 Pygments
 bleach
 emoji
+pytest
+pytest-flask

@@ -6,6 +6,17 @@
     </div>
 
     <div id="message-list">
+        {% if messages and messages|length == PAGE_SIZE %}
+        <div class="text-center"
+             hx-get="{{ url_for('main.get_older_messages', conversation_id='channel_' ~ channel.id, before_message_id=messages[0].id) }}"
+             hx-trigger="intersect once"
+             hx-swap="outerHTML"
+             hx-target="this">
+            <div class="spinner-border spinner-border-sm my-3" role="status">
+                <span class="visually-hidden">Loading older messages...</span>
+            </div>
+        </div>
+        {% endif %}
         {% set ns = namespace(first_unread_found=false) %}
         {% for message in messages %}
             {# Check if this is the first unread message #}

@@ -2,8 +2,6 @@ Current issues with the slack_clone:
 
 We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.
 
-We need to make links clickable
-
 Reactions to messages would be nice.
 
 I also think we are going to need to implement threads but I only want them in channels.
@@ -12,7 +10,7 @@ I want the side bar to only show a max number of people on the side nav.  Let's 
 
 I want to add the @ feature for channels, where the message is highlighted (where you were @'d) and the only unread messages counts for channels will be where you were @'d.  Otherwise it will just bold them as having messages that you haven't read but it won't actually show the red badge (unless you've been @'d in the channel).
 
-We need to be able to upload files
+We need to be able to upload files and have avatars and inline images.
 
 We need a way to search and add gifs
 

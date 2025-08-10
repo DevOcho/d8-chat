@@ -18,6 +18,9 @@ main_bp = Blueprint('main', __name__)
 # Admin blueprint for admin-specific routes
 admin_bp = Blueprint('admin', __name__)
 
+# Number of messages per "page" meaning how many we will load at a time if they scroll back up
+PAGE_SIZE = 30
+
 # A central map for presence status to Bootstrap CSS classes.
 STATUS_CLASS_MAP = {
     'online': 'bg-success',
@@ -195,11 +198,11 @@ def get_channel_chat(channel_id):
             (Mention.user == m.user_id) & (Mention.message == m.message_id)
             for m in mentions_to_clear
         ]
-        
+
         # Use reduce() with operator.or_ to chain the expressions together,
         # creating a single WHERE clause like: (expr1) OR (expr2) OR ...
         where_clause = reduce(operator.or_, expressions)
-        
+
         # Execute the single DELETE query.
         Mention.delete().where(where_clause).execute()
 
@@ -210,9 +213,11 @@ def get_channel_chat(channel_id):
     status.save()
 
     # Get the messages and count of the members for the template
-    messages = (Message.select()
-                .where(Message.conversation == conversation)
-                .order_by(Message.created_at.asc()))
+    messages_query = (Message.select()
+                          .where(Message.conversation == conversation)
+                          .order_by(Message.created_at.desc())
+                          .limit(PAGE_SIZE))
+    messages = list(reversed(messages_query))
     members_count = ChannelMember.select().where(ChannelMember.channel == channel).count()
 
     # We will use a header and a message template to display with HTMX OOB swaps
@@ -226,7 +231,8 @@ def get_channel_chat(channel_id):
         channel=channel,
         messages=messages,
         last_read_timestamp=last_read_timestamp,
-        mention_message_ids=mention_message_ids
+        mention_message_ids=mention_message_ids,
+        PAGE_SIZE=PAGE_SIZE
     )
 
     # After marking as read, send back a command to clear the badge
@@ -595,13 +601,15 @@ def get_dm_chat(other_user_id):
     # Also ensure a status record exists for the other user
     UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
 
-    messages = (Message.select()
-                .where(Message.conversation == conversation)
-                .order_by(Message.created_at.asc()))
+    messages_query = (Message.select()
+                      .where(Message.conversation == conversation)
+                      .order_by(Message.created_at.desc())
+                      .limit(PAGE_SIZE))
+    messages = list(reversed(messages_query))
 
     # Header and message templates for a HTMX OOB Swap
     header_html = render_template('partials/dm_header.html', other_user=other_user)
-    messages_html = render_template('partials/dm_messages.html', messages=messages, other_user=other_user, last_read_timestamp=last_read_timestamp)
+    messages_html = render_template('partials/dm_messages.html', messages=messages, other_user=other_user, last_read_timestamp=last_read_timestamp, PAGE_SIZE=PAGE_SIZE)
 
     # Clear the new messages badge
     clear_badge_html = ""
@@ -720,6 +728,47 @@ def load_message_for_edit(message_id):
     except Message.DoesNotExist:
         return "Message not found", 404
     return render_template('partials/chat_input_edit.html', message=message)
+
+
+@main_bp.route('/chat/messages/older/<string:conversation_id>')
+@login_required
+def get_older_messages(conversation_id):
+    """Fetches a batch of older messages for a given conversation."""
+    before_message_id = request.args.get('before_message_id', type=int)
+    if not before_message_id:
+        return "Missing 'before_message_id'", 400
+
+    try:
+        # Get the timestamp of the message we are paginating from
+        cursor_message = Message.get_by_id(before_message_id)
+        cursor_timestamp = cursor_message.created_at
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+    # Find the corresponding conversation record
+    conversation = Conversation.get_or_none(conversation_id_str=conversation_id)
+    if not conversation:
+        return "Conversation not found", 404
+
+    # Base query
+    query = (Message.select()
+             .where(
+                 (Message.conversation == conversation) &
+                 (Message.created_at < cursor_timestamp)
+             )
+             .order_by(Message.created_at.desc())
+             .limit(PAGE_SIZE))
+
+    # Fetch and reverse the messages for correct chronological display
+    messages = list(reversed(query))
+
+    # The new partial handles rendering the messages and the next trigger
+    return render_template(
+        'partials/message_batch.html',
+        messages=messages,
+        conversation_id=conversation_id,
+        PAGE_SIZE=PAGE_SIZE
+    )
 
 
 # --- WebSocket Handler ---
