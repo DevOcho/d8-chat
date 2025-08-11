@@ -1,5 +1,6 @@
 import pytest
 from app.models import User, Channel, ChannelMember, Conversation, Message
+from app.routes import PAGE_SIZE
 
 @pytest.fixture
 def setup_conversation(test_db):
@@ -131,3 +132,93 @@ def test_get_reply_chat_input(logged_in_client, setup_conversation):
     assert b'Original message content' in response.data
     # Check for the hidden input that tracks the parent message
     assert f'name="parent_message_id" value="{message.id}"'.encode() in response.data
+
+def test_load_message_for_edit_success(logged_in_client, setup_conversation):
+    """
+    GIVEN a message created by the logged-in user
+    WHEN the endpoint to load that message for editing is called
+    THEN it should return the chat input partial configured for editing.
+    """
+    message = setup_conversation['message']
+    response = logged_in_client.get(f'/chat/message/{message.id}/load_for_edit')
+
+    assert response.status_code == 200
+    assert b'Editing Message' in response.data
+    assert b'<textarea id="chat-message-input" name="content" style="display: none;">Original message content</textarea>' in response.data
+
+def test_load_message_for_edit_unauthorized(logged_in_client, setup_conversation):
+    """
+    GIVEN a message created by user1
+    WHEN user2 tries to load that message for editing
+    THEN they should receive a 403 Forbidden response.
+    """
+    # Log in as user2
+    with logged_in_client.session_transaction() as sess:
+        sess['user_id'] = 2
+
+    message = setup_conversation['message']
+    response = logged_in_client.get(f'/chat/message/{message.id}/load_for_edit')
+
+    assert response.status_code == 403
+
+def test_get_older_messages_success(logged_in_client, setup_conversation):
+    """
+    GIVEN a conversation with more messages than PAGE_SIZE
+    WHEN the client requests older messages before the earliest visible one
+    THEN it should return a batch of older messages.
+    """
+    conversation = setup_conversation['message'].conversation
+    user = setup_conversation['user1']
+
+    # Create more messages than one page
+    for i in range(PAGE_SIZE):
+        Message.create(user=user, conversation=conversation, content=f"Older message {i}")
+
+    # The `setup_conversation` already created one message. We need the ID of the
+    # first message in our new batch, which will be the one with the lowest ID after the first.
+    # We fetch all, sort by ID ascending, and get the second one.
+    all_messages = Message.select().where(Message.conversation == conversation).order_by(Message.id)
+    cursor_message = all_messages[1]
+
+    response = logged_in_client.get(
+        f'/chat/messages/older/{conversation.conversation_id_str}?before_message_id={cursor_message.id}'
+    )
+
+    assert response.status_code == 200
+    # The response should contain the content of the very first message
+    assert b'Original message content' in response.data
+    # It should not contain a spinner, because we've reached the beginning
+    assert b'spinner-border' not in response.data
+
+def test_get_older_messages_errors(logged_in_client, setup_conversation):
+    """
+    WHEN the get_older_messages endpoint is called with invalid parameters
+    THEN it should return the appropriate error codes.
+    """
+    conversation = setup_conversation['message'].conversation
+
+    # Case 1: Missing before_message_id
+    response_1 = logged_in_client.get(f'/chat/messages/older/{conversation.conversation_id_str}')
+    assert response_1.status_code == 400
+
+    # Case 2: Non-existent message ID
+    response_2 = logged_in_client.get(f'/chat/messages/older/{conversation.conversation_id_str}?before_message_id=9999')
+    assert response_2.status_code == 404
+
+    # Case 3: Non-existent conversation ID
+    response_3 = logged_in_client.get('/chat/messages/older/channel_9999?before_message_id=1')
+    assert response_3.status_code == 404
+
+def test_get_message_view(logged_in_client, setup_conversation):
+    """
+    WHEN a user requests the standard view for a single message
+    THEN it should return the message partial.
+    """
+    message = setup_conversation['message']
+    response = logged_in_client.get(f'/chat/message/{message.id}')
+
+    assert response.status_code == 200
+    assert b'message-container' in response.data
+    assert b'Original message content' in response.data
+    # Ensure it's the display view, not the edit form
+    assert b'<form' not in response.data

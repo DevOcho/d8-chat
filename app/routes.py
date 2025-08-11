@@ -11,6 +11,7 @@ import re
 import datetime
 from functools import reduce
 import operator
+import markdown
 
 # Main blueprint for general app routes
 main_bp = Blueprint('main', __name__)
@@ -99,68 +100,74 @@ def profile():
 
 
 # --- CHAT INTERFACE ROUTES ---
+# Replace the existing chat_interface function with this one
+
 @main_bp.route('/chat')
 @login_required
 def chat_interface():
     """Renders the main chat UI."""
 
-    # Local Vars
-    unread_counts = {}
+    # 1. Fetch all channels the user is a member of.
+    user_channels = (Channel.select()
+                     .join(ChannelMember)
+                     .where(ChannelMember.user == g.user)
+                     .order_by(Channel.name))
+
+    # 2. Get all relevant conversation records in a single batch.
+    # This includes all DMs this user is part of, plus all conversations for their channels.
+    dm_convs_query = (Conversation.select()
+                      .join(UserConversationStatus)
+                      .where((UserConversationStatus.user == g.user) & (Conversation.type == 'dm')))
+    
+    channel_conv_ids_to_find = [f"channel_{c.id}" for c in user_channels]
+    channel_convs_query = Conversation.select().where(Conversation.conversation_id_str.in_(channel_conv_ids_to_find))
+
+    all_conversations = list(dm_convs_query | channel_convs_query)
+    
+    # 3. Process conversations: create a lookup map and find DM partners.
+    conv_map = {conv.conversation_id_str: conv for conv in all_conversations}
     dm_partner_ids = set()
 
-    # Fetch channels the current user is a member of
-    user_channels = (Channel.select(Channel, Conversation)
-                    .join(ChannelMember).where(ChannelMember.user == g.user)
-                    .join_from(Channel, Conversation,
-                     on=(Conversation.conversation_id_str == fn.CONCAT('channel_', Channel.id))))
-
-    # 1. Find all DM conversations the current user is a part of.
-    dm_conversations = (Conversation.select()
-                        .join(UserConversationStatus)
-                        .where((UserConversationStatus.user == g.user) & (Conversation.type == 'dm')))
-
-    # 2. From those conversations, extract the IDs of the *other* users.
-    for conv in dm_conversations:
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split('_')[1:]]
-        if len(user_ids) > 1:
+    for conv in all_conversations:
+        if conv.type == 'dm':
+            user_ids = [int(uid) for uid in conv.conversation_id_str.split('_')[1:]]
             partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
             if partner_id:
                 dm_partner_ids.add(partner_id)
+    
+    # Attach conversation objects to the channel models for easy access later.
+    for channel in user_channels:
+        channel.conversation = conv_map.get(f"channel_{channel.id}")
 
-    # 3. Fetch the User objects for the sidebar.
+    # 4. Fetch the User objects for the DM sidebar.
     direct_message_users = User.select().where(User.id.in_(list(dm_partner_ids)))
 
-    # --- Calculate Unread Counts ---
+    # 5. Calculate Unread Counts for all relevant conversations.
     unread_counts = {}
-    user_statuses = (UserConversationStatus.select()
-                     .where(UserConversationStatus.user == g.user))
-    last_read_map = {status.conversation.id: status.last_read_timestamp for status in user_statuses}
+    if all_conversations:
+        user_statuses = (UserConversationStatus.select()
+                         .where(UserConversationStatus.user == g.user)
+                         .join(Conversation)
+                         .where(Conversation.id.in_([c.id for c in all_conversations])))
+                         
+        last_read_map = {status.conversation.id: status.last_read_timestamp for status in user_statuses}
 
-    user_conv_ids = set(last_read_map.keys())
-    for channel in user_channels:
-        if channel.conversation:
-            user_conv_ids.add(channel.conversation.id)
-
-    all_user_convs = Conversation.select().where(Conversation.id.in_(list(user_conv_ids)))
-    conv_id_to_str_map = {conv.id: conv.conversation_id_str for conv in all_user_convs}
-
-    # 5. Count unread messages for each conversation.
-    for conv_id, conv_id_str in conv_id_to_str_map.items():
-        last_read_time = last_read_map.get(conv_id, datetime.datetime.min)
-        count = (Message.select()
-                 .where(
-                     (Message.conversation_id == conv_id) &
-                     (Message.created_at > last_read_time) &
-                     (Message.user != g.user)
-                 ).count())
-        unread_counts[conv_id_str] = count
+        for conv in all_conversations:
+            last_read_time = last_read_map.get(conv.id, datetime.datetime.min)
+            count = (Message.select()
+                     .where(
+                         (Message.conversation_id == conv.id) &
+                         (Message.created_at > last_read_time) &
+                         (Message.user != g.user)
+                     ).count())
+            unread_counts[conv.conversation_id_str] = count
 
     return render_template('chat.html',
-                       channels=user_channels,
-                       direct_message_users=direct_message_users,
-                       online_users=chat_manager.online_users,
-                       unread_counts=unread_counts,
-                       theme=g.user.theme)
+                           channels=user_channels,
+                           direct_message_users=direct_message_users,
+                           online_users=chat_manager.online_users,
+                           unread_counts=unread_counts,
+                           theme=g.user.theme)
 
 
 @main_bp.route('/chat/channel/<int:channel_id>')

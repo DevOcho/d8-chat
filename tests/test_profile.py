@@ -90,3 +90,63 @@ def test_update_theme_invalid(logged_in_client):
     updated_user = User.get_by_id(1)
     assert updated_user.theme == 'system'
     assert user.theme == 'system'
+
+def test_get_address_display_partial(logged_in_client):
+    """
+    WHEN a user's address display partial is requested
+    THEN it should return the correct partial with the user's info.
+    """
+    # First, set some data on the user to check for
+    user = User.get_by_id(1)
+    user.city = "Testville"
+    user.save()
+
+    response = logged_in_client.get('/profile/address/view')
+    assert response.status_code == 200
+    assert b'Testville' in response.data
+    assert b'form-label' in response.data # Check for label, indicating display view
+
+def test_get_address_form_partial(logged_in_client):
+    """
+    WHEN a user's address edit form is requested
+    THEN it should return the form partial with the user's info pre-filled.
+    """
+    # First, set some data on the user to check for
+    user = User.get_by_id(1)
+    user.country = "Testland"
+    user.save()
+
+    response = logged_in_client.get('/profile/address/edit')
+    assert response.status_code == 200
+    # Check for the value being inside an input element
+    assert b'<input type="text" class="form-control" id="country" name="country" value="Testland">' in response.data
+
+def test_set_wysiwyg_preference(logged_in_client):
+    """
+    GIVEN a logged-in user with WYSIWYG disabled by default
+    WHEN they send a request to enable it
+    THEN their preference should be updated in the database.
+    """
+    # 1. Verify the initial state (default is False)
+    user = User.get_by_id(1)
+    assert user.wysiwyg_enabled is False
+
+    # 2. Send the request to enable the feature
+    response = logged_in_client.put('/chat/user/preference/wysiwyg', data={
+        'wysiwyg_enabled': 'true'
+    })
+
+    # Assert the response is successful (204 No Content)
+    assert response.status_code == 204
+
+    # 3. Verify the change was persisted in the database
+    updated_user = User.get_by_id(1)
+    assert updated_user.wysiwyg_enabled is True
+
+    # 4. Now, test turning it back off
+    response_off = logged_in_client.put('/chat/user/preference/wysiwyg', data={
+        'wysiwyg_enabled': 'false'
+    })
+    assert response_off.status_code == 204
+    user_turned_off = User.get_by_id(1)
+    assert user_turned_off.wysiwyg_enabled is False

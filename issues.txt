@@ -4,6 +4,8 @@ We can't send HTML in code blocks because it is scrubbed out.  We need to make t
 
 Reactions to messages would be nice.
 
+Search for messages.
+
 I also think we are going to need to implement threads but I only want them in channels.
 
 I want the side bar to only show a max number of people on the side nav.  Let's say we have 10,000 users in the chat.  We only want to show people we've initiated a DM with or that have initiated a DM with us. We also don't want to show more than ~20 people total.
