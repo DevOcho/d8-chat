@@ -1,5 +1,12 @@
 Current issues with the slack_clone:
 
+
+If a user is added to a private channel they don't see it on their side bar.
+
+Code blocks are broken in the system.
+
+Spacing is weird with lists and block quotes in messages.  Things are too scrunched.
+
 We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.
 
 Reactions to messages would be nice.
