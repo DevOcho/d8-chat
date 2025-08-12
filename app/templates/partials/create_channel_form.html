@@ -1,36 +1,45 @@
 <!-- app/templates/partials/create_channel_form.html -->
-
 <!-- This form replaces itself on submission. On success, the parent modal is closed. -->
 <form hx-post="{{ url_for('main.create_channel') }}">
     <div class="modal-header">
         <h5 class="modal-title">Create a New Channel</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button"
+                class="btn-close"
+                data-bs-dismiss="modal"
+                aria-label="Close"></button>
     </div>
     <div class="modal-body">
-        {% if error %}
-            <div class="alert alert-danger" role="alert">
-                {{ error }}
-            </div>
-        {% endif %}
-
-        <p>Channels are where your team communicates. They’re best when organized around a topic — #project-alpha, for example.</p>
-
+        {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+        <p>
+            Channels are where your team communicates. They’re best when organized around a topic — #project-alpha, for example.
+        </p>
         <div class="mb-3">
-            <label for="name" class="form-label"><strong>Name</strong></label>
-            <input type="text" class="form-control" id="name" name="name"
+            <label for="name" class="form-label">
+                <strong>Name</strong>
+            </label>
+            <input type="text"
+                   class="form-control"
+                   id="name"
+                   name="name"
                    placeholder="e.g- project-marketing"
                    value="{{ name or '' }}"
-                   required minlength="3" maxlength="80" autocomplete="off">
+                   required
+                   minlength="3"
+                   maxlength="80"
+                   autocomplete="off">
         </div>
-
         <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" role="switch" id="is_private" name="is_private" {% if is_private %}checked{% endif %}>
+            <input class="form-check-input"
+                   type="checkbox"
+                   role="switch"
+                   id="is_private"
+                   name="is_private"
+                   {% if is_private %}checked{% endif %}>
             <label class="form-check-label" for="is_private">
                 <strong>Private Channel</strong>
                 <span class="d-block text-muted small">When a channel is set to private, it can only be viewed or joined by invitation.</span>
             </label>
         </div>
-
     </div>
     <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>

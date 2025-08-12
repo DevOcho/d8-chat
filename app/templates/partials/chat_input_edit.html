@@ -11,7 +11,6 @@
           hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/default', {target: '#chat-input-container', swap: 'outerHTML'})"
           id="message-form"
           autocomplete="off">
-
         <div class="wysiwyg-editor-container">
             <!-- Editing Block UI -->
             <div class="editing-block p-2 rounded">
@@ -20,53 +19,89 @@
                         <strong class="d-block">Editing Message</strong>
                         <p class="mb-0 text-muted">{{ message.content | truncate(150, True) }}</p>
                     </div>
-                    <button type="button" class="btn-close" aria-label="Cancel Edit" title="Cancel Edit"
+                    <button type="button"
+                            class="btn-close"
+                            aria-label="Cancel Edit"
+                            title="Cancel Edit"
                             hx-get="/chat/input/default"
                             hx-target="#chat-input-container"
                             hx-swap="outerHTML"></button>
                 </div>
             </div>
-
-            <div id="typing-indicator" class="text-muted small" style="height: 20px; padding-left: 0.75rem;"></div>
-
+            <div id="typing-indicator"
+                 class="text-muted small"
+                 style="height: 20px;
+                        padding-left: 0.75rem"></div>
             <div class="wysiwyg-toolbar toolbar-hidden">
-                <button type="button" data-command="bold" title="Bold (Ctrl+B)"><i class="bi bi-type-bold"></i></button>
-                <button type="button" data-command="italic" title="Italic (Ctrl+I)"><i class="bi bi-type-italic"></i></button>
-                <button type="button" data-command="strikethrough" title="Strikethrough"><i class="bi bi-type-strikethrough"></i></button>
-                <button type="button" data-command="insertUnorderedList" title="Bulleted List"><i class="bi bi-list-ul"></i></button>
-                <button type="button" data-command="insertOrderedList" title="Numbered List"><i class="bi bi-list-ol"></i></button>
-                <button type="button" data-command="formatBlock" data-value="blockquote" title="Quote"><i class="bi bi-quote"></i></button>
-                <button type="button" data-command="formatBlock" data-value="pre" title="Code Block"><i class="bi bi-code-slash"></i></button>
+                <button type="button" data-command="bold" title="Bold (Ctrl+B)">
+                    <i class="bi bi-type-bold"></i>
+                </button>
+                <button type="button" data-command="italic" title="Italic (Ctrl+I)">
+                    <i class="bi bi-type-italic"></i>
+                </button>
+                <button type="button" data-command="strikethrough" title="Strikethrough">
+                    <i class="bi bi-type-strikethrough"></i>
+                </button>
+                <button type="button"
+                        data-command="insertUnorderedList"
+                        title="Bulleted List">
+                    <i class="bi bi-list-ul"></i>
+                </button>
+                <button type="button" data-command="insertOrderedList" title="Numbered List">
+                    <i class="bi bi-list-ol"></i>
+                </button>
+                <button type="button"
+                        data-command="formatBlock"
+                        data-value="blockquote"
+                        title="Quote">
+                    <i class="bi bi-quote"></i>
+                </button>
+                <button type="button"
+                        data-command="formatBlock"
+                        data-value="pre"
+                        title="Code Block">
+                    <i class="bi bi-code-slash"></i>
+                </button>
             </div>
-
             <!-- Rich Text Format -->
-            <div id="wysiwyg-editor" class="wysiwyg-content" contenteditable="true" style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %};"></div>
-
+            <div id="wysiwyg-editor"
+                 class="wysiwyg-content"
+                 contenteditable="true"
+                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"></div>
             <!-- Markdow Format -->
-            <textarea id="markdown-toggle-view" class="form-control" rows="1" style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %};">{{ message.content }}</textarea>
-
+            <textarea id="markdown-toggle-view"
+                      class="form-control"
+                      rows="1"
+                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}">{{ message.content }}</textarea>
             <!-- This hidden input will hold the final markdown content for submission -->
             <textarea id="chat-message-input" name="content" style="display: none;">{{ message.content }}</textarea>
-
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
-                 <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting"><i class="bi bi-type"></i></button>
-                 <button type="button" id="mention-btn" title="Mention User"><i class="bi bi-at"></i></button>
-                 <button type="button" id="emoji-btn" title="Add Emoji"><i class="bi bi-emoji-smile"></i></button>
-                 <div class="ms-auto d-flex align-items-center">
-                    <button id="send-button" type="submit" class="btn btn-primary send-btn-dynamic">
-                        Save Changes
-                    </button>
-                 </div>
+                <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting">
+                    <i class="bi bi-type"></i>
+                </button>
+                <button type="button" id="mention-btn" title="Mention User">
+                    <i class="bi bi-at"></i>
+                </button>
+                <button type="button" id="emoji-btn" title="Add Emoji">
+                    <i class="bi bi-emoji-smile"></i>
+                </button>
+                <div class="ms-auto d-flex align-items-center">
+                    <button id="send-button"
+                            type="submit"
+                            class="btn btn-primary send-btn-dynamic">Save Changes</button>
+                </div>
             </div>
         </div>
-        <div id="emoji-picker-container" class="position-relative" style="display: none;">
+        <div id="emoji-picker-container"
+             class="position-relative"
+             style="display: none">
             <emoji-picker class="light"></emoji-picker>
         </div>
     </form>
-    <div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none;"></div>
+    <div id="typing-sender"
+         ws-send
+         hx-trigger="typing-event"
+         style="display: none"></div>
 </div>
-
 {# This script triggers our main Editor object in chat.js to initialize these new elements #}
-<script>
-    document.body.dispatchEvent(new Event('chatInputLoaded'));
-</script>
+<script>document.body.dispatchEvent(new Event('chatInputLoaded'));</script>

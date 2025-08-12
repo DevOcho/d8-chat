@@ -14,7 +14,7 @@ class ChatManager:
 
     def set_online(self, user_id, ws):
         """Marks a user as online and stores their client."""
-        self.online_users[user_id] = 'online'
+        self.online_users[user_id] = "online"
         self.all_clients[user_id] = ws
 
     def set_offline(self, user_id):

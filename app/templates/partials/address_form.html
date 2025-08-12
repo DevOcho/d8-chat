@@ -1,26 +1,39 @@
-<form hx-put="{{ url_for('main.update_address') }}" hx-target="#address-content-wrapper" hx-swap="innerHTML">
+<form hx-put="{{ url_for('main.update_address') }}"
+      hx-target="#address-content-wrapper"
+      hx-swap="innerHTML">
     <div class="card-body p-4">
         <div class="row">
             <div class="col-md-4">
                 <label for="country" class="form-label text-muted">Country</label>
-                <input type="text" class="form-control" id="country" name="country" value="{{ user.country or '' }}">
+                <input type="text"
+                       class="form-control"
+                       id="country"
+                       name="country"
+                       value="{{ user.country or '' }}">
             </div>
             <div class="col-md-4">
                 <label for="city" class="form-label text-muted">City</label>
-                <input type="text" class="form-control" id="city" name="city" value="{{ user.city or '' }}">
+                <input type="text"
+                       class="form-control"
+                       id="city"
+                       name="city"
+                       value="{{ user.city or '' }}">
             </div>
             <div class="col-md-4">
                 <label for="timezone" class="form-label text-muted">Timezone</label>
-                <input type="text" class="form-control" id="timezone" name="timezone" value="{{ user.timezone or '' }}">
+                <input type="text"
+                       class="form-control"
+                       id="timezone"
+                       name="timezone"
+                       value="{{ user.timezone or '' }}">
             </div>
         </div>
         <div class="mt-4 text-end">
-             <button type="button" class="btn btn-secondary"
+            <button type="button"
+                    class="btn btn-secondary"
                     hx-get="{{ url_for('main.get_address_display') }}"
                     hx-target="#address-content-wrapper"
-                    hx-swap="innerHTML">
-                Cancel
-            </button>
+                    hx-swap="innerHTML">Cancel</button>
             <button type="submit" class="btn btn-primary">Save Changes</button>
         </div>
     </div>

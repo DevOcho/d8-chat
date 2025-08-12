@@ -1,12 +1,34 @@
 # init_db.py
 
 from app import create_app
-from app.models import db, User, Workspace, WorkspaceMember, Channel, ChannelMember, Message, Conversation, UserConversationStatus, Mention
+from app.models import (
+    db,
+    User,
+    Workspace,
+    WorkspaceMember,
+    Channel,
+    ChannelMember,
+    Message,
+    Conversation,
+    UserConversationStatus,
+    Mention,
+)
 from config import Config
 from playhouse.db_url import connect
 from urllib.parse import urlparse
 
-ALL_MODELS = [User, Workspace, WorkspaceMember, Channel, ChannelMember, Message, Conversation, UserConversationStatus, Mention]
+ALL_MODELS = [
+    User,
+    Workspace,
+    WorkspaceMember,
+    Channel,
+    ChannelMember,
+    Message,
+    Conversation,
+    UserConversationStatus,
+    Mention,
+]
+
 
 def ensure_postgres_db_exists():
     """
@@ -20,7 +42,9 @@ def ensure_postgres_db_exists():
     db_host = parsed_url.hostname
     db_port = parsed_url.port
 
-    maintenance_conn_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/postgres"
+    maintenance_conn_url = (
+        f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/postgres"
+    )
     conn = None
     try:
         conn = connect(maintenance_conn_url)
@@ -29,13 +53,14 @@ def ensure_postgres_db_exists():
         cursor.execute(f"SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
         if not cursor.fetchone():
             print(f"Creating database {db_name}...")
-            cursor.execute(f'CREATE DATABASE {db_name}')
+            cursor.execute(f"CREATE DATABASE {db_name}")
         else:
             print(f"Database {db_name} already exists.")
         cursor.close()
     finally:
         if conn:
             conn.close()
+
 
 def reset_tables():
     """Drops all known tables and recreates them."""
@@ -47,27 +72,36 @@ def reset_tables():
         db.create_tables(ALL_MODELS)
     print("Tables created successfully.")
 
+
 def seed_initial_data():
     """Creates the default workspace and channels."""
     print("Seeding initial data...")
-    workspace, _ = Workspace.get_or_create(name='DevOcho')
+    workspace, _ = Workspace.get_or_create(name="DevOcho")
     general_channel, _ = Channel.get_or_create(
-        workspace=workspace, name='general',
-        defaults={'is_private': False, 'topic': 'General announcements and discussions.'}
+        workspace=workspace,
+        name="general",
+        defaults={
+            "is_private": False,
+            "topic": "General announcements and discussions.",
+        },
     )
     Conversation.get_or_create(
-        conversation_id_str=f"channel_{general_channel.id}", defaults={'type': 'channel'}
+        conversation_id_str=f"channel_{general_channel.id}",
+        defaults={"type": "channel"},
     )
     announcements_channel, _ = Channel.get_or_create(
-        workspace=workspace, name='announcements',
-        defaults={'is_private': False, 'topic': 'Company-wide announcements.'}
+        workspace=workspace,
+        name="announcements",
+        defaults={"is_private": False, "topic": "Company-wide announcements."},
     )
     Conversation.get_or_create(
-        conversation_id_str=f"channel_{announcements_channel.id}", defaults={'type': 'channel'}
+        conversation_id_str=f"channel_{announcements_channel.id}",
+        defaults={"type": "channel"},
     )
     print("Initial data seeded.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     # Step 1: Make sure the PostgreSQL database container/instance exists.
     ensure_postgres_db_exists()
 

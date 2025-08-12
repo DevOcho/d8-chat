@@ -1,6 +1,7 @@
 <!-- app/templates/partials/profile_header.html -->
-
-<div id="profile-header-card" class="card mb-4 border-0 shadow-sm" hx-swap-oob="true">
+<div id="profile-header-card"
+     class="card mb-4 border-0 shadow-sm"
+     hx-swap-oob="true">
     <div class="card-body p-3 d-flex align-items-center">
         <!-- The dropdown trigger is the entire avatar container -->
         <div class="dropdown">
@@ -8,56 +9,54 @@
                  id="profile-status-dropdown"
                  data-bs-toggle="dropdown"
                  aria-expanded="false"
-                 style="cursor: pointer;"
+                 style="cursor: pointer"
                  title="Set your status">
-
                 <!-- User's Initial -->
                 <span>{{ (user.display_name or user.username)[0]|upper }}</span>
-
                 <!-- Presence Indicator Dot -->
-                {% set status_class = 'presence-online' %}
+                {% set status_class = "presence-online" %}
                 {% if user.presence_status == 'away' %}
-                    {% set status_class = 'presence-away' %}
+                    {% set status_class = "presence-away" %}
                 {% elif user.presence_status == 'busy' %}
-                    {% set status_class = 'presence-busy' %}
+                    {% set status_class = "presence-busy" %}
                 {% endif %}
                 <span id="profile-presence-indicator-{{ user.id }}"
                       class="presence-indicator {{ status_class }}"></span>
             </div>
-
             <!-- Dropdown Menu -->
             <ul class="dropdown-menu" aria-labelledby="profile-status-dropdown">
-                <li><h6 class="dropdown-header">Set your status</h6></li>
+                <li>
+                    <h6 class="dropdown-header">Set your status</h6>
+                </li>
                 <li>
                     <button class="dropdown-item"
-                       hx-put="{{ url_for('main.update_presence_status') }}"
-                       hx-vals='{"status": "online"}'
-                       hx-swap-oob="true"
-                       hx-target="#profile-header-card">
-                       <span class="presence-dot presence-online"></span> Online
+                            hx-put="{{ url_for('main.update_presence_status') }}"
+                            hx-vals='{"status": "online"}'
+                            hx-swap-oob="true"
+                            hx-target="#profile-header-card">
+                        <span class="presence-dot presence-online"></span> Online
                     </button>
                 </li>
                 <li>
                     <button class="dropdown-item"
-                       hx-put="{{ url_for('main.update_presence_status') }}"
-                       hx-vals='{"status": "away"}'
-                       hx-swap-oob="true"
-                       hx-target="#profile-header-card">
-                       <span class="presence-dot presence-away"></span> Away
+                            hx-put="{{ url_for('main.update_presence_status') }}"
+                            hx-vals='{"status": "away"}'
+                            hx-swap-oob="true"
+                            hx-target="#profile-header-card">
+                        <span class="presence-dot presence-away"></span> Away
                     </button>
                 </li>
                 <li>
                     <button class="dropdown-item"
-                       hx-put="{{ url_for('main.update_presence_status') }}"
-                       hx-vals='{"status": "busy"}'
-                       hx-swap-oob="true"
-                       hx-target="#profile-header-card">
-                       <span class="presence-dot presence-busy"></span> Busy
+                            hx-put="{{ url_for('main.update_presence_status') }}"
+                            hx-vals='{"status": "busy"}'
+                            hx-swap-oob="true"
+                            hx-target="#profile-header-card">
+                        <span class="presence-dot presence-busy"></span> Busy
                     </button>
                 </li>
             </ul>
         </div>
-
         <div class="flex-grow-1 ms-3">
             <h5 class="mb-0">{{ user.display_name or user.username }}</h5>
             <p class="mb-0 text-muted">{{ user.city or 'City' }}, {{ user.country or 'Country' }}</p>

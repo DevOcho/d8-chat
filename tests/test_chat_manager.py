@@ -4,10 +4,12 @@ import pytest
 from unittest.mock import Mock
 from app.chat_manager import ChatManager
 
+
 @pytest.fixture
 def chat_manager():
     """Returns a fresh instance of ChatManager for each test."""
     return ChatManager()
+
 
 def test_user_presence(chat_manager):
     """
@@ -21,7 +23,7 @@ def test_user_presence(chat_manager):
     # Test setting user online
     chat_manager.set_online(user_id, mock_ws)
     assert chat_manager.is_online(user_id)
-    assert chat_manager.online_users[user_id] == 'online'
+    assert chat_manager.online_users[user_id] == "online"
     assert chat_manager.all_clients[user_id] is mock_ws
 
     # Test setting user offline
@@ -29,6 +31,7 @@ def test_user_presence(chat_manager):
     assert not chat_manager.is_online(user_id)
     assert user_id not in chat_manager.online_users
     assert user_id not in chat_manager.all_clients
+
 
 def test_subscribe_and_unsubscribe(chat_manager):
     """
@@ -48,6 +51,7 @@ def test_subscribe_and_unsubscribe(chat_manager):
     chat_manager.unsubscribe(mock_ws)
     assert conv_id not in chat_manager.active_connections
     assert mock_ws.channel_id is None
+
 
 def test_broadcast_to_channel(chat_manager):
     """
@@ -73,6 +77,7 @@ def test_broadcast_to_channel(chat_manager):
     # ws3 (not in channel) should not have been sent the message
     ws3.send.assert_not_called()
 
+
 def test_broadcast_to_all(chat_manager):
     """
     Tests broadcasting a message to all connected clients.
@@ -91,6 +96,7 @@ def test_broadcast_to_all(chat_manager):
     ws1.send.assert_called_once_with(message)
     ws2.send.assert_called_once_with(message)
 
+
 def test_broadcast_handles_exceptions(chat_manager):
     """
     Tests that the broadcast function handles exceptions and removes bad clients.
@@ -105,7 +111,7 @@ def test_broadcast_handles_exceptions(chat_manager):
     message = "<p>test</p>"
 
     chat_manager.subscribe(conv_id, ws1)
-    chat_manager.subscribe(conv_id, ws2) # The "bad" client
+    chat_manager.subscribe(conv_id, ws2)  # The "bad" client
     chat_manager.subscribe(conv_id, ws3)
 
     assert len(chat_manager.active_connections[conv_id]) == 3

@@ -1,80 +1,74 @@
 {% extends "base.html" %}
-
 {% block html_theme %}data-bs-theme="{{ theme }}"{% endblock %}
-
 {% block content %}
-<div class="container-fluid p-4" style="height: 100vh;">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="h4">My Profile</h2>
-        <div>
-             <a href="{{ url_for('main.chat_interface') }}" class="btn btn-outline-secondary">
-                <i class="bi bi-chat-dots-fill me-1"></i> Go to Chat
-            </a>
-            <a href="{{ url_for('main.logout') }}" class="btn btn-danger">
-                <i class="bi bi-box-arrow-right me-1"></i> Logout
-            </a>
+    <div class="container-fluid p-4" style="height: 100vh;">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="h4">My Profile</h2>
+            <div>
+                <a href="{{ url_for('main.chat_interface') }}"
+                   class="btn btn-outline-secondary">
+                    <i class="bi bi-chat-dots-fill me-1"></i> Go to Chat
+                </a>
+                <a href="{{ url_for('main.logout') }}" class="btn btn-danger">
+                    <i class="bi bi-box-arrow-right me-1"></i> Logout
+                </a>
+            </div>
         </div>
-    </div>
-
-    <!-- Profile Header Card -->
-    {% include 'partials/profile_header.html' %}
-
-    <!-- Personal Information Card -->
-    <div class="card mb-4 border-0 shadow-sm">
-        <div class="card-header d-flex justify-content-between align-items-center py-3">
-            <h6 class="mb-0">Personal Information (Set via SSO)</h6>
-        </div>
-        <div class="card-body p-4">
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="mb-3">
-                        <label class="form-label text-muted">Name</label>
-                        <p>{{ user.display_name or 'Not set' }}</p>
+        <!-- Profile Header Card -->
+        {% include 'partials/profile_header.html' %}
+        <!-- Personal Information Card -->
+        <div class="card mb-4 border-0 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center py-3">
+                <h6 class="mb-0">Personal Information (Set via SSO)</h6>
+            </div>
+            <div class="card-body p-4">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label text-muted">Name</label>
+                            <p>{{ user.display_name or 'Not set' }}</p>
+                        </div>
                     </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="mb-3">
-                        <label class="form-label text-muted">Email Address</label>
-                        <p>{{ user.email }}</p>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label text-muted">Email Address</label>
+                            <p>{{ user.email }}</p>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-
-    <div class="card mb-4 border-0 shadow-sm">
-        <div class="card-header py-3">
-            <h6 class="mb-0">Theme</h6>
+        <div class="card mb-4 border-0 shadow-sm">
+            <div class="card-header py-3">
+                <h6 class="mb-0">Theme</h6>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted small">Choose how D8-Chat looks to you. Select a theme or sync with your system preference.</p>
+                <select class="form-select"
+                        id="theme-select"
+                        name="theme"
+                        hx-put="{{ url_for('main.update_theme') }}"
+                        hx-trigger="change">
+                    <option value="light" {% if user.theme == 'light' %}selected{% endif %}>Light</option>
+                    <option value="dark" {% if user.theme == 'dark' %}selected{% endif %}>Dark</option>
+                    <option value="system" {% if user.theme == 'system' %}selected{% endif %}>Sync with system</option>
+                </select>
+            </div>
         </div>
-        <div class="card-body p-4">
-            <p class="text-muted small">Choose how D8-Chat looks to you. Select a theme or sync with your system preference.</p>
-            <select class="form-select" id="theme-select" name="theme"
-                    hx-put="{{ url_for('main.update_theme') }}"
-                    hx-trigger="change">
-                <option value="light" {% if user.theme == 'light' %}selected{% endif %}>Light</option>
-                <option value="dark" {% if user.theme == 'dark' %}selected{% endif %}>Dark</option>
-                <option value="system" {% if user.theme == 'system' %}selected{% endif %}>Sync with system</option>
-            </select>
-        </div>
-    </div>
-
-    <!-- Address Card -->
-    <div id="address-card" class="card border-0 shadow-sm">
-        <div class="card-header d-flex justify-content-between align-items-center py-3">
-            <h6 class="mb-0">Address</h6>
-            <!-- This button now targets the *inner* wrapper -->
-            <button class="btn btn-warning btn-sm"
-                    hx-get="{{ url_for('main.get_address_form') }}"
-                    hx-target="#address-content-wrapper"
-                    hx-swap="innerHTML">
-                <i class="bi bi-pencil-fill me-1"></i> Edit
-            </button>
-        </div>
-        <!-- This is the new stable wrapper for our swaps -->
-        <div id="address-content-wrapper">
-            {% include 'partials/address_display.html' %}
+        <!-- Address Card -->
+        <div id="address-card" class="card border-0 shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center py-3">
+                <h6 class="mb-0">Address</h6>
+                <!-- This button now targets the *inner* wrapper -->
+                <button class="btn btn-warning btn-sm"
+                        hx-get="{{ url_for('main.get_address_form') }}"
+                        hx-target="#address-content-wrapper"
+                        hx-swap="innerHTML">
+                    <i class="bi bi-pencil-fill me-1"></i> Edit
+                </button>
+            </div>
+            <!-- This is the new stable wrapper for our swaps -->
+            <div id="address-content-wrapper">{% include 'partials/address_display.html' %}</div>
         </div>
     </div>
-
-</div>
 {% endblock %}

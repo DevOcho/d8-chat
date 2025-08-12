@@ -2,25 +2,26 @@
 
 from app.models import User
 
+
 def test_update_address_success(logged_in_client):
     """
     GIVEN a logged-in user
     WHEN they submit valid data to the update_address endpoint
     THEN their address information should be updated in the database.
     """
-    response = logged_in_client.put('/profile/address', data={
-        'country': 'Canada',
-        'city': 'Toronto',
-        'timezone': 'EST'
-    })
+    response = logged_in_client.put(
+        "/profile/address",
+        data={"country": "Canada", "city": "Toronto", "timezone": "EST"},
+    )
     assert response.status_code == 200
-    assert b'profile-header-card' in response.data
-    assert b'Toronto' in response.data
+    assert b"profile-header-card" in response.data
+    assert b"Toronto" in response.data
 
     user = User.get_by_id(1)
-    assert user.country == 'Canada'
-    assert user.city == 'Toronto'
-    assert user.timezone == 'EST'
+    assert user.country == "Canada"
+    assert user.city == "Toronto"
+    assert user.timezone == "EST"
+
 
 def test_update_presence_status_success(logged_in_client):
     """
@@ -29,15 +30,16 @@ def test_update_presence_status_success(logged_in_client):
     THEN their status should be updated in the database.
     """
     user = User.get_by_id(1)
-    assert user.presence_status == 'online'
+    assert user.presence_status == "online"
 
-    response = logged_in_client.put('/profile/status', data={'status': 'away'})
+    response = logged_in_client.put("/profile/status", data={"status": "away"})
     assert response.status_code == 200
-    assert b'profile-header-card' in response.data
+    assert b"profile-header-card" in response.data
 
     # Re-fetch the user from the database to get the updated values.
     updated_user = User.get_by_id(1)
-    assert updated_user.presence_status == 'away'
+    assert updated_user.presence_status == "away"
+
 
 def test_update_presence_status_invalid(logged_in_client):
     """
@@ -46,15 +48,18 @@ def test_update_presence_status_invalid(logged_in_client):
     THEN they should get a 400 error and their status should not change.
     """
     user = User.get_by_id(1)
-    assert user.presence_status == 'online'
+    assert user.presence_status == "online"
 
-    response = logged_in_client.put('/profile/status', data={'status': 'invalid-status'})
+    response = logged_in_client.put(
+        "/profile/status", data={"status": "invalid-status"}
+    )
     assert response.status_code == 400
-    assert b'Invalid status' in response.data
+    assert b"Invalid status" in response.data
 
     # Re-fetch the user to verify their status did not change.
     updated_user = User.get_by_id(1)
-    assert updated_user.presence_status == 'online'
+    assert updated_user.presence_status == "online"
+
 
 def test_update_theme_success(logged_in_client):
     """
@@ -63,15 +68,16 @@ def test_update_theme_success(logged_in_client):
     THEN their theme should be updated and they should receive an HX-Refresh header.
     """
     user = User.get_by_id(1)
-    assert user.theme == 'system'
+    assert user.theme == "system"
 
-    response = logged_in_client.put('/profile/theme', data={'theme': 'dark'})
+    response = logged_in_client.put("/profile/theme", data={"theme": "dark"})
     assert response.status_code == 200
-    assert response.headers.get('HX-Refresh') == 'true'
+    assert response.headers.get("HX-Refresh") == "true"
 
     # Re-fetch the user to verify the new theme was saved.
     updated_user = User.get_by_id(1)
-    assert updated_user.theme == 'dark'
+    assert updated_user.theme == "dark"
+
 
 def test_update_theme_invalid(logged_in_client):
     """
@@ -80,16 +86,17 @@ def test_update_theme_invalid(logged_in_client):
     THEN they should get a 400 error and their theme should not change.
     """
     user = User.get_by_id(1)
-    assert user.theme == 'system'
+    assert user.theme == "system"
 
-    response = logged_in_client.put('/profile/theme', data={'theme': 'invalid-theme'})
+    response = logged_in_client.put("/profile/theme", data={"theme": "invalid-theme"})
     assert response.status_code == 400
-    assert b'Invalid theme' in response.data
+    assert b"Invalid theme" in response.data
 
     # Re-fetch the user to verify their theme did not change.
     updated_user = User.get_by_id(1)
-    assert updated_user.theme == 'system'
-    assert user.theme == 'system'
+    assert updated_user.theme == "system"
+    assert user.theme == "system"
+
 
 def test_get_address_display_partial(logged_in_client):
     """
@@ -101,10 +108,11 @@ def test_get_address_display_partial(logged_in_client):
     user.city = "Testville"
     user.save()
 
-    response = logged_in_client.get('/profile/address/view')
+    response = logged_in_client.get("/profile/address/view")
     assert response.status_code == 200
-    assert b'Testville' in response.data
-    assert b'form-label' in response.data # Check for label, indicating display view
+    assert b"Testville" in response.data
+    assert b"form-label" in response.data  # Check for label, indicating display view
+
 
 def test_get_address_form_partial(logged_in_client):
     """
@@ -116,10 +124,14 @@ def test_get_address_form_partial(logged_in_client):
     user.country = "Testland"
     user.save()
 
-    response = logged_in_client.get('/profile/address/edit')
+    response = logged_in_client.get("/profile/address/edit")
     assert response.status_code == 200
     # Check for the value being inside an input element
-    assert b'<input type="text" class="form-control" id="country" name="country" value="Testland">' in response.data
+    assert (
+        b'<input type="text" class="form-control" id="country" name="country" value="Testland">'
+        in response.data
+    )
+
 
 def test_set_wysiwyg_preference(logged_in_client):
     """
@@ -132,9 +144,9 @@ def test_set_wysiwyg_preference(logged_in_client):
     assert user.wysiwyg_enabled is False
 
     # 2. Send the request to enable the feature
-    response = logged_in_client.put('/chat/user/preference/wysiwyg', data={
-        'wysiwyg_enabled': 'true'
-    })
+    response = logged_in_client.put(
+        "/chat/user/preference/wysiwyg", data={"wysiwyg_enabled": "true"}
+    )
 
     # Assert the response is successful (204 No Content)
     assert response.status_code == 204
@@ -144,9 +156,9 @@ def test_set_wysiwyg_preference(logged_in_client):
     assert updated_user.wysiwyg_enabled is True
 
     # 4. Now, test turning it back off
-    response_off = logged_in_client.put('/chat/user/preference/wysiwyg', data={
-        'wysiwyg_enabled': 'false'
-    })
+    response_off = logged_in_client.put(
+        "/chat/user/preference/wysiwyg", data={"wysiwyg_enabled": "false"}
+    )
     assert response_off.status_code == 204
     user_turned_off = User.get_by_id(1)
     assert user_turned_off.wysiwyg_enabled is False

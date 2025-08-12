@@ -1,12 +1,11 @@
 <!-- This entire div is our "Out-of-Band" swap content -->
 <div id="chat-header-container" hx-swap-oob="true" class="p-3">
     <!-- WRAP THE HEADER IN A DIV THAT TRIGGERS THE MODAL -->
-    <div style="cursor: pointer;"
+    <div style="cursor: pointer"
          data-bs-toggle="modal"
          data-bs-target="#htmx-modal"
          hx-get="{{ url_for('main.get_manage_members_view', channel_id=channel.id) }}"
          hx-target="#htmx-modal-content">
-
         <h4 class="mb-0">#{{ channel.name }}</h4>
         <small class="text-muted">
             <!-- ADD AN ID TO THE SPAN FOR OOB SWAPPING -->

@@ -1,18 +1,20 @@
 <div class="modal-header">
     <h5 class="modal-title" id="startDmModalLabel">Direct Messages</h5>
-    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <button type="button"
+            class="btn-close"
+            data-bs-dismiss="modal"
+            aria-label="Close"></button>
 </div>
 <div class="modal-body">
     <p>Select a user to start a new conversation.</p>
     <ul class="list-group">
         {% for user in users_to_start_dm %}
             <li class="list-group-item list-group-item-action">
-                <a href="#" class="text-decoration-none text-dark"
+                <a href="#"
+                   class="text-decoration-none text-dark"
                    hx-get="/chat/dm/{{ user.id }}"
                    hx-target="#chat-messages-container"
-                   data-bs-dismiss="modal">
-                    {{ user.username }}
-                </a>
+                   data-bs-dismiss="modal">{{ user.username }}</a>
             </li>
         {% else %}
             <li class="list-group-item">No new users to message.</li>

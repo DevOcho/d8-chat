@@ -1,16 +1,11 @@
 {% set conversation_id = "dm_" ~ ([g.user.id, other_user.id]|sort|join('_')) %}
-
 <div class="h-100 htmx-added" data-conversation-id="{{ conversation_id }}">
-
     <div ws-send
          hx-trigger="load"
-         hx-vals='{"type": "subscribe", "conversation_id": "{{ conversation_id }}"}'>
-    </div>
-
+         hx-vals='{"type": "subscribe", "conversation_id": "{{ conversation_id }}"}'></div>
     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
         <h4 class="mb-0">{{ other_user.username }}</h4>
     </div>
-  
     <!-- The new, dedicated container for the list of messages -->
     <div id="message-list">
         {% for message in messages %}

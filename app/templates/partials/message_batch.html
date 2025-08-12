@@ -1,24 +1,21 @@
 {# app/templates/partials/message_batch.html #}
-
 {#
   This entire block of HTML will replace the trigger div that was scrolled into view.
   It contains two things:
   1. The trigger for the *next* page of messages (if there are any).
   2. The batch of messages we just fetched.
 #}
-
 {# If we fetched a full page, it's likely there are more messages. Render the next trigger. #}
 {% if messages|length == PAGE_SIZE %}
-<div class="text-center"
-     hx-get="{{ url_for('main.get_older_messages', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
-     hx-trigger="intersect once"
-     hx-swap="outerHTML">
-    <div class="spinner-border spinner-border-sm my-3" role="status">
-        <span class="visually-hidden">Loading older messages...</span>
+    <div class="text-center"
+         hx-get="{{ url_for('main.get_older_messages', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
+         hx-trigger="intersect once"
+         hx-swap="outerHTML">
+        <div class="spinner-border spinner-border-sm my-3" role="status">
+            <span class="visually-hidden">Loading older messages...</span>
+        </div>
     </div>
-</div>
 {% endif %}
-
 {# Render the actual messages that were fetched. These will be prepended to the top of the list. #}
 {% for message in messages %}
     {% include 'partials/message.html' %}

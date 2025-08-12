@@ -1,16 +1,14 @@
 <!-- app/templates/partials/channel_list_item.html -->
-
 <!--
     This snippet is designed to be added via an Out-of-Band swap.
     The target #channel-list will have this appended to its end.
     The <div> won't be there, just the contents of the <li>
 -->
 <div hx-swap-oob="beforeend:#channel-list">
-<li>
-    <a href="#" class="text-decoration-none text-light"
-       hx-get="/chat/channel/{{ channel.id }}"
-       hx-target="#chat-messages-container">
-        # {{ channel.name }}
-    </a>
-</li>
+    <li>
+        <a href="#"
+           class="text-decoration-none text-light"
+           hx-get="/chat/channel/{{ channel.id }}"
+           hx-target="#chat-messages-container"># {{ channel.name }}</a>
+    </li>
 </div>

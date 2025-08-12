@@ -1,27 +1,22 @@
 <!-- The outer wrapper that contains conversation context -->
-<div class="h-100 htmx-added" data-conversation-id="channel_{{ channel.id }}">
-
+<div class="h-100 htmx-added"
+     data-conversation-id="channel_{{ channel.id }}">
     <!-- On load, this hidden div will correctly subscribe us to the channel -->
     <div ws-send
          hx-trigger="load"
-         hx-vals='{"type": "subscribe", "conversation_id": "channel_{{ channel.id }}"}'>
-    </div>
-
+         hx-vals='{"type": "subscribe", "conversation_id": "channel_{{ channel.id }}"}'></div>
     <!-- The channel header -->
     <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
         <h4 class="mb-0">#{{ channel.name }}</h4>
         {% if channel.is_private %}
-        <div id="invite-button-container">
-            <button class="btn btn-sm btn-outline-secondary"
-                    hx-get="/chat/channel/{{ channel.id }}/invite"
-                    hx-target="#invite-button-container"
-                    hx-swap="outerHTML">
-                Invite User
-            </button>
-        </div>
+            <div id="invite-button-container">
+                <button class="btn btn-sm btn-outline-secondary"
+                        hx-get="/chat/channel/{{ channel.id }}/invite"
+                        hx-target="#invite-button-container"
+                        hx-swap="outerHTML">Invite User</button>
+            </div>
         {% endif %}
     </div>
-
     <!-- The new, dedicated container for the list of messages -->
     <div id="message-list">
         {% for message in messages %}

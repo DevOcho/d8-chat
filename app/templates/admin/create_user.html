@@ -1,12 +1,16 @@
 {% extends "base.html" %}
-
 {% block content %}
     <h1>Create a New User</h1>
-
-    <form action="{{ url_for('admin.create_user') }}" method="POST" class="mt-4">
+    <form action="{{ url_for('admin.create_user') }}"
+          method="POST"
+          class="mt-4">
         <div class="mb-3">
             <label for="username" class="form-label">Username</label>
-            <input type="text" class="form-control" id="username" name="username" required>
+            <input type="text"
+                   class="form-control"
+                   id="username"
+                   name="username"
+                   required>
         </div>
         <div class="mb-3">
             <label for="email" class="form-label">Email address</label>

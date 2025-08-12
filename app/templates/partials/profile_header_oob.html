@@ -1,9 +1,12 @@
-<div id="profile-header-card" hx-swap-oob="true" class="card mb-4 border-0 shadow-sm">
+<div id="profile-header-card"
+     hx-swap-oob="true"
+     class="card mb-4 border-0 shadow-sm">
     <div class="card-body p-3 d-flex align-items-center">
         <div class="flex-shrink-0 me-3">
-            <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center" style="width: 60px; height: 60px; font-size: 1.5rem;">
-                {{ (user.display_name or user.username)[0]|upper }}
-            </div>
+            <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center"
+                 style="width: 60px;
+                        height: 60px;
+                        font-size: 1.5rem">{{ (user.display_name or user.username)[0]|upper }}</div>
         </div>
         <div class="flex-grow-1">
             <h5 class="mb-0">{{ user.display_name or user.username }}</h5>

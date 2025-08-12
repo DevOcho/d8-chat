@@ -1,6 +1,5 @@
 Current issues with the slack_clone:
 
-
 If a user is added to a private channel they don't see it on their side bar.
 
 Code blocks are broken in the system.

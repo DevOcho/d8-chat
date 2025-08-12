@@ -4,14 +4,12 @@
       hx-swap="outerHTML">
     <textarea name="content" class="form-control mb-1">{{ message.content }}</textarea>
     <button type="submit" class="btn btn-primary btn-sm">Save</button>
-    <button type="button" class="btn btn-secondary btn-sm"
+    <button type="button"
+            class="btn btn-secondary btn-sm"
             hx-get="/chat/message/{{ message.id }}"
             hx-target="closest form"
-            hx-swap="outerHTML">
-        Cancel
-    </button>
+            hx-swap="outerHTML">Cancel</button>
 </form>
-
 <script>
   // Use an IIFE to scope variables and prevent conflicts.
   (function() {

@@ -1,35 +1,31 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en" {% block html_theme %}{% endblock %}>
-<head>
-    <!-- Required meta tags -->
-    <meta charset="utf--8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-
-    <!-- CSS & Icons -->
-    <link rel="stylesheet" href="/css/local/bootstrap.min.css">
-    <link rel="stylesheet" href="/css/local/bootstrap-icons.css">
-    <link rel="stylesheet" href="/css/style.css">
-    <link rel="stylesheet" href="/css/syntax.css">
-
-    <title>D8 - Chat</title>
-</head>
-<body class="{% block body_class %}{% endblock %}">
-    <div class="main-layout">
-        {% block layout %}
-        <div class="container mt-4">
-            {% block content %}{% endblock %}
+    <head>
+        <!-- Required meta tags -->
+        <meta charset="utf--8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <!-- CSS & Icons -->
+        <link rel="stylesheet" href="/css/local/bootstrap.min.css">
+        <link rel="stylesheet" href="/css/local/bootstrap-icons.css">
+        <link rel="stylesheet" href="/css/style.css">
+        <link rel="stylesheet" href="/css/syntax.css">
+        <title>D8 - Chat</title>
+    </head>
+    <body class="{% block body_class %}{% endblock %}">
+        <div class="main-layout">
+            {% block layout %}
+                <div class="container mt-4">
+                    {% block content %}{% endblock %}
+                </div>
+            {% endblock layout %}
         </div>
-        {% endblock layout %}
-    </div>
-
-    <!-- Bootstrap, HTMX, and HTMX Websockets -->
-    <script src="/js/local/bootstrap.bundle.min.js"></script>
-    <script src="/js/local/htmx.min.js"></script>
-    <script src="/js/local/htmx-ws.js"></script>
-    <script src="/js/local/turndown.js"></script>
-
-    {# Dark or Light Theme #}
-    <script>
+        <!-- Bootstrap, HTMX, and HTMX Websockets -->
+        <script src="/js/local/bootstrap.bundle.min.js"></script>
+        <script src="/js/local/htmx.min.js"></script>
+        <script src="/js/local/htmx-ws.js"></script>
+        <script src="/js/local/turndown.js"></script>
+        {# Dark or Light Theme #}
+        <script>
       // IIFE to handle system theme preference
       (function () {
         const htmlElement = document.documentElement;
@@ -45,9 +41,8 @@
           });
         }
       })();
-    </script>
-
-    {# custom scripts in different templates #}
-    {% block scripts %}{% endblock %}
-</body>
+        </script>
+        {# custom scripts in different templates #}
+        {% block scripts %}{% endblock %}
+    </body>
 </html>
