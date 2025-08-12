@@ -97,7 +97,7 @@ const Editor = {
         });
         turndownService.addRule('strikethrough', {
             filter: ['del', 's', 'strike'],
-            replacement: content => `~${content}~`
+            replacement: content => `~~${content}~~`
         });
 
         this.state = {

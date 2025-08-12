@@ -124,9 +124,9 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
 .wysiwyg-content:focus, #markdown-toggle-view:focus { outline: 0 !important; box-shadow: none !important; }
 
 /* --- Rendered Message Content Styles --- */
-.message-content > * + * { margin-top: 0.5em; }
-.message-content ul, .message-content ol { padding-left: 2em; }
-.message-content blockquote { border-left: 4px solid cornflowerblue; padding-left: 1rem; color: #555555; }
+.message-content > * + * { margin-top: 0.6em; }
+.message-content ul, .message-content ol { padding-left: 2em; padding-bottom: 0.4em;}
+.message-content blockquote { border-left: 4px solid cornflowerblue; padding-left: 1rem; color: #555555; padding-bottom: 0.4em;}
 .wysiwyg-content blockquote { border-left: 4px solid cornflowerblue; padding-left: 1rem; color: #555555; margin: 0.5em 0; }
 .message-content p, .message-content ul, .message-content ol, .message-content blockquote { margin: 0; }
 

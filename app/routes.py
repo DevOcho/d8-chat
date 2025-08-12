@@ -77,7 +77,7 @@ def to_html(text):
     Converts markdown text to HTML, using the same extensions as the
     Jinja filter for consistency.
     """
-    return markdown.markdown(text, extensions=["extra", "codehilite"])
+    return markdown.markdown(text, extensions=["extra", "codehilite", "pymdownx.tilde"])
 
 
 # --- Routes ---
@@ -345,7 +345,7 @@ def get_manage_members_view(channel_id):
 @login_required
 def add_channel_member(channel_id):
     """Processes adding a new member to a channel."""
-    user_id_to_add = request.form.get("user_id")
+    user_id_to_add = request.form.get("user_id", type=int)
     channel = Channel.get_or_none(id=channel_id)
 
     if not user_id_to_add or not channel:
@@ -353,6 +353,23 @@ def add_channel_member(channel_id):
 
     # Add the user to the channel
     ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
+
+    # Check if the added user is currently online and connected via WebSocket
+    if user_id_to_add in chat_manager.all_clients:
+        try:
+            # Get the recipient's websocket connection
+            recipient_ws = chat_manager.all_clients[user_id_to_add]
+
+            # Render the HTML fragment for the new channel list item.
+            new_channel_html = render_template(
+                "partials/channel_list_item.html", channel=channel
+            )
+
+            # Send the HTML fragment directly to that user's websocket
+            recipient_ws.send(new_channel_html)
+        except Exception as e:
+            # It's good practice to log if the send fails for any reason
+            print(f"Could not send real-time channel add to user {user_id_to_add}: {e}")
 
     # --- Powerful HTMX Response ---
     # We will send back TWO pieces of OOB content:

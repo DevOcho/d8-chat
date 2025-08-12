@@ -47,6 +47,8 @@ def create_app(config_class=Config):
             "strong",
             "em",
             "del",
+            "sub",
+            "sup",
             "ul",
             "ol",
             "li",
@@ -77,7 +79,7 @@ def create_app(config_class=Config):
         # Setup the markdown
         html = markdown.markdown(
             content_with_emojis,  # Use the emoji-processed content
-            extensions=["extra", "codehilite"],
+            extensions=["extra", "codehilite", "pymdownx.tilde"],
             extension_configs={
                 "codehilite": {
                     "css_class": "codehilite",
