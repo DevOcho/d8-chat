@@ -83,6 +83,7 @@ def seed_initial_data():
         defaults={
             "is_private": False,
             "topic": "General announcements and discussions.",
+            "description": "This is the default channel for everyone in the workspace.",
         },
     )
     Conversation.get_or_create(
@@ -92,7 +93,11 @@ def seed_initial_data():
     announcements_channel, _ = Channel.get_or_create(
         workspace=workspace,
         name="announcements",
-        defaults={"is_private": False, "topic": "Company-wide announcements."},
+        defaults={"is_private": False, 
+                  "topic": "Company-wide announcements.",
+                  "description": "Important, must-read announcements will be posted here.",
+                  "posting_restricted_to_admins": True,
+        },
     )
     Conversation.get_or_create(
         conversation_id_str=f"channel_{announcements_channel.id}",

@@ -308,20 +308,20 @@ def get_channel_chat(channel_id):
 
     return response
 
-
-@main_bp.route("/chat/channel/<int:channel_id>/members", methods=["GET"])
+@main_bp.route("/chat/channel/<int:channel_id>/details", methods=["GET"])
 @login_required
-def get_manage_members_view(channel_id):
-    """Renders the HTMX partial for the 'manage members' modal."""
+def get_channel_details(channel_id):
+    """Renders the HTMX partial for the channel details slide-out panel."""
     channel = Channel.get_or_none(id=channel_id)
     if not channel:
         return "Channel not found", 404
 
-    # Verify user is a member of the channel they are trying to manage
-    if not ChannelMember.get_or_none(user=g.user, channel=channel):
+    # Verify user is a member of the channel they are trying to view
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not current_user_membership: # <-- MODIFY THIS
         return "You are not a member of this channel.", 403
 
-    # Find users who are NOT already members of this channel
+    # Find users who are NOT already members of this channel to populate the invite list
     subquery = ChannelMember.select(ChannelMember.user_id).where(
         ChannelMember.channel_id == channel_id
     )
@@ -331,14 +331,79 @@ def get_manage_members_view(channel_id):
         .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
     )
 
+    # Get the list of current members to display
     current_members = ChannelMember.select().where(ChannelMember.channel == channel)
 
     return render_template(
-        "partials/manage_members_modal.html",
+        "partials/channel_details.html",
         channel=channel,
         users_to_invite=users_to_invite,
         current_members=current_members,
+        current_user_membership=current_user_membership,
+    )    
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/about", methods=["GET"])
+@login_required
+def get_channel_details_about_display(channel_id):
+    """Returns the read-only view of the channel 'About' section."""
+    channel = Channel.get_by_id(channel_id)
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    # This partial is used for the "Cancel" button on the edit form
+    return render_template(
+        "partials/channel_details_about_display.html",
+        channel=channel,
+        current_user_membership=current_user_membership
     )
+
+@main_bp.route("/chat/channel/<int:channel_id>/about/edit", methods=["GET"])
+@login_required
+def get_channel_about_form(channel_id):
+    """Returns the form for editing channel details."""
+    channel = Channel.get_by_id(channel_id)
+    # Security check: only admins should be able to get this form
+    membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not membership or membership.role != 'admin':
+        return "Unauthorized", 403
+
+    return render_template("partials/channel_details_about_form.html", channel=channel)
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/about", methods=["PUT"])
+@login_required
+def update_channel_about(channel_id):
+    """Processes the submission of the channel details edit form."""
+    channel = Channel.get_by_id(channel_id)
+    # Security check: only admins should be able to update
+    membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not membership or membership.role != 'admin':
+        return "Unauthorized", 403
+
+    # Update the channel and save
+    channel.topic = request.form.get("topic")
+    channel.description = request.form.get("description")
+    channel.save()
+
+    # We need to send back two pieces of HTML:
+    # 1. The updated "About" section to replace the form in the side panel.
+    # 2. An OOB swap for the main chat header to show the new topic.
+
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    members_count = ChannelMember.select().where(ChannelMember.channel == channel).count()
+
+    display_html = render_template(
+        "partials/channel_details_about_display.html",
+        channel=channel,
+        current_user_membership=current_user_membership
+    )
+    header_html = render_template(
+        "partials/channel_header.html", channel=channel, members_count=members_count
+    )
+
+    # Broadcast the header update to all users in the channel
+    chat_manager.broadcast(f"channel_{channel.id}", header_html)
+
+    return display_html
 
 
 @main_bp.route("/chat/channel/<int:channel_id>/members", methods=["POST"])
@@ -350,6 +415,16 @@ def add_channel_member(channel_id):
 
     if not user_id_to_add or not channel:
         return "Invalid request", 400
+
+    # Check permissions
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not current_user_membership:
+         return "You are not a member of this channel.", 403
+
+    if channel.invites_restricted_to_admins and current_user_membership.role != 'admin':
+        # This is a silent fail for now, we can add a proper error message later.
+        # It just re-renders the panel without adding the user.
+        return get_channel_details(channel_id)
 
     # Add the user to the channel
     ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
@@ -389,7 +464,7 @@ def add_channel_member(channel_id):
 
     # Render the new state of the modal content
     modal_html = render_template(
-        "partials/manage_members_modal.html",
+        "partials/channel_details.html",
         channel=channel,
         users_to_invite=users_to_invite,
         current_members=current_members,
@@ -401,40 +476,6 @@ def add_channel_member(channel_id):
 
     # Combine them and send the response
     return make_response(modal_html + header_count_html)
-
-
-'''
-@main_bp.route('/chat/channel/<int:channel_id>/invite', methods=['GET'])
-@login_required
-def get_invite_form(channel_id):
-    """Returns the HTMX partial for the user invite form."""
-    channel = Channel.get_or_none(id=channel_id)
-    if not channel or not channel.is_private:
-        return "", 404
-
-    # Find users who are NOT already members of this channel
-    subquery = ChannelMember.select(ChannelMember.user_id).where(ChannelMember.channel_id == channel_id)
-    users_to_invite = User.select().where(User.id.not_in(subquery))
-
-    return render_template('partials/invite_form.html', channel=channel, users_to_invite=users_to_invite)
-
-
-@main_bp.route('/chat/channel/<int:channel_id>/invite', methods=['POST'])
-@login_required
-def invite_user_to_channel(channel_id):
-    """Processes the invitation form submission."""
-    user_id_to_add = request.form.get('user_id')
-
-    # Simple validation
-    if not user_id_to_add:
-        return "Please select a user.", 400
-
-    # Create the membership record
-    ChannelMember.create(user_id=user_id_to_add, channel_id=channel_id)
-
-    # Return a simple success message that replaces the form
-    return f'<div class="text-success my-3">User has been invited!</div>'
-'''
 
 
 # --- Route to get the channel creation form ---
@@ -483,7 +524,7 @@ def create_channel():
                 workspace=workspace, name=channel_name, is_private=is_private
             )
             # The creator automatically becomes a member
-            ChannelMember.create(user=g.user, channel=new_channel)
+            ChannelMember.create(user=g.user, channel=new_channel, role="admin")
 
     except IntegrityError:
         # This happens if the UNIQUE constraint on (workspace, name) fails
@@ -962,6 +1003,15 @@ def chat(ws):
             conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
             if not conversation:
                 continue
+
+            # Check posting permissions
+            if conversation.type == "channel":
+                channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+                if channel.posting_restricted_to_admins:
+                    membership = ChannelMember.get_or_none(user=ws.user, channel=channel)
+                    if not membership or membership.role != 'admin':
+                        # Silently ignore the message if the user doesn't have permission
+                        continue
 
             with db.atomic():
                 new_message = Message.create(

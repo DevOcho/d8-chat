@@ -1,14 +1,18 @@
-<!-- This entire div is our "Out-of-Band" swap content -->
 <div id="chat-header-container" hx-swap-oob="true" class="p-3">
-    <!-- WRAP THE HEADER IN A DIV THAT TRIGGERS THE MODAL -->
+    <!--
+      This div is the trigger for our Offcanvas slide-out panel.
+      - data-bs-toggle: Tells Bootstrap JS to open an offcanvas.
+      - data-bs-target: Specifies WHICH offcanvas to open.
+      - hx-get/target: Tells HTMX to load content into the offcanvas body.
+    -->
     <div style="cursor: pointer"
-         data-bs-toggle="modal"
-         data-bs-target="#htmx-modal"
-         hx-get="{{ url_for('main.get_manage_members_view', channel_id=channel.id) }}"
-         hx-target="#htmx-modal-content">
+         data-bs-toggle="offcanvas"
+         data-bs-target="#right-panel-offcanvas"
+         hx-get="{{ url_for('main.get_channel_details', channel_id=channel.id) }}"
+         hx-target="#right-panel-body"
+         title="View channel details">
         <h4 class="mb-0">#{{ channel.name }}</h4>
         <small class="text-muted">
-            <!-- ADD AN ID TO THE SPAN FOR OOB SWAPPING -->
             <span id="member-count" class="me-3" title="View members">
                 <i class="bi bi-people-fill me-1"></i>{{ members_count }} members
             </span>

@@ -86,7 +86,10 @@ class Channel(BaseModel):
     workspace = ForeignKeyField(Workspace, backref="channels")
     name = CharField(max_length=80)
     topic = TextField(null=True)
+    description = TextField(null=True)
     is_private = BooleanField(default=False)
+    posting_restricted_to_admins = BooleanField(default=False)
+    invites_restricted_to_admins = BooleanField(default=False)
 
     class Meta:
         constraints = [SQL("UNIQUE(workspace_id, name)")]
@@ -96,6 +99,7 @@ class ChannelMember(BaseModel):
     id = PrimaryKeyField()
     user = ForeignKeyField(User, backref="channels")
     channel = ForeignKeyField(Channel, backref="members")
+    role = CharField(default="member")
 
 
 # This table will represent a "chat room", which can be a channel or a DM
