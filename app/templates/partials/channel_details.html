@@ -1,12 +1,8 @@
 <div id="channel-details-content">
     <h5 class="mb-0">#{{ channel.name }}</h5>
     <hr />
-
     <!-- About Section -->
-    <div id="about-section-wrapper">
-        {% include 'partials/channel_details_about_display.html' %}
-    </div>
-
+    <div id="about-section-wrapper">{% include 'partials/channel_details_about_display.html' %}</div>
     <!-- Members Section -->
     <div class="mb-4">
         <h6 class="text-muted">Members ({{ current_members|length }})</h6>
@@ -14,39 +10,89 @@
             {% for member in current_members %}
                 <li class="list-group-item d-flex align-items-center px-0">
                     <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2"
-                         style="width: 24px; height: 24px; font-size: 0.8rem;">
-                         {{ member.user.username[0]|upper }}
-                    </div>
+                         style="width: 24px;
+                                height: 24px;
+                                font-size: 0.8rem">{{ member.user.username[0]|upper }}</div>
                     <span>{{ member.user.username }}</span>
-                    {% if member.role == 'admin' %}
-                        <span class="badge bg-primary ms-auto">Admin</span>
-                    {% endif %}
+                    <div class="ms-auto d-flex align-items-center">
+                        {% if member.role == 'admin' %}<span class="badge bg-primary me-2">Admin</span>{% endif %}
+                        {# Show dropdown menu if current user is admin and is not looking at their own entry #}
+                        {% if current_user_membership.role == 'admin' and member.user.id != g.user.id %}
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-light"
+                                        type="button"
+                                        data-bs-toggle="dropdown"
+                                        aria-expanded="false">
+                                    <i class="bi bi-three-dots-vertical"></i>
+                                </button>
+                                <ul class="dropdown-menu">
+                                    {# Option to change role #}
+                                    {% if member.role == 'member' %}
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
+                                                    hx-vals='{"role": "admin"}'
+                                                    hx-target="#channel-details-content"
+                                                    hx-swap="innerHTML">Make Admin</button>
+                                        </li>
+                                    {% else %}
+                                        {# member.role == 'admin' #}
+                                        <li>
+                                            <button class="dropdown-item"
+                                                    hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
+                                                    hx-vals='{"role": "member"}'
+                                                    hx-target="#channel-details-content"
+                                                    hx-swap="innerHTML">Make Member</button>
+                                        </li>
+                                    {% endif %}
+                                    <li>
+                                        <hr class="dropdown-divider">
+                                    </li>
+                                    {# Option to remove user #}
+                                    <li>
+                                        <button class="dropdown-item text-danger"
+                                                hx-delete="{{ url_for('main.remove_channel_member', channel_id=channel.id, user_id_to_remove=member.user.id) }}"
+                                                hx-target="#channel-details-content"
+                                                hx-swap="innerHTML"
+                                                hx-confirm="Are you sure you want to remove {{ member.user.username }} from the channel?">
+                                            Remove from channel
+                                        </button>
+                                    </li>
+                                </ul>
+                            </div>
+                        {% endif %}
+                    </div>
                 </li>
             {% endfor %}
         </ul>
     </div>
-
     <!-- Invite New Members Section -->
     {% if not channel.invites_restricted_to_admins or current_user_membership.role == 'admin' %}
-    <div>
-        <h6 class="text-muted">Add Members</h6>
-        <form hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}"
-              hx-target="#channel-details-content"
-              hx-swap="innerHTML">
-            <div class="input-group">
-                <select name="user_id" class="form-select" required>
-                    <option value="" selected disabled>Choose a user...</option>
-                    {% for user in users_to_invite %}
-                        <option value="{{ user.id }}">{{ user.username }}</option>
-                    {% endfor %}
-                </select>
-                <button class="btn btn-success" type="submit">Add</button>
-            </div>
-            {% if users_to_invite|length == 0 %}
-                <p class="text-muted small mt-2">All workspace users are already in this channel.</p>
-            {% endif %}
-        </form>
-    </div>
+        <div>
+            <h6 class="text-muted">Add Members</h6>
+            <form hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}"
+                  hx-target="#channel-details-content"
+                  hx-swap="innerHTML">
+                <div class="input-group">
+                    <select name="user_id" class="form-select" required>
+                        <option value="" selected disabled>Choose a user...</option>
+                        {% for user in users_to_invite %}<option value="{{ user.id }}">{{ user.username }}</option>{% endfor %}
+                    </select>
+                    <button class="btn btn-success" type="submit">Add</button>
+                </div>
+                {% if users_to_invite|length == 0 %}
+                    <p class="text-muted small mt-2">All workspace users are already in this channel.</p>
+                {% endif %}
+            </form>
+        </div>
     {% endif %}
-
+    <hr />
+    <!-- Danger Zone -->
+    <div>
+        <h6 class="text-danger">Danger Zone</h6>
+        <button class="btn btn-outline-danger w-100"
+                hx-post="{{ url_for('main.leave_channel', channel_id=channel.id) }}"
+                hx-confirm="Are you sure you want to leave #{{ channel.name }}? This action cannot be undone."
+                title="Leave this channel">Leave Channel</button>
+    </div>
 </div>

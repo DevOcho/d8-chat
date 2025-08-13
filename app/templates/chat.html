@@ -50,7 +50,7 @@
             {% for channel in channels %}
                 {% set conv_id_str = "channel_" ~ channel.id %}
                 {% set count = unread_counts.get(conv_id_str, 0) %}
-                <li>
+                <li id="channel-item-{{ channel.id }}">
                     <div class="d-flex justify-content-between align-items-center">
                         <a href="#"
                            id="link-{{ conv_id_str }}"
@@ -63,7 +63,7 @@
                     </div>
                 </li>
             {% else %}
-                <li>No channels found.</li>
+                <li id="no-channels-placeholder">No channels found.</li>
             {% endfor %}
         </ul>
         <!-- DM list -->
@@ -183,7 +183,6 @@
             </div>
         </div>
     </main>
-
     <!-- Slide-Out Panel -->
     <div class="offcanvas offcanvas-end"
          tabindex="-1"
@@ -205,7 +204,6 @@
             </div>
         </div>
     </div>
-
     <!-- Generic HTMX Modal -->
     <div class="modal fade"
          id="htmx-modal"

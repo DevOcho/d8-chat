@@ -308,6 +308,7 @@ def get_channel_chat(channel_id):
 
     return response
 
+
 @main_bp.route("/chat/channel/<int:channel_id>/details", methods=["GET"])
 @login_required
 def get_channel_details(channel_id):
@@ -318,7 +319,7 @@ def get_channel_details(channel_id):
 
     # Verify user is a member of the channel they are trying to view
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    if not current_user_membership: # <-- MODIFY THIS
+    if not current_user_membership:  # <-- MODIFY THIS
         return "You are not a member of this channel.", 403
 
     # Find users who are NOT already members of this channel to populate the invite list
@@ -340,7 +341,7 @@ def get_channel_details(channel_id):
         users_to_invite=users_to_invite,
         current_members=current_members,
         current_user_membership=current_user_membership,
-    )    
+    )
 
 
 @main_bp.route("/chat/channel/<int:channel_id>/about", methods=["GET"])
@@ -353,8 +354,9 @@ def get_channel_details_about_display(channel_id):
     return render_template(
         "partials/channel_details_about_display.html",
         channel=channel,
-        current_user_membership=current_user_membership
+        current_user_membership=current_user_membership,
     )
+
 
 @main_bp.route("/chat/channel/<int:channel_id>/about/edit", methods=["GET"])
 @login_required
@@ -363,7 +365,7 @@ def get_channel_about_form(channel_id):
     channel = Channel.get_by_id(channel_id)
     # Security check: only admins should be able to get this form
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    if not membership or membership.role != 'admin':
+    if not membership or membership.role != "admin":
         return "Unauthorized", 403
 
     return render_template("partials/channel_details_about_form.html", channel=channel)
@@ -376,7 +378,7 @@ def update_channel_about(channel_id):
     channel = Channel.get_by_id(channel_id)
     # Security check: only admins should be able to update
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    if not membership or membership.role != 'admin':
+    if not membership or membership.role != "admin":
         return "Unauthorized", 403
 
     # Update the channel and save
@@ -389,12 +391,14 @@ def update_channel_about(channel_id):
     # 2. An OOB swap for the main chat header to show the new topic.
 
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    members_count = ChannelMember.select().where(ChannelMember.channel == channel).count()
+    members_count = (
+        ChannelMember.select().where(ChannelMember.channel == channel).count()
+    )
 
     display_html = render_template(
         "partials/channel_details_about_display.html",
         channel=channel,
-        current_user_membership=current_user_membership
+        current_user_membership=current_user_membership,
     )
     header_html = render_template(
         "partials/channel_header.html", channel=channel, members_count=members_count
@@ -419,9 +423,9 @@ def add_channel_member(channel_id):
     # Check permissions
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not current_user_membership:
-         return "You are not a member of this channel.", 403
+        return "You are not a member of this channel.", 403
 
-    if channel.invites_restricted_to_admins and current_user_membership.role != 'admin':
+    if channel.invites_restricted_to_admins and current_user_membership.role != "admin":
         # This is a silent fail for now, we can add a proper error message later.
         # It just re-renders the panel without adding the user.
         return get_channel_details(channel_id)
@@ -494,8 +498,6 @@ def create_channel():
     channel_name = request.form.get("name", "").strip()
     is_private = request.form.get("is_private") == "on"
 
-    # --- Validation ---
-    # Sanitize name: lowercase, no spaces, limited special chars
     channel_name = re.sub(r"[^a-zA-Z0-9_-]", "", channel_name).lower()
 
     if not channel_name or len(channel_name) < 3:
@@ -510,24 +512,18 @@ def create_channel():
             400,
         )
 
-    # Assume user belongs to the first workspace they are a member of.
-    # In a multi-workspace app, this might come from the URL or session.
     workspace_member = WorkspaceMember.get_or_none(user=g.user)
     if not workspace_member:
         return "You are not a member of any workspace.", 403
     workspace = workspace_member.workspace
 
-    # --- Database Creation ---
     try:
-        with db.atomic():  # Use a transaction
+        with db.atomic():
             new_channel = Channel.create(
                 workspace=workspace, name=channel_name, is_private=is_private
             )
-            # The creator automatically becomes a member
             ChannelMember.create(user=g.user, channel=new_channel, role="admin")
-
     except IntegrityError:
-        # This happens if the UNIQUE constraint on (workspace, name) fails
         error = f"A channel named '#{channel_name}' already exists."
         return (
             render_template(
@@ -540,14 +536,218 @@ def create_channel():
         )
 
     # --- HTMX Success Response ---
-    # 1. Render the new channel item to be appended to the list
+    # 1. Render the new channel item using our corrected partial.
     new_channel_html = render_template(
         "partials/channel_list_item.html", channel=new_channel
     )
-    # 2. Create a response and add a trigger to close the modal
-    response = make_response(new_channel_html)
+
+    # 2. Create an OOB swap to specifically delete the placeholder message.
+    remove_placeholder_html = (
+        '<li id="no-channels-placeholder" hx-swap-oob="delete"></li>'
+    )
+
+    # 3. Combine both HTML fragments into one response.
+    full_response_html = new_channel_html + remove_placeholder_html
+
+    # 4. Create a response with the combined HTML and add a trigger to close the modal.
+    response = make_response(full_response_html)
     response.headers["HX-Trigger"] = "close-modal"
     return response
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/leave", methods=["POST"])
+@login_required
+def leave_channel(channel_id):
+    """Allows the current user to leave a channel."""
+    channel = Channel.get_or_none(id=channel_id)
+    if not channel:
+        response = make_response()
+        response.headers["HX-Redirect"] = url_for("main.chat_interface")
+        return response
+
+    # 1. Delete the user's membership
+    membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if membership:
+        if channel.is_private and membership.role == "admin":
+            admin_count = (
+                ChannelMember.select()
+                .where(
+                    (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
+                )
+                .count()
+            )
+            if (
+                admin_count == 1
+                and ChannelMember.select()
+                .where(ChannelMember.channel == channel)
+                .count()
+                > 1
+            ):
+                return (
+                    "You cannot leave as the sole admin of a private channel with other members.",
+                    403,
+                )
+        membership.delete_instance()
+
+    # 2. Prepare all the HTML fragments for the multi-swap response
+
+    # Fragment A: OOB swap to delete the channel from the sidebar
+    remove_from_list_html = (
+        f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
+    )
+
+    # Fragment B & C: Get the content needed to render the user's personal DM view.
+    user_self = g.user
+    conv_id_str_self = f"dm_{user_self.id}_{user_self.id}"
+    conversation_self, _ = Conversation.get_or_create(
+        conversation_id_str=conv_id_str_self, defaults={"type": "dm"}
+    )
+    messages_self = (
+        Message.select()
+        .where(Message.conversation == conversation_self)
+        .order_by(Message.created_at.desc())
+        .limit(PAGE_SIZE)
+    )
+
+    # Render the new header. The template already contains the hx-swap-oob attribute,
+    # so we use it directly instead of wrapping it.
+    dm_header_html = render_template("partials/dm_header.html", other_user=user_self)
+
+    # Render the new message list. This template does NOT have an OOB attribute,
+    # so we correctly wrap it in a div that does.
+    dm_messages_html = render_template(
+        "partials/dm_messages.html",
+        messages=list(reversed(messages_self)),
+        other_user=user_self,
+        last_read_timestamp=datetime.datetime.now(),
+        PAGE_SIZE=PAGE_SIZE,
+    )
+    messages_swap_html = f'<div id="chat-messages-container" hx-swap-oob="innerHTML">{dm_messages_html}</div>'
+
+    # 3. Combine all HTML parts into a single response body
+    full_response_html = remove_from_list_html + dm_header_html + messages_swap_html
+
+    # 4. Create the final response and add a custom trigger to close the panel
+    response = make_response(full_response_html)
+    response.headers["HX-Trigger"] = "close-offcanvas"
+
+    return response
+
+
+@main_bp.route(
+    "/chat/channel/<int:channel_id>/members/<int:user_id_to_remove>", methods=["DELETE"]
+)
+@login_required
+def remove_channel_member(channel_id, user_id_to_remove):
+    """Allows a channel admin to remove another member from the channel."""
+    channel = Channel.get_or_none(id=channel_id)
+    user_to_remove = User.get_or_none(id=user_id_to_remove)
+
+    if not channel or not user_to_remove:
+        return "Channel or user not found", 404
+
+    # Security Check 1: Is the current user an admin of this channel?
+    admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not admin_membership or admin_membership.role != "admin":
+        return "You do not have permission to remove members.", 403
+
+    # Security Check 2: Can't remove yourself with this endpoint.
+    if g.user.id == user_id_to_remove:
+        return "You cannot remove yourself.", 400
+
+    # Find and delete the target user's membership
+    membership_to_delete = ChannelMember.get_or_none(
+        user=user_to_remove, channel=channel
+    )
+    if membership_to_delete:
+        # Prevent removing the last admin
+        if membership_to_delete.role == "admin":
+            admin_count = (
+                ChannelMember.select()
+                .where(
+                    (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
+                )
+                .count()
+            )
+            if admin_count == 1:
+                return "You cannot remove the last admin of the channel.", 403
+
+        membership_to_delete.delete_instance()
+
+        # Real-time notification for the removed user
+        if user_id_to_remove in chat_manager.all_clients:
+            try:
+                # OOB swap removes the channel from their sidebar
+                remove_html = (
+                    f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
+                )
+
+                # Notification payload
+                notification = {
+                    "type": "notification",
+                    "title": "Removed from Channel",
+                    "body": f"You have been removed from #{channel.name} by {g.user.username}.",
+                    "icon": url_for("static", filename="favicon.ico", _external=True),
+                }
+
+                recipient_ws = chat_manager.all_clients[user_id_to_remove]
+                recipient_ws.send(remove_html)
+                recipient_ws.send(json.dumps(notification))
+
+            except Exception as e:
+                print(
+                    f"Could not send removal notification to user {user_id_to_remove}: {e}"
+                )
+
+    # After removing, re-render the channel details panel for the admin
+    return get_channel_details(channel_id)
+
+
+@main_bp.route(
+    "/chat/channel/<int:channel_id>/members/<int:user_id_to_modify>/role",
+    methods=["PUT"],
+)
+@login_required
+def update_member_role(channel_id, user_id_to_modify):
+    """Allows a channel admin to promote or demote another member."""
+    new_role = request.form.get("role")
+    channel = Channel.get_or_none(id=channel_id)
+    user_to_modify = User.get_or_none(id=user_id_to_modify)
+
+    if not all([channel, user_to_modify, new_role in ["admin", "member"]]):
+        return "Invalid request parameters", 400
+
+    # Security Check 1: Is the current user an admin?
+    admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not admin_membership or admin_membership.role != "admin":
+        return "You do not have permission to change roles.", 403
+
+    # Security Check 2: Can't modify yourself.
+    if g.user.id == user_id_to_modify:
+        return "You cannot change your own role.", 400
+
+    # Find the membership to modify
+    membership_to_modify = ChannelMember.get_or_none(
+        user=user_to_modify, channel=channel
+    )
+    if membership_to_modify:
+        # Security Check 3: Prevent demoting the last admin.
+        if membership_to_modify.role == "admin" and new_role == "member":
+            admin_count = (
+                ChannelMember.select()
+                .where(
+                    (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
+                )
+                .count()
+            )
+            if admin_count == 1:
+                return "Cannot demote the last admin of the channel.", 403
+
+        membership_to_modify.role = new_role
+        membership_to_modify.save()
+
+    # Re-render the details panel to show the change.
+    return get_channel_details(channel_id)
 
 
 @main_bp.route("/chat/dms/start", methods=["GET"])
@@ -1006,10 +1206,14 @@ def chat(ws):
 
             # Check posting permissions
             if conversation.type == "channel":
-                channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+                channel = Channel.get_by_id(
+                    conversation.conversation_id_str.split("_")[1]
+                )
                 if channel.posting_restricted_to_admins:
-                    membership = ChannelMember.get_or_none(user=ws.user, channel=channel)
-                    if not membership or membership.role != 'admin':
+                    membership = ChannelMember.get_or_none(
+                        user=ws.user, channel=channel
+                    )
+                    if not membership or membership.role != "admin":
                         # Silently ignore the message if the user doesn't have permission
                         continue
 

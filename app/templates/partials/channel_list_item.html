@@ -1,14 +1,18 @@
-<!-- app/templates/partials/channel_list_item.html -->
+File: app/templates/partials/channel_list_item.html
 <!--
     This snippet is designed to be added via an Out-of-Band swap.
-    The target #channel-list will have this appended to its end.
-    The <div> won't be there, just the contents of the <li>
+    It appends the new, correctly-structured <li> to the #channel-list.
 -->
 <div hx-swap-oob="beforeend:#channel-list">
-    <li>
-        <a href="#"
-           class="text-decoration-none text-light"
-           hx-get="/chat/channel/{{ channel.id }}"
-           hx-target="#chat-messages-container"># {{ channel.name }}</a>
+    <li id="channel-item-{{ channel.id }}">
+        <div class="d-flex justify-content-between align-items-center">
+            <a href="#"
+               id="link-channel_{{ channel.id }}"
+               class="text-decoration-none text-light"
+               hx-get="/chat/channel/{{ channel.id }}"
+               hx-target="#chat-messages-container"># {{ channel.name }}</a>
+            {# The badge will be empty initially, but the container must exist #}
+            <span id="unread-badge-channel_{{ channel.id }}"></span>
+        </div>
     </li>
 </div>

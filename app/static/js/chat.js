@@ -510,5 +510,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Logic to control the right-side slide-out panel (Offcanvas)
+    const rightPanelOffcanvasEl = document.getElementById('right-panel-offcanvas');
+    if (rightPanelOffcanvasEl) {
+        const rightPanelOffcanvas = new bootstrap.Offcanvas(rightPanelOffcanvasEl);
+        // Listen for our custom event sent from the server to close the panel
+        document.body.addEventListener('close-offcanvas', () => {
+            rightPanelOffcanvas.hide();
+        });
+    }
+
     processCodeBlocks(document.body);
 });
