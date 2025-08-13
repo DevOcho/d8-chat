@@ -402,6 +402,22 @@ const Editor = {
 document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
 
+    // Global HTMX Error Handling with Toasts
+    const toastEl = document.getElementById('error-toast');
+    if (toastEl) {
+        const toastBody = document.getElementById('toast-body-content');
+        const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+
+        document.body.addEventListener('htmx:responseError', function(evt) {
+            console.error("HTMX Response Error:", evt.detail.xhr);
+            // Use the response text from the server as the toast message
+            if (toastBody && evt.detail.xhr.responseText) {
+                toastBody.textContent = evt.detail.xhr.responseText;
+                toast.show();
+            }
+        });
+    }
+
     // --- Element References ---
     const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');

@@ -13,26 +13,6 @@ tree -I 'bin|lib|.git|__pycache__|*.pyc'
 
 Next steps for channel management:
 
-Prompt for Stage 3: Member Management (Leaving, Removing, and Role Changes)
-Goal: To give users and admins the ability to manage channel membership beyond just adding people.
-When you're ready, you can say:
-"Hello again. We've built the channel details panel and implemented basic permissions. Now, let's add more advanced member management features.
-I need to implement the following:
-Leave Channel: A button in the details panel that allows the current user to leave the channel.
-Remove Member: For channel admins, a "Remove" button next to each member's name (except their own) to remove that person from the channel.
-Manage Roles: For channel admins, a way to promote a regular member to an admin, and demote an admin back to a member. This could be a dropdown or a set of buttons next to each member.
-Please guide me through building these features."
-
-Prompt for Stage 4: UI for Channel Settings
-Goal: To give channel admins a user interface to control the permission settings we've already added to the database.
-When you're ready, you can say:
-"Hello again. Channel admins can now manage members. Let's give them control over the channel's settings.
-I want to add a new 'Settings' section to the channel details panel that is only visible to admins. This section should contain a form with toggles/switches for:
-posting_restricted_to_admins ("Only admins can post messages")
-invites_restricted_to_admins ("Only admins can invite new members")
-Please help me build the UI and the backend routes to save these settings."
-
-
 Prompt for Stage 5: Public Channel Discovery and Joining
 Goal: To fulfill the requirement for "less restrictive" channels by allowing users to find and join public channels on their own.
 When you're ready, you can say:

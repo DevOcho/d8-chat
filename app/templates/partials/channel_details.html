@@ -31,10 +31,7 @@
                                                     hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
                                                     hx-vals='{"role": "admin"}'
                                                     hx-target="#channel-details-content"
-                                                    hx-swap="outerHTML">
-                                                {# <-- FIX: WAS innerHTML #}
-                                                Make Admin
-                                            </button>
+                                                    hx-swap="outerHTML">Make Admin</button>
                                         </li>
                                     {% else %}
                                         <li>
@@ -42,10 +39,7 @@
                                                     hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
                                                     hx-vals='{"role": "member"}'
                                                     hx-target="#channel-details-content"
-                                                    hx-swap="outerHTML">
-                                                {# <-- FIX: WAS innerHTML #}
-                                                Make Member
-                                            </button>
+                                                    hx-swap="outerHTML">Make Member</button>
                                         </li>
                                     {% endif %}
                                     <li>
@@ -53,10 +47,10 @@
                                     </li>
                                     <li>
                                         <button class="dropdown-item text-danger"
-                                            hx-delete="{{ url_for('main.remove_channel_member', channel_id=channel.id, user_id_to_remove=member.user.id) }}"
-                                            hx-target="#channel-details-content"
-                                            hx-swap="outerHTML" {# <-- FIX: WAS innerHTML #}
-                                            hx-confirm="Are you sure you want to remove {{ member.user.username }} from the channel?">
+                                                hx-delete="{{ url_for('main.remove_channel_member', channel_id=channel.id, user_id_to_remove=member.user.id) }}"
+                                                hx-target="#channel-details-content"
+                                                hx-swap="outerHTML"
+                                                hx-confirm="Are you sure you want to remove {{ member.user.username }} from the channel?">
                                             Remove from channel
                                         </button>
                                     </li>
@@ -69,13 +63,13 @@
         </ul>
     </div>
     <!-- Invite New Members Section -->
-    {% if not channel.invites_restricted_to_admins or current_user_membership.role == 'admin' %}
-        <div>
+    {# This whole section is now conditional on the user being an admin OR invites not being restricted #}
+    {% if current_user_membership.role == 'admin' or not channel.invites_restricted_to_admins %}
+        <div class="mb-4">
             <h6 class="text-muted">Add Members</h6>
             <form hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}"
                   hx-target="#channel-details-content"
                   hx-swap="outerHTML">
-                {# <-- FIX: WAS innerHTML #}
                 <div class="input-group">
                     <select name="user_id" class="form-select" required>
                         <option value="" selected disabled>Choose a user...</option>
@@ -87,6 +81,40 @@
                     <p class="text-muted small mt-2">All workspace users are already in this channel.</p>
                 {% endif %}
             </form>
+        </div>
+    {% endif %}
+    {# --- [THIS ENTIRE SECTION HAS BEEN REWRITTEN] --- #}
+    {% if current_user_membership.role == 'admin' %}
+        <div class="mb-4">
+            <h6 class="text-muted">Settings</h6>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input"
+                       type="checkbox"
+                       role="switch"
+                       id="posting_restricted"
+                       name="posting_restricted"
+                       hx-put="{{ url_for('main.update_channel_settings', channel_id=channel.id) }}"
+                       hx-trigger="change"
+                       hx-include="[name='posting_restricted'], [name='invites_restricted']"
+                       hx-target="this"
+                       hx-swap="none"
+                       {% if channel.posting_restricted_to_admins %}checked{% endif %}>
+                <label class="form-check-label small" for="posting_restricted">Only admins can post messages</label>
+            </div>
+            <div class="form-check form-switch">
+                <input class="form-check-input"
+                       type="checkbox"
+                       role="switch"
+                       id="invites_restricted"
+                       name="invites_restricted"
+                       hx-put="{{ url_for('main.update_channel_settings', channel_id=channel.id) }}"
+                       hx-trigger="change"
+                       hx-include="[name='posting_restricted'], [name='invites_restricted']"
+                       hx-target="this"
+                       hx-swap="none"
+                       {% if channel.invites_restricted_to_admins %}checked{% endif %}>
+                <label class="form-check-label small" for="invites_restricted">Only admins can invite new members</label>
+            </div>
         </div>
     {% endif %}
     <hr />

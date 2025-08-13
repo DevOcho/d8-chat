@@ -459,7 +459,7 @@ def add_channel_member(channel_id):
     )
 
     members_count = current_members.count()
-    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count">{members_count} members</span>'
+    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count"><i class="bi bi-people-fill me-1"></i> {members_count} members</span>'
 
     return make_response(panel_html + header_count_html)
 
@@ -535,6 +535,70 @@ def create_channel():
     response = make_response(full_response_html)
     response.headers["HX-Trigger"] = "close-modal"
     return response
+
+
+@main_bp.route("/chat/channels/browse", methods=["GET"])
+@login_required
+def get_browse_channels_modal():
+    """Renders the modal for browsing and joining public channels."""
+    # Subquery to find all channels the user is already a member of.
+    member_of_channels_subquery = ChannelMember.select(ChannelMember.channel_id).where(
+        ChannelMember.user == g.user
+    )
+
+    # Main query to find channels that are public AND the user is not a member of.
+    joinable_channels = (
+        Channel.select()
+        .where(
+            (Channel.is_private == False)
+            & (Channel.id.not_in(member_of_channels_subquery))
+        )
+        .order_by(Channel.name)
+    )
+
+    return render_template(
+        "partials/browse_channels_modal.html", joinable_channels=joinable_channels
+    )
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/join", methods=["POST"])
+@login_required
+def join_channel(channel_id):
+    """Adds the current user to a public channel."""
+    channel = Channel.get_or_none(id=channel_id)
+    if not channel:
+        return "Channel not found.", 404
+
+    # Security checks
+    if channel.is_private:
+        return "You cannot join a private channel.", 403
+
+    is_already_member = (
+        ChannelMember.select()
+        .where((ChannelMember.user == g.user) & (ChannelMember.channel == channel))
+        .exists()
+    )
+
+    if is_already_member:
+        # User is already a member, do nothing but return success.
+        return '<span class="text-success fw-bold">Joined</span>'
+
+    # Add the user to the channel
+    ChannelMember.create(user=g.user, channel=channel)
+
+    # --- Powerful HTMX Multi-Swap Response ---
+    # 1. Render the HTML fragment to add the new channel to the sidebar list.
+    #    This uses our existing partial and an OOB (Out-of-Band) swap.
+    new_sidebar_item_html = render_template(
+        "partials/channel_list_item.html", channel=channel
+    )
+
+    # 2. Render the confirmation message that will replace the 'Join' button in the modal.
+    #    This is the "main" swap target.
+    confirmation_message_html = '<span class="text-success fw-bold">Joined!</span>'
+
+    # 3. Combine them into a single response. HTMX will process both swaps.
+    return new_sidebar_item_html + confirmation_message_html
 
 
 @main_bp.route("/chat/channel/<int:channel_id>/leave", methods=["POST"])
@@ -698,7 +762,7 @@ def remove_channel_member(channel_id, user_id_to_remove):
     )
 
     members_count = current_members.count()
-    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count">{members_count} members</span>'
+    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count"><i class="bi bi-people-fill me-1"></i> {members_count} members</span>'
 
     return make_response(panel_html + header_count_html)
 
@@ -717,21 +781,17 @@ def update_member_role(channel_id, user_id_to_modify):
     if not all([channel, user_to_modify, new_role in ["admin", "member"]]):
         return "Invalid request parameters", 400
 
-    # Security Check 1: Is the current user an admin?
     admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not admin_membership or admin_membership.role != "admin":
         return "You do not have permission to change roles.", 403
 
-    # Security Check 2: Can't modify yourself.
     if g.user.id == user_id_to_modify:
         return "You cannot change your own role.", 400
 
-    # Find the membership to modify
     membership_to_modify = ChannelMember.get_or_none(
         user=user_to_modify, channel=channel
     )
     if membership_to_modify:
-        # Security Check 3: Prevent demoting the last admin.
         if membership_to_modify.role == "admin" and new_role == "member":
             admin_count = (
                 ChannelMember.select()
@@ -741,13 +801,57 @@ def update_member_role(channel_id, user_id_to_modify):
                 .count()
             )
             if admin_count == 1:
+                # In a real app, you might want to return a more graceful error UI
                 return "Cannot demote the last admin of the channel.", 403
 
         membership_to_modify.role = new_role
         membership_to_modify.save()
 
-    # Re-render the details panel to show the change.
-    return get_channel_details(channel_id)
+    subquery = ChannelMember.select(ChannelMember.user_id).where(
+        ChannelMember.channel_id == channel_id
+    )
+    users_to_invite = (
+        User.select()
+        .join(WorkspaceMember)
+        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
+    )
+    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
+
+    # Re-render the panel to show the change.
+    return render_template(
+        "partials/channel_details.html",
+        channel=channel,
+        users_to_invite=users_to_invite,
+        current_members=current_members,
+        current_user_membership=admin_membership,
+    )
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/settings", methods=["PUT"])
+@login_required
+def update_channel_settings(channel_id):
+    """Allows a channel admin to update channel-wide settings. Saves on toggle."""
+    channel = Channel.get_or_none(id=channel_id)
+    if not channel:
+        return "Channel not found.", 404
+
+    # Security Check: Is the current user an admin of this channel?
+    admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not admin_membership or admin_membership.role != "admin":
+        return "You do not have permission to change settings.", 403
+
+    # Update settings based on form data.
+    channel.posting_restricted_to_admins = (
+        request.form.get("posting_restricted") == "on"
+    )
+    channel.invites_restricted_to_admins = (
+        request.form.get("invites_restricted") == "on"
+    )
+    channel.save()
+
+    # On success, return an empty 200 OK response.
+    # HTMX will do nothing, which is exactly what we want.
+    return "", 200
 
 
 @main_bp.route("/chat/dms/start", methods=["GET"])
