@@ -420,42 +420,25 @@ def add_channel_member(channel_id):
     if not user_id_to_add or not channel:
         return "Invalid request", 400
 
-    # Check permissions
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not current_user_membership:
         return "You are not a member of this channel.", 403
 
     if channel.invites_restricted_to_admins and current_user_membership.role != "admin":
-        # This is a silent fail for now, we can add a proper error message later.
-        # It just re-renders the panel without adding the user.
         return get_channel_details(channel_id)
 
-    # Add the user to the channel
     ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
 
-    # Check if the added user is currently online and connected via WebSocket
     if user_id_to_add in chat_manager.all_clients:
         try:
-            # Get the recipient's websocket connection
             recipient_ws = chat_manager.all_clients[user_id_to_add]
-
-            # Render the HTML fragment for the new channel list item.
             new_channel_html = render_template(
                 "partials/channel_list_item.html", channel=channel
             )
-
-            # Send the HTML fragment directly to that user's websocket
             recipient_ws.send(new_channel_html)
         except Exception as e:
-            # It's good practice to log if the send fails for any reason
             print(f"Could not send real-time channel add to user {user_id_to_add}: {e}")
 
-    # --- Powerful HTMX Response ---
-    # We will send back TWO pieces of OOB content:
-    # 1. The updated member count for the main chat header.
-    # 2. The refreshed content for the modal itself.
-
-    # Re-query the data needed for the modal partial
     subquery = ChannelMember.select(ChannelMember.user_id).where(
         ChannelMember.channel_id == channel_id
     )
@@ -466,20 +449,19 @@ def add_channel_member(channel_id):
     )
     current_members = ChannelMember.select().where(ChannelMember.channel == channel)
 
-    # Render the new state of the modal content
-    modal_html = render_template(
+    # We now correctly pass 'current_user_membership' to the template.
+    panel_html = render_template(
         "partials/channel_details.html",
         channel=channel,
         users_to_invite=users_to_invite,
         current_members=current_members,
+        current_user_membership=current_user_membership,
     )
 
-    # Render just the new member count for the header
     members_count = current_members.count()
     header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count">{members_count} members</span>'
 
-    # Combine them and send the response
-    return make_response(modal_html + header_count_html)
+    return make_response(panel_html + header_count_html)
 
 
 # --- Route to get the channel creation form ---
@@ -559,11 +541,17 @@ def create_channel():
 @login_required
 def leave_channel(channel_id):
     """Allows the current user to leave a channel."""
+
     channel = Channel.get_or_none(id=channel_id)
     if not channel:
         response = make_response()
         response.headers["HX-Redirect"] = url_for("main.chat_interface")
         return response
+
+    if channel.name == "announcements":
+        # Return a 403 Forbidden error. This is a good practice for actions
+        # that are disallowed by application rules.
+        return "You cannot leave the announcements channel.", 403
 
     # 1. Delete the user's membership
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
@@ -646,21 +634,17 @@ def remove_channel_member(channel_id, user_id_to_remove):
     if not channel or not user_to_remove:
         return "Channel or user not found", 404
 
-    # Security Check 1: Is the current user an admin of this channel?
     admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not admin_membership or admin_membership.role != "admin":
         return "You do not have permission to remove members.", 403
 
-    # Security Check 2: Can't remove yourself with this endpoint.
     if g.user.id == user_id_to_remove:
         return "You cannot remove yourself.", 400
 
-    # Find and delete the target user's membership
     membership_to_delete = ChannelMember.get_or_none(
         user=user_to_remove, channel=channel
     )
     if membership_to_delete:
-        # Prevent removing the last admin
         if membership_to_delete.role == "admin":
             admin_count = (
                 ChannelMember.select()
@@ -670,37 +654,53 @@ def remove_channel_member(channel_id, user_id_to_remove):
                 .count()
             )
             if admin_count == 1:
+                # This needs to re-render the panel with an error message
                 return "You cannot remove the last admin of the channel.", 403
 
         membership_to_delete.delete_instance()
 
-        # Real-time notification for the removed user
         if user_id_to_remove in chat_manager.all_clients:
             try:
-                # OOB swap removes the channel from their sidebar
                 remove_html = (
                     f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
                 )
-
-                # Notification payload
                 notification = {
                     "type": "notification",
                     "title": "Removed from Channel",
                     "body": f"You have been removed from #{channel.name} by {g.user.username}.",
                     "icon": url_for("static", filename="favicon.ico", _external=True),
                 }
-
                 recipient_ws = chat_manager.all_clients[user_id_to_remove]
                 recipient_ws.send(remove_html)
                 recipient_ws.send(json.dumps(notification))
-
             except Exception as e:
                 print(
                     f"Could not send removal notification to user {user_id_to_remove}: {e}"
                 )
 
-    # After removing, re-render the channel details panel for the admin
-    return get_channel_details(channel_id)
+    subquery = ChannelMember.select(ChannelMember.user_id).where(
+        ChannelMember.channel_id == channel_id
+    )
+    users_to_invite = (
+        User.select()
+        .join(WorkspaceMember)
+        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
+    )
+    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+
+    panel_html = render_template(
+        "partials/channel_details.html",
+        channel=channel,
+        users_to_invite=users_to_invite,
+        current_members=current_members,
+        current_user_membership=current_user_membership,
+    )
+
+    members_count = current_members.count()
+    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count">{members_count} members</span>'
+
+    return make_response(panel_html + header_count_html)
 
 
 @main_bp.route(
