@@ -312,17 +312,78 @@ def get_channel_chat(channel_id):
 @main_bp.route("/chat/channel/<int:channel_id>/details", methods=["GET"])
 @login_required
 def get_channel_details(channel_id):
-    """Renders the HTMX partial for the channel details slide-out panel."""
+    """Renders the channel details shell with the default 'About' tab."""
     channel = Channel.get_or_none(id=channel_id)
     if not channel:
         return "Channel not found", 404
 
-    # Verify user is a member of the channel they are trying to view
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    if not current_user_membership:  # <-- MODIFY THIS
+    if not current_user_membership:
         return "You are not a member of this channel.", 403
 
-    # Find users who are NOT already members of this channel to populate the invite list
+    # Data needed for the 'About' tab (the default view)
+    admins = list(
+        ChannelMember.select().where(
+            (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
+        )
+    )
+    members_count = (
+        ChannelMember.select().where(ChannelMember.channel == channel).count()
+    )
+
+    return render_template(
+        "partials/channel_details.html",
+        channel=channel,
+        admins=admins,
+        members_count=members_count,
+        current_user_membership=current_user_membership,
+    )
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/details/about", methods=["GET"])
+@login_required
+def get_channel_details_about_tab(channel_id):
+    """Renders the content for the 'About' tab."""
+    channel = Channel.get_by_id(channel_id)
+    admins = list(
+        ChannelMember.select().where(
+            (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
+        )
+    )
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    return render_template(
+        "partials/channel_details_tab_about.html",
+        channel=channel,
+        admins=admins,
+        current_user_membership=current_user_membership,
+    )
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/details/members", methods=["GET"])
+@login_required
+def get_channel_details_members_tab(channel_id):
+    """Renders the content for the 'Members' tab."""
+    channel = Channel.get_by_id(channel_id)
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+
+    if not current_user_membership:
+        return "Unauthorized", 403
+
+    # Separate queries for admins and regular members
+    admins = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "admin"))
+        .order_by(ChannelMember.user.username)
+    )
+    members = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "member"))
+        .order_by(ChannelMember.user.username)
+    )
+
+    # Users available to be invited
     subquery = ChannelMember.select(ChannelMember.user_id).where(
         ChannelMember.channel_id == channel_id
     )
@@ -332,15 +393,26 @@ def get_channel_details(channel_id):
         .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
     )
 
-    # Get the list of current members to display
-    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
-
     return render_template(
-        "partials/channel_details.html",
+        "partials/channel_details_tab_members.html",
         channel=channel,
+        admins=admins,
+        members=members,
         users_to_invite=users_to_invite,
-        current_members=current_members,
         current_user_membership=current_user_membership,
+    )
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/details/settings", methods=["GET"])
+@login_required
+def get_channel_details_settings_tab(channel_id):
+    """Renders the content for the 'Settings' tab."""
+    channel = Channel.get_by_id(channel_id)
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not current_user_membership or current_user_membership.role != "admin":
+        return "Unauthorized", 403
+    return render_template(
+        "partials/channel_details_tab_settings.html", channel=channel
     )
 
 
@@ -350,7 +422,6 @@ def get_channel_details_about_display(channel_id):
     """Returns the read-only view of the channel 'About' section."""
     channel = Channel.get_by_id(channel_id)
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    # This partial is used for the "Cancel" button on the edit form
     return render_template(
         "partials/channel_details_about_display.html",
         channel=channel,
@@ -363,7 +434,6 @@ def get_channel_details_about_display(channel_id):
 def get_channel_about_form(channel_id):
     """Returns the form for editing channel details."""
     channel = Channel.get_by_id(channel_id)
-    # Security check: only admins should be able to get this form
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not membership or membership.role != "admin":
         return "Unauthorized", 403
@@ -376,35 +446,30 @@ def get_channel_about_form(channel_id):
 def update_channel_about(channel_id):
     """Processes the submission of the channel details edit form."""
     channel = Channel.get_by_id(channel_id)
-    # Security check: only admins should be able to update
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not membership or membership.role != "admin":
         return "Unauthorized", 403
 
-    # Update the channel and save
     channel.topic = request.form.get("topic")
     channel.description = request.form.get("description")
     channel.save()
 
-    # We need to send back two pieces of HTML:
-    # 1. The updated "About" section to replace the form in the side panel.
-    # 2. An OOB swap for the main chat header to show the new topic.
-
+    # We need to send back the updated "About" display section
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    members_count = (
-        ChannelMember.select().where(ChannelMember.channel == channel).count()
-    )
-
     display_html = render_template(
         "partials/channel_details_about_display.html",
         channel=channel,
         current_user_membership=current_user_membership,
     )
+
+    # And an OOB swap for the main chat header
+    members_count = (
+        ChannelMember.select().where(ChannelMember.channel == channel).count()
+    )
     header_html = render_template(
         "partials/channel_header.html", channel=channel, members_count=members_count
     )
 
-    # Broadcast the header update to all users in the channel
     chat_manager.broadcast(f"channel_{channel.id}", header_html)
 
     return display_html
@@ -425,7 +490,7 @@ def add_channel_member(channel_id):
         return "You are not a member of this channel.", 403
 
     if channel.invites_restricted_to_admins and current_user_membership.role != "admin":
-        return get_channel_details(channel_id)
+        return "Only admins can invite new members to this channel.", 403
 
     ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
 
@@ -439,29 +504,8 @@ def add_channel_member(channel_id):
         except Exception as e:
             print(f"Could not send real-time channel add to user {user_id_to_add}: {e}")
 
-    subquery = ChannelMember.select(ChannelMember.user_id).where(
-        ChannelMember.channel_id == channel_id
-    )
-    users_to_invite = (
-        User.select()
-        .join(WorkspaceMember)
-        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
-    )
-    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
-
-    # We now correctly pass 'current_user_membership' to the template.
-    panel_html = render_template(
-        "partials/channel_details.html",
-        channel=channel,
-        users_to_invite=users_to_invite,
-        current_members=current_members,
-        current_user_membership=current_user_membership,
-    )
-
-    members_count = current_members.count()
-    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count"><i class="bi bi-people-fill me-1"></i> {members_count} members</span>'
-
-    return make_response(panel_html + header_count_html)
+    # After adding, re-render the members tab for the admin.
+    return get_channel_details_members_tab(channel_id)
 
 
 # --- Route to get the channel creation form ---
@@ -499,13 +543,20 @@ def create_channel():
         return "You are not a member of any workspace.", 403
     workspace = workspace_member.workspace
 
+    # --- Database Creation ---
     try:
-        with db.atomic():
+        with db.atomic():  # Use a transaction
             new_channel = Channel.create(
-                workspace=workspace, name=channel_name, is_private=is_private
+                workspace=workspace,
+                name=channel_name,
+                is_private=is_private,
+                created_by=g.user,
             )
+            # The creator automatically becomes a member
             ChannelMember.create(user=g.user, channel=new_channel, role="admin")
+
     except IntegrityError:
+        # This happens if the UNIQUE constraint on (workspace, name) fails
         error = f"A channel named '#{channel_name}' already exists."
         return (
             render_template(
@@ -518,94 +569,22 @@ def create_channel():
         )
 
     # --- HTMX Success Response ---
-    # 1. Render the new channel item using our corrected partial.
     new_channel_html = render_template(
         "partials/channel_list_item.html", channel=new_channel
     )
-
-    # 2. Create an OOB swap to specifically delete the placeholder message.
     remove_placeholder_html = (
         '<li id="no-channels-placeholder" hx-swap-oob="delete"></li>'
     )
-
-    # 3. Combine both HTML fragments into one response.
     full_response_html = new_channel_html + remove_placeholder_html
-
-    # 4. Create a response with the combined HTML and add a trigger to close the modal.
     response = make_response(full_response_html)
     response.headers["HX-Trigger"] = "close-modal"
     return response
-
-
-@main_bp.route("/chat/channels/browse", methods=["GET"])
-@login_required
-def get_browse_channels_modal():
-    """Renders the modal for browsing and joining public channels."""
-    # Subquery to find all channels the user is already a member of.
-    member_of_channels_subquery = ChannelMember.select(ChannelMember.channel_id).where(
-        ChannelMember.user == g.user
-    )
-
-    # Main query to find channels that are public AND the user is not a member of.
-    joinable_channels = (
-        Channel.select()
-        .where(
-            (Channel.is_private == False)
-            & (Channel.id.not_in(member_of_channels_subquery))
-        )
-        .order_by(Channel.name)
-    )
-
-    return render_template(
-        "partials/browse_channels_modal.html", joinable_channels=joinable_channels
-    )
-
-
-@main_bp.route("/chat/channel/<int:channel_id>/join", methods=["POST"])
-@login_required
-def join_channel(channel_id):
-    """Adds the current user to a public channel."""
-    channel = Channel.get_or_none(id=channel_id)
-    if not channel:
-        return "Channel not found.", 404
-
-    # Security checks
-    if channel.is_private:
-        return "You cannot join a private channel.", 403
-
-    is_already_member = (
-        ChannelMember.select()
-        .where((ChannelMember.user == g.user) & (ChannelMember.channel == channel))
-        .exists()
-    )
-
-    if is_already_member:
-        # User is already a member, do nothing but return success.
-        return '<span class="text-success fw-bold">Joined</span>'
-
-    # Add the user to the channel
-    ChannelMember.create(user=g.user, channel=channel)
-
-    # --- Powerful HTMX Multi-Swap Response ---
-    # 1. Render the HTML fragment to add the new channel to the sidebar list.
-    #    This uses our existing partial and an OOB (Out-of-Band) swap.
-    new_sidebar_item_html = render_template(
-        "partials/channel_list_item.html", channel=channel
-    )
-
-    # 2. Render the confirmation message that will replace the 'Join' button in the modal.
-    #    This is the "main" swap target.
-    confirmation_message_html = '<span class="text-success fw-bold">Joined!</span>'
-
-    # 3. Combine them into a single response. HTMX will process both swaps.
-    return new_sidebar_item_html + confirmation_message_html
 
 
 @main_bp.route("/chat/channel/<int:channel_id>/leave", methods=["POST"])
 @login_required
 def leave_channel(channel_id):
     """Allows the current user to leave a channel."""
-
     channel = Channel.get_or_none(id=channel_id)
     if not channel:
         response = make_response()
@@ -613,11 +592,8 @@ def leave_channel(channel_id):
         return response
 
     if channel.name == "announcements":
-        # Return a 403 Forbidden error. This is a good practice for actions
-        # that are disallowed by application rules.
         return "You cannot leave the announcements channel.", 403
 
-    # 1. Delete the user's membership
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if membership:
         if channel.is_private and membership.role == "admin":
@@ -641,14 +617,10 @@ def leave_channel(channel_id):
                 )
         membership.delete_instance()
 
-    # 2. Prepare all the HTML fragments for the multi-swap response
-
-    # Fragment A: OOB swap to delete the channel from the sidebar
     remove_from_list_html = (
         f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
     )
 
-    # Fragment B & C: Get the content needed to render the user's personal DM view.
     user_self = g.user
     conv_id_str_self = f"dm_{user_self.id}_{user_self.id}"
     conversation_self, _ = Conversation.get_or_create(
@@ -661,12 +633,7 @@ def leave_channel(channel_id):
         .limit(PAGE_SIZE)
     )
 
-    # Render the new header. The template already contains the hx-swap-oob attribute,
-    # so we use it directly instead of wrapping it.
     dm_header_html = render_template("partials/dm_header.html", other_user=user_self)
-
-    # Render the new message list. This template does NOT have an OOB attribute,
-    # so we correctly wrap it in a div that does.
     dm_messages_html = render_template(
         "partials/dm_messages.html",
         messages=list(reversed(messages_self)),
@@ -676,10 +643,7 @@ def leave_channel(channel_id):
     )
     messages_swap_html = f'<div id="chat-messages-container" hx-swap-oob="innerHTML">{dm_messages_html}</div>'
 
-    # 3. Combine all HTML parts into a single response body
     full_response_html = remove_from_list_html + dm_header_html + messages_swap_html
-
-    # 4. Create the final response and add a custom trigger to close the panel
     response = make_response(full_response_html)
     response.headers["HX-Trigger"] = "close-offcanvas"
 
@@ -718,7 +682,6 @@ def remove_channel_member(channel_id, user_id_to_remove):
                 .count()
             )
             if admin_count == 1:
-                # This needs to re-render the panel with an error message
                 return "You cannot remove the last admin of the channel.", 403
 
         membership_to_delete.delete_instance()
@@ -742,29 +705,8 @@ def remove_channel_member(channel_id, user_id_to_remove):
                     f"Could not send removal notification to user {user_id_to_remove}: {e}"
                 )
 
-    subquery = ChannelMember.select(ChannelMember.user_id).where(
-        ChannelMember.channel_id == channel_id
-    )
-    users_to_invite = (
-        User.select()
-        .join(WorkspaceMember)
-        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
-    )
-    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
-    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-
-    panel_html = render_template(
-        "partials/channel_details.html",
-        channel=channel,
-        users_to_invite=users_to_invite,
-        current_members=current_members,
-        current_user_membership=current_user_membership,
-    )
-
-    members_count = current_members.count()
-    header_count_html = f'<span id="member-count" hx-swap-oob="innerHTML:#member-count"><i class="bi bi-people-fill me-1"></i> {members_count} members</span>'
-
-    return make_response(panel_html + header_count_html)
+    # Re-render the members tab for the admin.
+    return get_channel_details_members_tab(channel_id)
 
 
 @main_bp.route(
@@ -801,30 +743,13 @@ def update_member_role(channel_id, user_id_to_modify):
                 .count()
             )
             if admin_count == 1:
-                # In a real app, you might want to return a more graceful error UI
                 return "Cannot demote the last admin of the channel.", 403
 
         membership_to_modify.role = new_role
         membership_to_modify.save()
 
-    subquery = ChannelMember.select(ChannelMember.user_id).where(
-        ChannelMember.channel_id == channel_id
-    )
-    users_to_invite = (
-        User.select()
-        .join(WorkspaceMember)
-        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
-    )
-    current_members = ChannelMember.select().where(ChannelMember.channel == channel)
-
-    # Re-render the panel to show the change.
-    return render_template(
-        "partials/channel_details.html",
-        channel=channel,
-        users_to_invite=users_to_invite,
-        current_members=current_members,
-        current_user_membership=admin_membership,
-    )
+    # Re-render the members tab to show the change.
+    return get_channel_details_members_tab(channel_id)
 
 
 @main_bp.route("/chat/channel/<int:channel_id>/settings", methods=["PUT"])
@@ -835,12 +760,19 @@ def update_channel_settings(channel_id):
     if not channel:
         return "Channel not found.", 404
 
-    # Security Check: Is the current user an admin of this channel?
     admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not admin_membership or admin_membership.role != "admin":
         return "You do not have permission to change settings.", 403
 
-    # Update settings based on form data.
+    # Get the value for the new toggle
+    is_private_request = request.form.get("is_private") == "on"
+
+    # Add a security check for special channels
+    if channel.name == "announcements" and is_private_request:
+        return "The announcements channel cannot be made private.", 403
+
+    # Update the model with all three values
+    channel.is_private = is_private_request
     channel.posting_restricted_to_admins = (
         request.form.get("posting_restricted") == "on"
     )
@@ -849,8 +781,7 @@ def update_channel_settings(channel_id):
     )
     channel.save()
 
-    # On success, return an empty 200 OK response.
-    # HTMX will do nothing, which is exactly what we want.
+    # On success, return an empty 200 OK. Our toast system will handle any errors.
     return "", 200
 
 
@@ -878,6 +809,60 @@ def get_start_dm_form():
     return render_template(
         "partials/start_dm_modal.html", users_to_start_dm=users_to_start_dm
     )
+
+
+@main_bp.route("/chat/channels/browse", methods=["GET"])
+@login_required
+def get_browse_channels_modal():
+    """Renders the modal for browsing and joining public channels."""
+    # Subquery to find all channels the user is already a member of.
+    member_of_channels_subquery = ChannelMember.select(ChannelMember.channel_id).where(
+        ChannelMember.user == g.user
+    )
+
+    # Main query to find channels that are public AND the user is not a member of.
+    joinable_channels = (
+        Channel.select()
+        .where(
+            (Channel.is_private == False)
+            & (Channel.id.not_in(member_of_channels_subquery))
+        )
+        .order_by(Channel.name)
+    )
+
+    return render_template(
+        "partials/browse_channels_modal.html", joinable_channels=joinable_channels
+    )
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/join", methods=["POST"])
+@login_required
+def join_channel(channel_id):
+    """Adds the current user to a public channel."""
+    channel = Channel.get_or_none(id=channel_id)
+    if not channel:
+        return "Channel not found.", 404
+
+    if channel.is_private:
+        return "You cannot join a private channel.", 403
+
+    is_already_member = (
+        ChannelMember.select()
+        .where((ChannelMember.user == g.user) & (ChannelMember.channel == channel))
+        .exists()
+    )
+
+    if is_already_member:
+        return '<span class="text-success fw-bold">Joined</span>'
+
+    ChannelMember.create(user=g.user, channel=channel)
+
+    new_sidebar_item_html = render_template(
+        "partials/channel_list_item.html", channel=channel
+    )
+    confirmation_message_html = '<span class="text-success fw-bold">Joined!</span>'
+
+    return new_sidebar_item_html + confirmation_message_html
 
 
 # --- MESSAGE EDIT AND DELETE ROUTES ---

@@ -87,6 +87,7 @@ class Channel(BaseModel):
     name = CharField(max_length=80)
     topic = TextField(null=True)
     description = TextField(null=True)
+    created_by = ForeignKeyField(User, backref="created_channels", null=True)
     is_private = BooleanField(default=False)
     posting_restricted_to_admins = BooleanField(default=False)
     invites_restricted_to_admins = BooleanField(default=False)

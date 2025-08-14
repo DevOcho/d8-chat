@@ -1,0 +1,36 @@
+<!-- app/templates/partials/channel_details_tab_members.html -->
+<div class="p-3">
+    <!-- Invite New Members Form -->
+    {% if current_user_membership.role == 'admin' or not channel.invites_restricted_to_admins %}
+        <div class="mb-4">
+            <h6 class="text-muted">Add Members</h6>
+            <form hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}"
+                  hx-target="#tab-content-container"
+                  hx-swap="innerHTML">
+                <div class="input-group">
+                    <select name="user_id" class="form-select" required>
+                        <option value="" selected disabled>Choose a user...</option>
+                        {% for user in users_to_invite %}<option value="{{ user.id }}">{{ user.username }}</option>{% endfor %}
+                    </select>
+                    <button class="btn btn-success" type="submit">Add</button>
+                </div>
+                {% if users_to_invite|length == 0 %}
+                    <p class="text-muted small mt-2">All workspace users are already in this channel.</p>
+                {% endif %}
+            </form>
+        </div>
+    {% endif %}
+    <!-- Member Lists -->
+    <h6 class="text-muted">Admins ({{ admins|length }})</h6>
+    <ul class="list-group list-group-flush mb-4">
+        {% for member in admins %}
+            {% include 'partials/channel_member_item.html' %}
+        {% endfor %}
+    </ul>
+    <h6 class="text-muted">Members ({{ members|length }})</h6>
+    <ul class="list-group list-group-flush">
+        {% for member in members %}
+            {% include 'partials/channel_member_item.html' %}
+        {% endfor %}
+    </ul>
+</div>

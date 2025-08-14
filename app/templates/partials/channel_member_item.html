@@ -1,0 +1,51 @@
+<!-- app/templates/partials/channel_member_item.html -->
+<li class="list-group-item d-flex align-items-center px-0">
+    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2"
+         style="width: 24px;
+                height: 24px;
+                font-size: 0.8rem">{{ member.user.username[0]|upper }}</div>
+    <span>{{ member.user.username }}</span>
+    <div class="ms-auto">
+        {% if current_user_membership.role == 'admin' and member.user.id != g.user.id %}
+            <div class="dropdown">
+                <button class="btn btn-sm btn-light"
+                        type="button"
+                        data-bs-toggle="dropdown"
+                        aria-expanded="false">
+                    <i class="bi bi-three-dots-vertical"></i>
+                </button>
+                <ul class="dropdown-menu">
+                    {% if member.role == 'member' %}
+                        <li>
+                            <button class="dropdown-item"
+                                    hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
+                                    hx-vals='{"role": "admin"}'
+                                    hx-target="#tab-content-container"
+                                    hx-swap="innerHTML">Make Admin</button>
+                        </li>
+                    {% else %}
+                        <li>
+                            <button class="dropdown-item"
+                                    hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
+                                    hx-vals='{"role": "member"}'
+                                    hx-target="#tab-content-container"
+                                    hx-swap="innerHTML">Make Member</button>
+                        </li>
+                    {% endif %}
+                    <li>
+                        <hr class="dropdown-divider">
+                    </li>
+                    <li>
+                        <button class="dropdown-item text-danger"
+                                hx-delete="{{ url_for('main.remove_channel_member', channel_id=channel.id, user_id_to_remove=member.user.id) }}"
+                                hx-target="#tab-content-container"
+                                hx-swap="innerHTML"
+                                hx-confirm="Are you sure you want to remove {{ member.user.username }} from the channel?">
+                            Remove from channel
+                        </button>
+                    </li>
+                </ul>
+            </div>
+        {% endif %}
+    </div>
+</li>
