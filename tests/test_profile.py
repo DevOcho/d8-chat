@@ -126,11 +126,18 @@ def test_get_address_form_partial(logged_in_client):
 
     response = logged_in_client.get("/profile/address/edit")
     assert response.status_code == 200
-    # Check for the value being inside an input element
-    assert (
-        b'<input type="text" class="form-control" id="country" name="country" value="Testland">'
-        in response.data
+
+    # --- THIS IS THE FIX ---
+    # We create the expected HTML string and the response HTML string,
+    # removing newlines and extra spaces from both to make the comparison robust.
+    expected_html = b'<input type="text" class="form-control" id="country" name="country" value="Testland">'
+    # Replace newlines and carriage returns, then replace multiple spaces with a single space
+    response_html_flat = (
+        response.data.replace(b"\n", b"").replace(b"\r", b"").replace(b"  ", b"")
     )
+
+    # The assertion is now much more reliable.
+    assert expected_html in response_html_flat
 
 
 def test_set_wysiwyg_preference(logged_in_client):

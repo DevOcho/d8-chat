@@ -481,19 +481,14 @@ def add_channel_member(channel_id):
     """Processes adding a new member to a channel."""
     user_id_to_add = request.form.get("user_id", type=int)
     channel = Channel.get_or_none(id=channel_id)
-
     if not user_id_to_add or not channel:
         return "Invalid request", 400
-
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not current_user_membership:
         return "You are not a member of this channel.", 403
-
     if channel.invites_restricted_to_admins and current_user_membership.role != "admin":
         return "Only admins can invite new members to this channel.", 403
-
     ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
-
     if user_id_to_add in chat_manager.all_clients:
         try:
             recipient_ws = chat_manager.all_clients[user_id_to_add]
@@ -504,8 +499,139 @@ def add_channel_member(channel_id):
         except Exception as e:
             print(f"Could not send real-time channel add to user {user_id_to_add}: {e}")
 
-    # After adding, re-render the members tab for the admin.
-    return get_channel_details_members_tab(channel_id)
+    # Re-render the members tab for the admin.
+    admins = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "admin"))
+        .order_by(User.username)
+    )
+    members = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "member"))
+        .order_by(User.username)
+    )
+    subquery = ChannelMember.select(ChannelMember.user_id).where(
+        ChannelMember.channel_id == channel_id
+    )
+    users_to_invite = (
+        User.select()
+        .join(WorkspaceMember)
+        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
+    )
+
+    # This is the HTML for the main swap target (the tab content)
+    members_tab_html = render_template(
+        "partials/channel_details_tab_members.html",
+        channel=channel,
+        admins=admins,
+        members=members,
+        users_to_invite=users_to_invite,
+        current_user_membership=current_user_membership,
+    )
+
+    # This is the new, correctly formatted OOB swap for the count badge
+    members_count = len(admins) + len(members)
+    count_swap_html = (
+        f'<span id="channel-members-count-{channel_id}" hx-swap-oob="true" class="badge bg-secondary rounded-pill">'
+        f"{members_count}"
+        f"</span>"
+    )
+
+    return make_response(members_tab_html + count_swap_html)
+
+
+@main_bp.route(
+    "/chat/channel/<int:channel_id>/members/<int:user_id_to_remove>", methods=["DELETE"]
+)
+@login_required
+def remove_channel_member(channel_id, user_id_to_remove):
+    """Allows a channel admin to remove another member from the channel."""
+    # ... (the first part of the function is correct and remains the same)
+    channel = Channel.get_or_none(id=channel_id)
+    user_to_remove = User.get_or_none(id=user_id_to_remove)
+    if not channel or not user_to_remove:
+        return "Channel or user not found", 404
+    admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if not admin_membership or admin_membership.role != "admin":
+        return "You do not have permission to remove members.", 403
+    if g.user.id == user_id_to_remove:
+        return "You cannot remove yourself.", 400
+    membership_to_delete = ChannelMember.get_or_none(
+        user=user_to_remove, channel=channel
+    )
+    if membership_to_delete:
+        if membership_to_delete.role == "admin":
+            admin_count = (
+                ChannelMember.select()
+                .where(
+                    (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
+                )
+                .count()
+            )
+            if admin_count == 1:
+                return "You cannot remove the last admin of the channel.", 403
+        membership_to_delete.delete_instance()
+        if user_id_to_remove in chat_manager.all_clients:
+            try:
+                remove_html = (
+                    f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
+                )
+                notification = {
+                    "type": "notification",
+                    "title": "Removed from Channel",
+                    "body": f"You have been removed from #{channel.name} by {g.user.username}.",
+                    "icon": url_for("static", filename="favicon.ico", _external=True),
+                }
+                recipient_ws = chat_manager.all_clients[user_id_to_remove]
+                recipient_ws.send(remove_html)
+                recipient_ws.send(json.dumps(notification))
+            except Exception as e:
+                print(
+                    f"Could not send removal notification to user {user_id_to_remove}: {e}"
+                )
+
+    # Re-render the members tab for the admin.
+    admins = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "admin"))
+        .order_by(User.username)
+    )
+    members = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "member"))
+        .order_by(User.username)
+    )
+    subquery = ChannelMember.select(ChannelMember.user_id).where(
+        ChannelMember.channel_id == channel_id
+    )
+    users_to_invite = (
+        User.select()
+        .join(WorkspaceMember)
+        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
+    )
+
+    members_tab_html = render_template(
+        "partials/channel_details_tab_members.html",
+        channel=channel,
+        admins=admins,
+        members=members,
+        users_to_invite=users_to_invite,
+        current_user_membership=admin_membership,
+    )
+
+    # This is the new, correctly formatted OOB swap for the count badge
+    members_count = len(admins) + len(members)
+    count_swap_html = (
+        f'<span id="channel-members-count-{channel_id}" hx-swap-oob="true" class="badge bg-secondary rounded-pill">'
+        f"{members_count}"
+        f"</span>"
+    )
+
+    return make_response(members_tab_html + count_swap_html)
 
 
 # --- Route to get the channel creation form ---
@@ -648,65 +774,6 @@ def leave_channel(channel_id):
     response.headers["HX-Trigger"] = "close-offcanvas"
 
     return response
-
-
-@main_bp.route(
-    "/chat/channel/<int:channel_id>/members/<int:user_id_to_remove>", methods=["DELETE"]
-)
-@login_required
-def remove_channel_member(channel_id, user_id_to_remove):
-    """Allows a channel admin to remove another member from the channel."""
-    channel = Channel.get_or_none(id=channel_id)
-    user_to_remove = User.get_or_none(id=user_id_to_remove)
-
-    if not channel or not user_to_remove:
-        return "Channel or user not found", 404
-
-    admin_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
-    if not admin_membership or admin_membership.role != "admin":
-        return "You do not have permission to remove members.", 403
-
-    if g.user.id == user_id_to_remove:
-        return "You cannot remove yourself.", 400
-
-    membership_to_delete = ChannelMember.get_or_none(
-        user=user_to_remove, channel=channel
-    )
-    if membership_to_delete:
-        if membership_to_delete.role == "admin":
-            admin_count = (
-                ChannelMember.select()
-                .where(
-                    (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
-                )
-                .count()
-            )
-            if admin_count == 1:
-                return "You cannot remove the last admin of the channel.", 403
-
-        membership_to_delete.delete_instance()
-
-        if user_id_to_remove in chat_manager.all_clients:
-            try:
-                remove_html = (
-                    f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
-                )
-                notification = {
-                    "type": "notification",
-                    "title": "Removed from Channel",
-                    "body": f"You have been removed from #{channel.name} by {g.user.username}.",
-                    "icon": url_for("static", filename="favicon.ico", _external=True),
-                }
-                recipient_ws = chat_manager.all_clients[user_id_to_remove]
-                recipient_ws.send(remove_html)
-                recipient_ws.send(json.dumps(notification))
-            except Exception as e:
-                print(
-                    f"Could not send removal notification to user {user_id_to_remove}: {e}"
-                )
-
-    # Re-render the members tab for the admin.
-    return get_channel_details_members_tab(channel_id)
 
 
 @main_bp.route(

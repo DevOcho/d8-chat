@@ -5,7 +5,7 @@
         <div class="mb-4">
             <h6 class="text-muted">Add Members</h6>
             <form hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}"
-                  hx-target="#tab-content-container"
+                  hx-target="#members-tab-pane"
                   hx-swap="innerHTML">
                 <div class="input-group">
                     <select name="user_id" class="form-select" required>

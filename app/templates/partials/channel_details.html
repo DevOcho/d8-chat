@@ -21,7 +21,8 @@
                     hx-get="{{ url_for('main.get_channel_details_members_tab', channel_id=channel.id) }}"
                     hx-target="#members-tab-pane"
                     hx-trigger="click once">
-                Members <span class="badge bg-secondary rounded-pill">{{ members_count }}</span>
+                Members <span id="channel-members-count-{{ channel.id }}"
+       class="badge bg-secondary rounded-pill">{{ members_count }}</span>
             </button>
         </li>
         {% if current_user_membership.role == 'admin' %}
