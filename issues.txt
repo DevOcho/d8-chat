@@ -1,18 +1,18 @@
 Current issues with the slack_clone:
 
-If a user is added to a private channel they don't see it on their side bar.
-
 We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.
 
 Reactions to messages would be nice.
 
 Search for messages.
 
+If the last admin leaves a channel and there are no other admins then we need to require the elect an admin before they leave.
+
+We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
+
 I also think we are going to need to implement threads but I only want them in channels.
 
 I want the side bar to only show a max number of people on the side nav.  Let's say we have 10,000 users in the chat.  We only want to show people we've initiated a DM with or that have initiated a DM with us. We also don't want to show more than ~20 people total.
-
-I want to add the @ feature for channels, where the message is highlighted (where you were @'d) and the only unread messages counts for channels will be where you were @'d.  Otherwise it will just bold them as having messages that you haven't read but it won't actually show the red badge (unless you've been @'d in the channel).
 
 We need to be able to upload files and have avatars and inline images.
 
