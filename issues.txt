@@ -3,6 +3,28 @@ Current issues with the slack_clone:
 We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.
 
 Reactions to messages would be nice.
+When a user hovers their mouse over a message the toolbar that appears should include both the reply and an emoji reaction option.  When they click the emoji reaction button they should get the same emoji selector (but hovering from the button they clicked).  Once they click the emoji they want it should appear below the message.
+
+Rules:
+  - Users can add a single new reaction emoji to any message (even in the annoucment channel, other channels, or direct messages).
+  - If a user adds a reaction to a channel it will indicate for them with a pink highlight (same as the send button border color plus a lighter pink background on the pill)
+  - Similar to the screenshot, If other users add a reaction to a post those will show with their respective counts with a white background with a subtle grey border.  If the user decided they agree with that reaction they can click it as well to add their vote to that one.  If they click it then it will turn the same color pink.  The screenshot uses a blue color but I want to use the pink color.
+ - If a user changes their mind, they can click the reaction again to remove their reaction or their vote for a second reaction.  If no one else has chosen that reaction it will leave the message.
+
+Slack's emoji reactions feature enables users to provide quick, non-verbal feedback to messages in channels, threads, or direct messages by attaching emojis. This allows for efficient expression of agreement, appreciation, humor, or other sentiments without cluttering the conversation with additional text replies. Reactions are displayed compactly beneath the original message, grouped by emoji type, with a numerical count indicating how many unique users have added each specific reaction. Users can add multiple different emojis to a single message but only one instance of each emoji per user; attempting to add the same emoji again toggles it off for that user. Reactions are visible to all participants in the conversation and can be added or removed at any time, fostering interactive and engaging discussions while maintaining a clean interface.Acceptance CriteriaAdding a Reaction: Users must be able to select an emoji from the picker and add it to any visible message. The system should prevent a user from adding the same emoji more than once to the same message.
+Toggling Reactions: If a user clicks or selects an already-added emoji reaction on a message, it should remove their contribution to that reaction, decrementing the count if applicable.
+Display of Reactions: Reactions should appear inline below the message in a horizontal row or compact list, showing each unique emoji with its count (e.g.,  3). The display should update in real-time for all users viewing the conversation.
+Multiple Reactions per Message: A single message can have unlimited unique emoji reactions (subject to practical UI limits), and multiple users can contribute to the same emoji, increasing its count.
+User-Specific Tracking: The system must track reactions per user per message per emoji to ensure accurate counting and toggling, without allowing duplicate additions from the same user.
+Visibility and Permissions: Reactions should be visible to all users who can see the message. Only authenticated users in the conversation can add or remove their own reactions; they cannot remove others' reactions.
+Emoji Support: Support the same emojis we are using in the chat input box now.
+Performance and Limits: The feature should handle high-traffic scenarios without lag, with a soft limit (e.g., 20 unique emoji reactions per message) to prevent UI overload.
+Accessibility: Reactions should be accessible via keyboard navigation, screen readers (e.g., announcing "thumbs up reaction, 3 users"), and include alt text for emojis.
+Edge Cases: Handle scenarios like message deletion (reactions are removed), user leaving the conversation (their reactions remain but are anonymized if needed), and reactions on threaded replies (displayed similarly within the thread).
+Notifications: Users could receive optional notifications for reactions on their messages, configurable per user or channel.
+Support for both light and dark mode: We need to change the colors to support the light and dark mode.
+
+
 
 Search for messages.
 

@@ -669,20 +669,28 @@ def create_channel():
         return "You are not a member of any workspace.", 403
     workspace = workspace_member.workspace
 
-    # --- Database Creation ---
+    # Check if the "No channels found" placeholder is likely to be on the page
+    # by counting the user's channels *before* we create the new one.
+    user_channel_count = (
+        ChannelMember.select().where(ChannelMember.user == g.user).count()
+    )
+
     try:
-        with db.atomic():  # Use a transaction
+        with db.atomic():
             new_channel = Channel.create(
                 workspace=workspace,
                 name=channel_name,
                 is_private=is_private,
                 created_by=g.user,
             )
-            # The creator automatically becomes a member
             ChannelMember.create(user=g.user, channel=new_channel, role="admin")
 
+            Conversation.get_or_create(
+                conversation_id_str=f"channel_{new_channel.id}",
+                defaults={"type": "channel"},
+            )
+
     except IntegrityError:
-        # This happens if the UNIQUE constraint on (workspace, name) fails
         error = f"A channel named '#{channel_name}' already exists."
         return (
             render_template(
@@ -694,16 +702,55 @@ def create_channel():
             409,
         )
 
-    # --- HTMX Success Response ---
-    new_channel_html = render_template(
+    # 1. Render the OOB swap to add the new channel to the sidebar.
+    new_sidebar_item_html = render_template(
         "partials/channel_list_item.html", channel=new_channel
     )
-    remove_placeholder_html = (
-        '<li id="no-channels-placeholder" hx-swap-oob="delete"></li>'
+    # And the OOB swap to remove the "No channels found" placeholder.
+    remove_placeholder_html = ""
+    if user_channel_count == 0:
+        remove_placeholder_html = (
+            '<li id="no-channels-placeholder" hx-swap-oob="delete"></li>'
+        )
+
+    # 2. Prepare data for the main chat view swap.
+    members_count = 1  # Just the creator
+    messages = []  # It's a new channel
+
+    # 3. Render the OOB swaps for the header and message containers.
+    header_html = render_template(
+        "partials/channel_header.html", channel=new_channel, members_count=members_count
     )
-    full_response_html = new_channel_html + remove_placeholder_html
+    messages_html = render_template(
+        "partials/channel_messages.html",
+        channel=new_channel,
+        messages=messages,
+        last_read_timestamp=datetime.datetime.now(),  # Mark as read
+        mention_message_ids=set(),  # No mentions yet
+        PAGE_SIZE=PAGE_SIZE,
+    )
+
+    # 4. Wrap the main content swaps in divs with OOB attributes.
+    header_swap_html = (
+        f'<div id="chat-header-container" hx-swap-oob="innerHTML">{header_html}</div>'
+    )
+    messages_swap_html = f'<div id="chat-messages-container" hx-swap-oob="innerHTML">{messages_html}</div>'
+
+    # 5. Combine all HTML fragments into a single response payload.
+    full_response_html = (
+        new_sidebar_item_html
+        + remove_placeholder_html
+        + header_swap_html
+        + messages_swap_html
+    )
+
+    # 6. Create the final response and add the trigger to close the modal.
     response = make_response(full_response_html)
-    response.headers["HX-Trigger"] = "close-modal"
+
+    # Set focus in the chat input
+    response.headers["HX-Trigger"] = "close-modal, focus-chat-input"
+
+    # Update the screen
     return response
 
 

@@ -359,7 +359,6 @@ const Editor = {
             this.sendTypingStatus(false);
         });
 
-        // --- [THE FIX] ---
         // This is the new, more robust logic for handling form clearing after send.
         this.state.messageForm.addEventListener('htmx:wsAfterSend', () => {
             const isReply = this.state.messageForm.querySelector('[name="parent_message_id"]');
@@ -421,6 +420,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Element References ---
     const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
+
+    // Custom event listener to focus the chat input after certain actions
+    document.body.addEventListener('focus-chat-input', () => {
+        // We can reuse the focus function we already wrote in our Editor object
+        if (Editor && typeof Editor.focusActiveInput === 'function') {
+            Editor.focusActiveInput();
+        }
+    });
 
     // Listen for our custom event to initialize the chat editor scripts.
     document.body.addEventListener('chatInputLoaded', () => Editor.initialize());
