@@ -401,6 +401,23 @@ const Editor = {
 document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
 
+    /**
+     * Finds all reaction pills in a container and applies the 'user-reacted'
+     * class if the current user is in the list of reactors.
+     * @param {HTMLElement} container The element to search within.
+     */
+    const updateReactionHighlights = (container) => {
+        const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
+        if (!currentUserId) return;
+
+        const reactionPills = container.querySelectorAll('.reaction-pill');
+        reactionPills.forEach(pill => {
+            const reactorIds = pill.dataset.reactorIds || '';
+            const hasReacted = reactorIds.split(',').includes(currentUserId);
+            pill.classList.toggle('user-reacted', hasReacted);
+        });
+    };
+
      /**
      * Initializes emoji reaction popovers on a given container.
      * @param {HTMLElement} container The element to search for reaction buttons.
@@ -518,6 +535,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const target = event.detail.target;
         processCodeBlocks(target);
         initializeReactionPopovers(target);
+        updateReactionHighlights(target);
 
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
@@ -545,6 +563,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const messageList = document.getElementById('message-list');
         if (messageList) {
              initializeReactionPopovers(messageList);
+             updateReactionHighlights(messageList);
         }
 
         // Process as an HTML swap for the message list
@@ -594,4 +613,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     processCodeBlocks(document.body);
+    initializeReactionPopovers(document.body);
+    updateReactionHighlights(document.body);
 });

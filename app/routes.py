@@ -1189,12 +1189,14 @@ def toggle_reaction(message_id):
     # Convert the query results into a more usable list of objects
     grouped_reactions = []
     for r in reactions_query:
+        user_ids = r.user_ids if r.user_ids is not None else []
+        usernames = r.usernames if r.usernames is not None else []
         grouped_reactions.append(
             {
                 "emoji": r.emoji,
                 "count": r.count,
-                "users": r.user_ids,
-                "usernames": r.usernames,
+                "users": user_ids,
+                "usernames": usernames,
             }
         )
 
@@ -1203,6 +1205,7 @@ def toggle_reaction(message_id):
         "partials/reactions.html", message=message, grouped_reactions=grouped_reactions
     )
 
+    # Wrap the content in the container div for the OOB broadcast
     broadcast_html = f'<div id="reactions-container-{message.id}" hx-swap-oob="innerHTML">{reactions_html_content}</div>'
 
     # Broadcast the updated HTML to everyone in the conversation
