@@ -35,6 +35,9 @@
                         title="You must promote another member to admin before you can leave this channel.">
                     Leave Channel
                 </button>
+                <small class="form-text text-muted d-block text-center mt-2">
+                    You are the only admin. Promote another member to admin before you can leave.
+                </small>
             {% else %}
                 <button class="btn btn-sm btn-outline-danger w-100"
                         hx-post="{{ url_for('main.leave_channel', channel_id=channel.id) }}"

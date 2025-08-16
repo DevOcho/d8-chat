@@ -1,5 +1,7 @@
 Current issues with the slack_clone:
 
+We need to be able to archive a channel.
+
 Search for messages.
 
 We need to be able to upload files and have avatars and inline images.

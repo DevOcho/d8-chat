@@ -453,43 +453,36 @@ def get_channel_details_about_tab(channel_id):
 @main_bp.route("/chat/channel/<int:channel_id>/details/members", methods=["GET"])
 @login_required
 def get_channel_details_members_tab(channel_id):
-    """Renders the content for the 'Members' tab."""
+    """
+    Renders the content for the 'Members' tab, showing current members.
+    The list of users to add is now loaded via a separate search request.
+    """
     channel = Channel.get_by_id(channel_id)
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
 
     if not current_user_membership:
         return "Unauthorized", 403
 
-    # Separate queries for admins and regular members
+    # We ONLY need to query for the current admins and members for the initial load.
     admins = list(
         ChannelMember.select()
         .join(User)
         .where((ChannelMember.channel == channel) & (ChannelMember.role == "admin"))
-        .order_by(ChannelMember.user.username)
+        .order_by(User.username)
     )
     members = list(
         ChannelMember.select()
         .join(User)
         .where((ChannelMember.channel == channel) & (ChannelMember.role == "member"))
-        .order_by(ChannelMember.user.username)
+        .order_by(User.username)
     )
-
-    # Users available to be invited
-    subquery = ChannelMember.select(ChannelMember.user_id).where(
-        ChannelMember.channel_id == channel_id
-    )
-    users_to_invite = (
-        User.select()
-        .join(WorkspaceMember)
-        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
-    )
-
+    
+    # We no longer pre-load the list of users to invite.
     return render_template(
         "partials/channel_details_tab_members.html",
         channel=channel,
         admins=admins,
         members=members,
-        users_to_invite=users_to_invite,
         current_user_membership=current_user_membership,
     )
 
@@ -631,6 +624,55 @@ def add_channel_member(channel_id):
     )
 
     return make_response(members_tab_html + count_swap_html)
+
+
+@main_bp.route("/chat/channel/<int:channel_id>/members/search", methods=["GET"])
+@login_required
+def search_users_to_add(channel_id):
+    """
+    Searches for workspace members who are not in the current channel,
+    with support for pagination.
+    """
+    search_term = request.args.get("q", "").strip()
+    page = request.args.get("page", 1, type=int)
+    per_page = 15
+
+    channel = Channel.get_by_id(channel_id)
+
+    # Subquery to find all user IDs already in the channel
+    members_subquery = ChannelMember.select(ChannelMember.user_id).where(
+        ChannelMember.channel_id == channel_id
+    )
+
+    # Base query for users in the workspace but not in the channel
+    query = (
+        User.select()
+        .join(WorkspaceMember)
+        .where(
+            (User.id.not_in(members_subquery)) &
+            (WorkspaceMember.workspace == channel.workspace)
+        )
+    )
+
+    # Apply search filter if a query is provided
+    if search_term:
+        # Search against username OR display name
+        query = query.where(
+            (User.username.contains(search_term)) |
+            (User.display_name.contains(search_term))
+        )
+    
+    total_users = query.count()
+    users_for_page = query.order_by(User.username).paginate(page, per_page)
+    has_more_pages = total_users > (page * per_page)
+
+    return render_template(
+        "partials/add_member_results.html",
+        channel=channel,
+        users_to_invite=users_for_page,
+        has_more_pages=has_more_pages,
+        current_page=page
+    )
 
 
 @main_bp.route(

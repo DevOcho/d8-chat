@@ -11,6 +11,76 @@ from app.models import (
     Conversation,
 )
 from peewee import IntegrityError
+from faker import Faker
+
+# Initialize Faker
+fake = Faker()
+
+def _seed_users_and_members(workspace):
+    """Generates 200 fake users and adds them to the workspace and default channels."""
+    print("\nSeeding 200 new users...")
+
+    # First, get the default channels that every user should be a part of.
+    general_channel = Channel.get(Channel.name == "general", Channel.workspace == workspace)
+    announcements_channel = Channel.get(Channel.name == "announcements", Channel.workspace == workspace)
+
+    users_created_count = 0
+    for i in range(200):
+        first_name = fake.unique.first_name()
+        last_name = fake.unique.last_name()
+        
+        #
+        # Create a unique username and email from the fake name.
+        #
+        username = f"{first_name.lower()}_{last_name.lower()}"
+        email = f"{username}@example.com"
+        display_name = f"{first_name} {last_name}"
+
+        try:
+            # Create the user record
+            user = User.create(
+                username=username,
+                email=email,
+                display_name=display_name,
+                is_active=True
+            )
+
+            #
+            # The first user created (i=0) will be our admin.
+            # Everyone else will be a regular member.
+            #
+            role = "admin" if i == 0 else "member"
+            WorkspaceMember.create(
+                user=user,
+                workspace=workspace,
+                role=role
+            )
+
+            #
+            # Add every new user to the two default channels.
+            #
+            ChannelMember.create(user=user, channel=general_channel)
+            ChannelMember.create(user=user, channel=announcements_channel)
+
+            users_created_count += 1
+        except IntegrityError:
+            # This might happen if Faker generates a name that results in a
+            # duplicate username after a previous failed run.
+            print(f"-> Skipping duplicate user: {username}")
+            continue
+
+    print(f"-> Created and onboarded {users_created_count} new users.")
+    #
+    # We can now safely assume the first user is our primary admin for seeding purposes.
+    # Let's assign them as the creator for all our seeded channels.
+    #
+    admin_user = User.select().order_by(User.id).first()
+    if admin_user:
+        print(f"-> Assigning '{admin_user.username}' as creator for all public channels.")
+        Channel.update(created_by=admin_user).where(
+            (Channel.workspace == workspace) &
+            (Channel.created_by.is_null())
+        ).execute()
 
 
 def _seed_channels(workspace):
@@ -76,41 +146,12 @@ def seed_data():
         else:
             print(f"Workspace '{workspace.name}' already exists.")
 
-        # 2. Create Users
-        users_data = [
-            {"username": "admin", "email": "admin@example.com"},
-            {"username": "user1", "email": "user1@example.com"},
-            {"username": "user2", "email": "user2@example.com"},
-        ]
-        users = {}
-        for user_data in users_data:
-            user, created = User.get_or_create(
-                email=user_data["email"], defaults={"username": user_data["username"]}
-            )
-            users[user_data["username"]] = user
-            if created:
-                print(f"User '{user.username}' created.")
-            else:
-                print(f"User '{user.username}' already exists.")
-
-        # 3. Make all users members of the workspace
-        WorkspaceMember.get_or_create(
-            user=users["admin"], workspace=workspace, defaults={"role": "admin"}
-        )
-        WorkspaceMember.get_or_create(
-            user=users["user1"], workspace=workspace, defaults={"role": "member"}
-        )
-        WorkspaceMember.get_or_create(
-            user=users["user2"], workspace=workspace, defaults={"role": "member"}
-        )
-        print("Assigned users to workspace.")
-        
         #
-        # This is the new function call to seed all the extra channels.
-        # It's placed here to ensure the workspace it needs already exists.
+        # The new logic will seed channels first, then users.
+        # This ensures the default channels exist before we try to add users to them.
         #
         _seed_channels(workspace)
-
+        _seed_users_and_members(workspace)
 
         print("\nDatabase seeding complete!")
 

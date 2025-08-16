@@ -4,20 +4,36 @@
     {% if current_user_membership.role == 'admin' or not channel.invites_restricted_to_admins %}
         <div class="mb-4">
             <h6 class="text-muted">Add Members</h6>
-            <form hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}"
-                  hx-target="#members-tab-pane"
-                  hx-swap="innerHTML">
-                <div class="input-group">
-                    <select name="user_id" class="form-select" required>
-                        <option value="" selected disabled>Choose a user...</option>
-                        {% for user in users_to_invite %}<option value="{{ user.id }}">{{ user.username }}</option>{% endfor %}
-                    </select>
-                    <button class="btn btn-success" type="submit">Add</button>
+            <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input class="form-control"
+                       type="search"
+                       name="q"
+                       placeholder="Find by name or username"
+                       autocomplete="off"
+                       hx-get="{{ url_for('main.search_users_to_add', channel_id=channel.id) }}"
+                       hx-trigger="keyup changed delay:300ms, search"
+                       hx-target="#add-member-results"
+                       hx-indicator="#add-member-spinner">
+            </div>
+             <!-- HTMX loading indicator -->
+            <div class="text-center">
+                <div id="add-member-spinner" class="spinner-border spinner-border-sm htmx-indicator" role="status">
+                    <span class="visually-hidden">Loading...</span>
                 </div>
-                {% if users_to_invite|length == 0 %}
-                    <p class="text-muted small mt-2">All workspace users are already in this channel.</p>
-                {% endif %}
-            </form>
+            </div>
+            <!-- 
+              Container for the search results 
+              [THE FIX] This now starts with a simple text prompt. The content
+              will be replaced by HTMX as soon as the user starts typing.
+            -->
+            <div id="add-member-results" class="mt-2">
+                <div class="list-group list-group-flush">
+                    <div class="list-group-item text-muted fst-italic px-0">
+                        Start typing to find users to add.
+                    </div>
+                </div>
+            </div>
         </div>
     {% endif %}
     <!-- Member Lists -->

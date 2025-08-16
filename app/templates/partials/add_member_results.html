@@ -1,0 +1,28 @@
+{# This partial renders the list of users to invite and the "Load More" button #}
+<ul class="list-group list-group-flush">
+    {% for user in users_to_invite %}
+        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+            <span>{{ user.display_name or user.username }}</span>
+            <button class="btn btn-sm btn-success"
+                    hx-post="{{ url_for('main.add_channel_member', channel_id=channel.id) }}"
+                    hx-vals='{"user_id": {{ user.id }} }'
+                    hx-target="#members-tab-pane"
+                    hx-swap="innerHTML">
+                Add
+            </button>
+        </li>
+    {% else %}
+        {% if request.args.get('q') %}
+            <li class="list-group-item text-muted px-0">No users match your search.</li>
+        {% endif %}
+    {% endfor %}
+</ul>
+
+{% if has_more_pages %}
+<div class="mt-3 text-center"
+     hx-get="{{ url_for('main.search_users_to_add', channel_id=channel.id, q=request.args.get('q', ''), page=current_page + 1) }}"
+     hx-target="this"
+     hx-swap="outerHTML">
+    <button class="btn btn-outline-secondary">Load More</button>
+</div>
+{% endif %}

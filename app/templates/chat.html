@@ -30,7 +30,7 @@
         <hr class="text-secondary">
         <!-- Channel list -->
         <div class="d-flex justify-content-between align-items-center">
-            <h6 class="mt-4 text-secondary">Channels</h6>
+            <h6 class="mt-4 text-light text-opacity-75">Channels</h6>
             <div>
                 <button class="btn btn-sm text-secondary pt-4"
                         data-bs-toggle="modal"
@@ -78,7 +78,7 @@
         </ul>
         <!-- DM list -->
         <div class="d-flex justify-content-between align-items-center">
-            <h6 class="mt-4 text-secondary">Direct Messages</h6>
+            <h6 class="mt-4 text-light text-opacity-75">Direct Messages</h6>
             <button class="btn btn-sm text-secondary"
                     data-bs-toggle="modal"
                     data-bs-target="#htmx-modal"
@@ -93,7 +93,6 @@
             {% set self_conv_id_str = "dm_" ~ g.user.id ~ "_" ~ g.user.id %}
             <li class="d-flex justify-content-between align-items-center">
                 <div class="d-flex align-items-center">
-                    <!-- [THE FIX] This logic now correctly checks the user's own status on load -->
                     {% set self_status_class = "bg-success" %} {# Default to online #}
                     {% if g.user.presence_status == 'away' %}
                         {% set self_status_class = "bg-secondary" %}

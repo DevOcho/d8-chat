@@ -16,3 +16,5 @@ emoji
 pytest
 pytest-flask
 pytest-cov
+Faker
+pytest-mock

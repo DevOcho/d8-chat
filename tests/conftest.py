@@ -21,7 +21,7 @@ from app.models import (
 )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def app():
     """
     Creates a single Flask app instance for the entire test session.
@@ -65,7 +65,7 @@ def test_db(app):
         db.create_tables(tables)
 
         # Seed the database with one essential user and workspace
-        workspace, _ = Workspace.get_or_create(name="Test Workspace")
+        workspace, _ = Workspace.get_or_create(name="DevOcho")
         user, _ = User.get_or_create(
             id=1,
             username="testuser",
@@ -73,6 +73,18 @@ def test_db(app):
             display_name="Test User",
         )
         WorkspaceMember.get_or_create(user=user, workspace=workspace)
+
+        # Also create the default channels that the SSO handler expects to exist.
+        general_channel, _ = Channel.get_or_create(workspace=workspace, name="general")
+        Conversation.get_or_create(
+            conversation_id_str=f"channel_{general_channel.id}",
+            defaults={"type": "channel"},
+        )
+        announcements_channel, _ = Channel.get_or_create(workspace=workspace, name="announcements")
+        Conversation.get_or_create(
+            conversation_id_str=f"channel_{announcements_channel.id}",
+            defaults={"type": "channel"},
+        )
 
         yield  # The test runs at this point
 
