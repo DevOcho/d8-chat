@@ -402,6 +402,15 @@ document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
 
     /**
+     * Finds and initializes all Bootstrap tooltips within a given container.
+     * @param {HTMLElement} container
+     */
+    const initializeTooltips = (container) => {
+        const tooltipTriggerList = container.querySelectorAll('[data-bs-toggle="tooltip"]');
+        [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+    };
+
+    /**
      * Finds all reaction pills in a container and applies the 'user-reacted'
      * class if the current user is in the list of reactors.
      * @param {HTMLElement} container The element to search within.
@@ -475,7 +484,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 toast.show();
             }
         });
+
+        // Listener for CLIENT-SIDE swap errors (e.g., target element not found)
+        document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
+            console.error("HTMX OOB Target Error:", evt.detail);
+
+            // Create a user-friendly message
+            const targetId = evt.detail.target.id;
+            const errorMessage = `A UI update failed because the target element '#${targetId}' could not be found. This can happen during rapid operations.`;
+
+            if (toastBody) {
+                toastBody.textContent = errorMessage;
+                toast.show();
+            }
+        });
+
     }
+
+
 
     // --- Element References ---
     const messagesContainer = document.getElementById('chat-messages-container');
@@ -536,6 +562,7 @@ document.addEventListener('DOMContentLoaded', () => {
         processCodeBlocks(target);
         initializeReactionPopovers(target);
         updateReactionHighlights(target);
+        initializeTooltips(target);
 
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
@@ -615,4 +642,5 @@ document.addEventListener('DOMContentLoaded', () => {
     processCodeBlocks(document.body);
     initializeReactionPopovers(document.body);
     updateReactionHighlights(document.body);
+    initializeTooltips(document.body);
 });

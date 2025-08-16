@@ -17,6 +17,7 @@ from app.models import (
     Message,
     UserConversationStatus,
     Mention,
+    Reaction,
 )
 
 
@@ -58,6 +59,7 @@ def test_db(app):
             Message,
             UserConversationStatus,
             Mention,
+            Reaction,
         ]
 
         db.create_tables(tables)

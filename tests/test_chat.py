@@ -14,6 +14,24 @@ from app.models import (
 
 
 @pytest.fixture
+def setup_admin_and_member(test_db):
+    """Sets up a channel with an admin (user1) and a regular member (user2)."""
+    user1 = User.get_by_id(1)
+    user2 = User.create(id=2, username="regular_user", email="regular@example.com")
+
+    workspace = WorkspaceMember.get(user=user1).workspace
+    WorkspaceMember.create(user=user2, workspace=workspace)
+
+    channel = Channel.create(workspace=workspace, name="managed-channel")
+    # User 1 is the admin
+    ChannelMember.create(user=user1, channel=channel, role="admin")
+    # User 2 is a regular member
+    ChannelMember.create(user=user2, channel=channel)
+
+    return {"admin": user1, "member": user2, "channel": channel}
+
+
+@pytest.fixture
 def setup_channel_and_users(test_db):
     """
     Sets up a channel with one member (the default testuser) and a second user
@@ -209,3 +227,181 @@ def test_chat_interface_loads_data_correctly(logged_in_client):
         b'<span class="badge rounded-pill bg-danger float-end">1</span>'
         in response.data
     )
+
+
+def test_admin_can_remove_member(logged_in_client, setup_admin_and_member):
+    """
+    GIVEN a channel admin (user1) and a member (user2)
+    WHEN the admin removes the member
+    THEN the member's ChannelMember record should be deleted.
+    """
+    channel = setup_admin_and_member["channel"]
+    member_to_remove = setup_admin_and_member["member"]
+
+    # Ensure the member exists before the action
+    assert ChannelMember.get_or_none(user=member_to_remove, channel=channel) is not None
+
+    response = logged_in_client.delete(
+        f"/chat/channel/{channel.id}/members/{member_to_remove.id}"
+    )
+
+    assert response.status_code == 200
+    # Ensure the member has been removed
+    assert ChannelMember.get_or_none(user=member_to_remove, channel=channel) is None
+
+
+def test_member_cannot_remove_other_member(logged_in_client, setup_admin_and_member):
+    """
+    GIVEN a regular member (user2)
+    WHEN they attempt to remove the admin (user1)
+    THEN they should receive a 403 Forbidden error.
+    """
+    channel = setup_admin_and_member["channel"]
+    admin_user = setup_admin_and_member["admin"]
+    member_user = setup_admin_and_member["member"]
+
+    # Log in as the regular member
+    with logged_in_client.session_transaction() as sess:
+        sess["user_id"] = member_user.id
+
+    response = logged_in_client.delete(
+        f"/chat/channel/{channel.id}/members/{admin_user.id}"
+    )
+
+    assert response.status_code == 403
+    # Ensure the admin was NOT removed
+    assert ChannelMember.get_or_none(user=admin_user, channel=channel) is not None
+
+
+def test_admin_can_change_channel_settings(logged_in_client, setup_admin_and_member):
+    """
+    GIVEN a channel admin
+    WHEN they update the channel's settings (e.g., make it private)
+    THEN the channel's properties should be updated in the database.
+    """
+    channel = setup_admin_and_member["channel"]
+    assert channel.is_private is False
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/settings",
+        data={"is_private": "on", "posting_restricted": "on"},
+    )
+
+    assert response.status_code == 200
+
+    # Re-fetch the channel from the DB to check its updated state
+    updated_channel = Channel.get_by_id(channel.id)
+    assert updated_channel.is_private is True
+    assert updated_channel.posting_restricted_to_admins is True
+
+
+def test_user_can_join_public_channel(logged_in_client):
+    """
+    GIVEN a public channel the user is not a member of
+    WHEN the user posts to the join_channel endpoint
+    THEN they should be added as a member.
+    """
+    user_to_join = User.create(id=2, username="new_joiner", email="joiner@example.com")
+    WorkspaceMember.create(user=user_to_join, workspace_id=1)
+
+    public_channel = Channel.create(
+        workspace_id=1, name="public-for-joining", is_private=False
+    )
+
+    # Log in as the new user
+    with logged_in_client.session_transaction() as sess:
+        sess["user_id"] = user_to_join.id
+
+    assert ChannelMember.get_or_none(user=user_to_join, channel=public_channel) is None
+
+    response = logged_in_client.post(f"/chat/channel/{public_channel.id}/join")
+
+    assert response.status_code == 200
+    assert (
+        ChannelMember.get_or_none(user=user_to_join, channel=public_channel) is not None
+    )
+
+
+def test_non_admin_cannot_change_settings(logged_in_client, setup_admin_and_member):
+    """
+    GIVEN a regular channel member
+    WHEN they attempt to update channel settings
+    THEN they should receive a 403 Forbidden error.
+    """
+    channel = setup_admin_and_member["channel"]
+    member_user = setup_admin_and_member["member"]
+
+    # Log in as the non-admin member
+    with logged_in_client.session_transaction() as sess:
+        sess["user_id"] = member_user.id
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/settings", data={"is_private": "on"}
+    )
+
+    assert response.status_code == 403
+    assert b"You do not have permission" in response.data
+
+
+def test_user_cannot_leave_announcements_channel(logged_in_client):
+    """
+    GIVEN the special 'announcements' channel
+    WHEN a user tries to leave it
+    THEN they should receive a 403 Forbidden error.
+    """
+    # First, create the announcements channel and add the user to it
+    announcements_channel = Channel.create(workspace_id=1, name="announcements")
+    ChannelMember.create(user_id=1, channel=announcements_channel)
+
+    response = logged_in_client.post(f"/chat/channel/{announcements_channel.id}/leave")
+
+    assert response.status_code == 403
+    assert b"cannot leave the announcements channel" in response.data
+
+
+def test_last_admin_cannot_be_demoted(logged_in_client, setup_admin_and_member):
+    """
+    GIVEN a channel where user1 is the only admin
+    WHEN user1 (logged in) tries to demote themselves (which is blocked) or another admin
+    (if they were the last one), the action should fail. We test a more direct case:
+    an admin cannot demote another user if they are the last admin.
+    """
+    channel = setup_admin_and_member["channel"]
+    member_user = setup_admin_and_member["member"]
+
+    # First, promote the member to an admin
+    logged_in_client.put(
+        f"/chat/channel/{channel.id}/members/{member_user.id}/role",
+        data={"role": "admin"},
+    )
+
+    # Now, try to demote the original admin (user_id=1)
+    admin_to_demote = setup_admin_and_member["admin"]
+
+    # Log in as the newly promoted admin (user 2)
+    with logged_in_client.session_transaction() as sess:
+        sess["user_id"] = member_user.id
+
+    # Have user 2 demote user 1
+    logged_in_client.put(
+        f"/chat/channel/{channel.id}/members/{admin_to_demote.id}/role",
+        data={"role": "member"},
+    )
+
+    # Now, with only user 2 as admin, try to demote them (using user 1 logged in again)
+    # This scenario is a bit contrived but tests the logic. The simplest way is to
+    # just demote the only admin that isn't you.
+    last_admin = member_user  # user 2 is now the last admin besides user 1
+
+    # Log back in as user 1
+    with logged_in_client.session_transaction() as sess:
+        sess["user_id"] = admin_to_demote.id
+
+    # Try to demote the last admin
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/members/{last_admin.id}/role",
+        data={"role": "member"},
+    )
+
+    assert response.status_code == 403
+    assert b"Cannot demote the last admin" in response.data

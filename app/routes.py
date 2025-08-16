@@ -81,6 +81,56 @@ def to_html(text):
     return markdown.markdown(text, extensions=["extra", "codehilite", "pymdownx.tilde"])
 
 
+def get_reactions_for_messages(messages):
+    """
+    Efficiently fetches and groups reactions for a given list of message objects.
+
+    Args:
+        messages: A list of Peewee Message model instances.
+
+    Returns:
+        A dictionary mapping message IDs to a list of their grouped reactions.
+        Example: { 123: [ {'emoji': '👍', 'count': 2, ...} ], ... }
+    """
+    reactions_map = {}
+    if not messages:
+        return reactions_map
+
+    message_ids = [m.id for m in messages]
+    # Fetch all reactions for the given messages in one query
+    all_reactions_for_messages = (
+        Reaction.select(Reaction, User)
+        .join(User)
+        .where(Reaction.message_id.in_(message_ids))
+        .order_by(Reaction.created_at)
+    )
+
+    # Process into a dictionary grouped by message ID, then by emoji
+    reactions_by_message = {}
+    for r in all_reactions_for_messages:
+        mid = r.message_id
+        if mid not in reactions_by_message:
+            reactions_by_message[mid] = {}
+        if r.emoji not in reactions_by_message[mid]:
+            reactions_by_message[mid][r.emoji] = {
+                "emoji": r.emoji,
+                "count": 0,
+                "users": [],
+                "usernames": [],
+            }
+
+        group = reactions_by_message[mid][r.emoji]
+        group["count"] += 1
+        group["users"].append(r.user.id)
+        group["usernames"].append(r.user.username)
+
+    # Convert the inner emoji dictionary to a list for easier template iteration
+    for mid, emoji_groups in reactions_by_message.items():
+        reactions_map[mid] = list(emoji_groups.values())
+
+    return reactions_map
+
+
 # --- Routes ---
 @main_bp.route("/")
 def index():
@@ -283,40 +333,7 @@ def get_channel_chat(channel_id):
     )
 
     # After fetching messages, fetch all their reactions in a single, efficient query.
-    reactions_map = {}
-    if messages:
-        message_ids = [m.id for m in messages]
-        # This query fetches all reactions for the visible messages
-        reactions_query = (
-            Reaction.select(Reaction, User.id, User.username)
-            .join(User)
-            .where(Reaction.message_id.in_(message_ids))
-            .order_by(Reaction.created_at)
-        )
-
-        # Now, process these reactions into a structure the template can easily use:
-        # { message_id: { emoji: { emoji, count, users, usernames } } }
-        reactions_by_message = {}
-        for r in reactions_query:
-            mid = r.message_id
-            if mid not in reactions_by_message:
-                reactions_by_message[mid] = {}
-            if r.emoji not in reactions_by_message[mid]:
-                reactions_by_message[mid][r.emoji] = {
-                    "emoji": r.emoji,
-                    "count": 0,
-                    "users": [],
-                    "usernames": [],
-                }
-
-            group = reactions_by_message[mid][r.emoji]
-            group["count"] += 1
-            group["users"].append(r.user.id)
-            group["usernames"].append(r.user.username)
-
-        # Convert the inner dict to a list for the template
-        for mid, emoji_groups in reactions_by_message.items():
-            reactions_map[mid] = list(emoji_groups.values())
+    reactions_map = get_reactions_for_messages(messages)
 
     # We will use a header and a message template to display with HTMX OOB swaps
     header_html = render_template(
@@ -807,7 +824,12 @@ def leave_channel(channel_id):
 
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if membership:
-        if channel.is_private and membership.role == "admin":
+        # Check if the user is an admin
+        if membership.role == "admin":
+            # Count how many other members and admins are in the channel
+            member_count = (
+                ChannelMember.select().where(ChannelMember.channel == channel).count()
+            )
             admin_count = (
                 ChannelMember.select()
                 .where(
@@ -815,18 +837,17 @@ def leave_channel(channel_id):
                 )
                 .count()
             )
-            if (
-                admin_count == 1
-                and ChannelMember.select()
-                .where(ChannelMember.channel == channel)
-                .count()
-                > 1
-            ):
+
+            # If this user is the last admin AND there are other members left, block them.
+            if admin_count == 1 and member_count > 1:
                 return (
-                    "You cannot leave as the sole admin of a private channel with other members.",
+                    "You must promote another member to admin before you can leave.",
                     403,
                 )
-        membership.delete_instance()
+
+        ChannelMember.delete().where(
+            (ChannelMember.user == g.user) & (ChannelMember.channel == channel)
+        ).execute()
 
     remove_from_list_html = (
         f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
@@ -900,8 +921,37 @@ def update_member_role(channel_id, user_id_to_modify):
         membership_to_modify.role = new_role
         membership_to_modify.save()
 
+    admins = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "admin"))
+        .order_by(User.username)
+    )
+    members = list(
+        ChannelMember.select()
+        .join(User)
+        .where((ChannelMember.channel == channel) & (ChannelMember.role == "member"))
+        .order_by(User.username)
+    )
+
+    subquery = ChannelMember.select(ChannelMember.user_id).where(
+        ChannelMember.channel_id == channel_id
+    )
+    users_to_invite = (
+        User.select()
+        .join(WorkspaceMember)
+        .where(User.id.not_in(subquery), WorkspaceMember.workspace == channel.workspace)
+    )
+
     # Re-render the members tab to show the change.
-    return get_channel_details_members_tab(channel_id)
+    return render_template(
+        "partials/channel_details_tab_members.html",
+        channel=channel,
+        admins=admins,
+        members=members,
+        users_to_invite=users_to_invite,
+        current_user_membership=admin_membership,
+    )
 
 
 @main_bp.route("/chat/channel/<int:channel_id>/settings", methods=["PUT"])
@@ -1170,35 +1220,8 @@ def toggle_reaction(message_id):
         # If it doesn't exist, create it.
         Reaction.create(user=g.user, message=message, emoji=emoji)
 
-    # After any change, fetch the new state of all reactions for the message
-    # This query groups reactions by emoji, counts them, and collects the
-    # user IDs and usernames for each emoji group.
-    reactions_query = (
-        Reaction.select(
-            Reaction.emoji,
-            fn.COUNT(Reaction.user_id).alias("count"),
-            fn.ARRAY_AGG(Reaction.user_id).alias("user_ids"),
-            fn.ARRAY_AGG(User.username).alias("usernames"),
-        )
-        .join(User)
-        .where(Reaction.message == message)
-        .group_by(Reaction.emoji)
-        .order_by(fn.MIN(Reaction.created_at))
-    )
-
-    # Convert the query results into a more usable list of objects
-    grouped_reactions = []
-    for r in reactions_query:
-        user_ids = r.user_ids if r.user_ids is not None else []
-        usernames = r.usernames if r.usernames is not None else []
-        grouped_reactions.append(
-            {
-                "emoji": r.emoji,
-                "count": r.count,
-                "users": user_ids,
-                "usernames": usernames,
-            }
-        )
+    # Convert the dictionary's values to a list for the template.
+    grouped_reactions = get_reactions_for_messages([message])
 
     # Render the reactions partial with the new data
     reactions_html_content = render_template(
@@ -1276,33 +1299,7 @@ def get_dm_chat(other_user_id):
     messages = list(reversed(messages_query))
 
     # Add reactions to messages
-    reactions_map = {}
-    if messages:
-        message_ids = [m.id for m in messages]
-        reactions_query = (
-            Reaction.select(Reaction, User.id, User.username)
-            .join(User)
-            .where(Reaction.message_id.in_(message_ids))
-            .order_by(Reaction.created_at)
-        )
-        reactions_by_message = {}
-        for r in reactions_query:
-            mid = r.message_id
-            if mid not in reactions_by_message:
-                reactions_by_message[mid] = {}
-            if r.emoji not in reactions_by_message[mid]:
-                reactions_by_message[mid][r.emoji] = {
-                    "emoji": r.emoji,
-                    "count": 0,
-                    "users": [],
-                    "usernames": [],
-                }
-            group = reactions_by_message[mid][r.emoji]
-            group["count"] += 1
-            group["users"].append(r.user.id)
-            group["usernames"].append(r.user.username)
-        for mid, emoji_groups in reactions_by_message.items():
-            reactions_map[mid] = list(emoji_groups.values())
+    reactions_map = get_reactions_for_messages(messages)
 
     # Header and message templates for a HTMX OOB Swap
     header_html = render_template("partials/dm_header.html", other_user=other_user)
