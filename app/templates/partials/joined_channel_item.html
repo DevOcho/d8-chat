@@ -1,0 +1,13 @@
+{# This is the rich list item that displays AFTER a user joins a channel. #}
+<div id="joinable-channel-{{ channel.id }}" class="list-group-item d-flex justify-content-between align-items-center">
+    <div>
+        <h6 class="mb-0">#{{ channel.name }}</h6>
+        <small class="text-muted d-block mb-1">{{ channel.topic or 'No topic set.' }}</small>
+        <small class="text-muted">
+            Created by {{ channel.created_by.username if channel.created_by else 'Unknown' }} on {{ channel.created_at.strftime("%b %d, %Y") }}
+        </small>
+    </div>
+    <span class="text-success fw-bold">
+        <i class="bi bi-check-circle-fill"></i> Joined
+    </span>
+</div>

@@ -1,12 +1,15 @@
+import re
+import markdown
+
+from config import Config
+import bleach
+import emoji
 from flask import Flask, g
 from flask_sock import Sock
-from config import Config
+from markupsafe import Markup
+
 from .models import initialize_db
 from .sso import init_sso
-import markdown
-from markupsafe import Markup
-import bleach
-import emoji  # Import the new library
 
 sock = Sock()  # Create a Sock instance
 
@@ -35,74 +38,94 @@ def create_app(config_class=Config):
     def markdown_filter(content):
         """
         Converts Markdown content to sanitized HTML with syntax highlighting.
+        This uses a two-pass approach to safely handle code blocks and prevent
+        double-escaping issues with the HTML sanitizer.
         """
-        # First, convert emoji shortcodes (e.g., :joy:) into unicode characters.
-        # The 'alias' language allows for common shortcodes like :D
+        # Emoji conversion happens first
         content_with_emojis = emoji.emojize(content, language="alias")
 
         # Define the tags and attributes that we will allow in the final HTML
         allowed_tags = [
-            "p",
-            "br",
-            "strong",
-            "em",
-            "del",
-            "sub",
-            "sup",
-            "ul",
-            "ol",
-            "li",
-            "blockquote",
-            "pre",
-            "code",
-            "span",
-            "div",
-            "a",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "table",
-            "thead",
-            "tbody",
-            "tr",
-            "th",
-            "td",
+            "p", "br", "strong", "em", "del", "sub", "sup", "ul", "ol", "li",
+            "blockquote", "pre", "code", "span", "div", "a", "h1", "h2", "h3",
+            "h4", "h5", "h6", "table", "thead", "tbody", "tr", "th", "td",
         ]
         allowed_attrs = {
             "*": ["class"],
             "a": ["href", "rel", "target"],
         }
 
-        # Setup the markdown
-        html = markdown.markdown(
-            content_with_emojis,  # Use the emoji-processed content
-            extensions=["extra", "codehilite", "pymdownx.tilde"],
-            extension_configs={
-                "codehilite": {
-                    "css_class": "codehilite",
-                    "guess_lang": False,
-                    "linenums": False,
-                }
-            },
+        # --- Pass 1: Extract and process code blocks separately ---
+        code_blocks = []
+        def extract_and_process_code_block(m):
+            # The full match (e.g., ```python...```) is m.group(0)
+            # Process this block with Markdown to get syntax highlighting and escaping
+            block_html = markdown.markdown(
+                m.group(0),
+                extensions=["extra", "codehilite", "pymdownx.tilde"],
+                extension_configs={
+                    "codehilite": {
+                        "css_class": "codehilite",
+                        "guess_lang": False,
+                        "linenums": False,
+                    }
+                },
+            )
+            # Store the safe, processed HTML
+            code_blocks.append(block_html)
+            # Return a placeholder that contains NO special markdown characters
+            return f"D8CHATCODEBLOCKPLACEHOLDER{len(code_blocks)-1}"
+
+        # Use regex to find all fenced code blocks and replace them with placeholders
+        content_without_code = re.sub(
+            r"(?s)(```.*?```|~~~.*?~~~)",
+            extract_and_process_code_block,
+            content_with_emojis
         )
 
-        # Clickable links
+        # Pre-process the remaining content to escape lone ">" characters
+        # that would otherwise be incorrectly interpreted as empty blockquotes.
+        # This looks for any line that *only* contains a ">".
+        content_without_code = re.sub(
+            r"^(\s*)>(\s*)$",
+            r"\1&gt;\2",
+            content_without_code,
+            flags=re.MULTILINE
+        )
+
+        # --- Pass 2: Process the main content (without code blocks) ---
+        # Process the remaining markdown, but disable codehilite for this pass.
+        main_html = markdown.markdown(
+            content_without_code,
+            extensions=["extra", "pymdownx.tilde", 'nl2br']
+        )
+
+        # Linkify and then sanitize the main content.
         def set_link_attrs(attrs, new=False):
             attrs[(None, "target")] = "_blank"
             attrs[(None, "rel")] = "noopener noreferrer"
             return attrs
 
         linkified_html = bleach.linkify(
-            html, callbacks=[set_link_attrs], skip_tags=["pre"]
+            main_html, callbacks=[set_link_attrs], skip_tags=["pre"]
         )
 
-        # Santize HTML
         safe_html = bleach.clean(
             linkified_html, tags=allowed_tags, attributes=allowed_attrs
         )
+
+        # --- Final Step: Re-insert the processed code blocks ---
+        for i, block_html in enumerate(code_blocks):
+            # Use the new, safe placeholder for replacement
+            placeholder = f"D8CHATCODEBLOCKPLACEHOLDER{i}"
+            
+            # Markdown sometimes wraps standalone placeholders in <p> tags, so we must replace that.
+            placeholder_with_p_tags = f"<p>{placeholder}</p>"
+            
+            if placeholder_with_p_tags in safe_html:
+                safe_html = safe_html.replace(placeholder_with_p_tags, block_html)
+            else:
+                safe_html = safe_html.replace(placeholder, block_html)
 
         return Markup(safe_html)
 

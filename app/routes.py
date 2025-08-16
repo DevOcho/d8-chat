@@ -27,7 +27,7 @@ import secrets
 from . import sock
 from .chat_manager import chat_manager
 import json
-from peewee import IntegrityError, fn
+from peewee import IntegrityError, fn, JOIN  # <-- [THE FIX] IMPORT JOIN
 import re
 import datetime
 from functools import reduce
@@ -180,6 +180,9 @@ def profile():
 
 
 # --- CHAT INTERFACE ROUTES ---
+# Replace the existing chat_interface function with this one
+
+
 @main_bp.route("/chat")
 @login_required
 def chat_interface():
@@ -1049,26 +1052,92 @@ def get_start_dm_form():
 @main_bp.route("/chat/channels/browse", methods=["GET"])
 @login_required
 def get_browse_channels_modal():
-    """Renders the modal for browsing and joining public channels."""
+    """
+    Renders the modal for browsing channels, showing the first page of results.
+    """
+    page = 1
+    per_page = 15
+
     # Subquery to find all channels the user is already a member of.
     member_of_channels_subquery = ChannelMember.select(ChannelMember.channel_id).where(
         ChannelMember.user == g.user
     )
 
-    # Main query to find channels that are public AND the user is not a member of.
-    joinable_channels = (
-        Channel.select()
+    # Main query to find all channels that are public AND the user is not a member of.
+    # We also join the User table to fetch the creator's username.
+    query = (
+        Channel.select(Channel, User)
+        .join(User, join_type=JOIN.LEFT_OUTER, on=(Channel.created_by == User.id), attr='created_by')
         .where(
             (Channel.is_private == False)
             & (Channel.id.not_in(member_of_channels_subquery))
         )
         .order_by(Channel.name)
     )
+    
+    # Get the total count before paginating
+    total_channels = query.count()
+    
+    # Fetch the channels for the current page
+    channels_for_page = query.paginate(page, per_page)
+    
+    # Determine if there's a next page
+    has_more_pages = total_channels > (page * per_page)
 
     return render_template(
-        "partials/browse_channels_modal.html", joinable_channels=joinable_channels
+        "partials/browse_channels_modal.html", 
+        channels=channels_for_page,
+        has_more_pages=has_more_pages,
+        current_page=page
     )
 
+
+@main_bp.route("/chat/channels/search", methods=["GET"])
+@login_required
+def search_channels():
+    """
+    Searches for joinable public channels based on a query and supports pagination.
+    Returns an HTML fragment with the filtered list of channels.
+    """
+    search_term = request.args.get("q", "").strip()
+    page = request.args.get("page", 1, type=int)
+    per_page = 15
+
+    # Subquery to find all channels the user is already a member of.
+    member_of_channels_subquery = ChannelMember.select(ChannelMember.channel_id).where(
+        ChannelMember.user == g.user
+    )
+
+    # Base query for channels, joining User to get creator info.
+    query = (
+        Channel.select(Channel, User)
+        .join(User, join_type=JOIN.LEFT_OUTER, on=(Channel.created_by == User.id), attr='created_by')
+        .where(
+            (Channel.is_private == False)
+            & (Channel.id.not_in(member_of_channels_subquery))
+        )
+    )
+
+    # If a search term is provided, filter the query by name.
+    if search_term:
+        query = query.where(Channel.name.contains(search_term))
+
+    # Get the total count of matching channels before paginating
+    total_channels = query.count()
+    
+    # Fetch the specific page of channels
+    channels_for_page = query.order_by(Channel.name).paginate(page, per_page)
+
+    # Determine if there's a next page
+    has_more_pages = total_channels > (page * per_page)
+
+    # Render *only* the results partial.
+    return render_template(
+        "partials/joinable_channel_results.html", 
+        channels=channels_for_page,
+        has_more_pages=has_more_pages,
+        current_page=page
+    )
 
 @main_bp.route("/chat/channel/<int:channel_id>/join", methods=["POST"])
 @login_required
@@ -1087,17 +1156,28 @@ def join_channel(channel_id):
         .exists()
     )
 
-    if is_already_member:
-        return '<span class="text-success fw-bold">Joined</span>'
+    if not is_already_member:
+        ChannelMember.create(user=g.user, channel=channel)
 
-    ChannelMember.create(user=g.user, channel=channel)
-
+    # OOB swap to add the new channel to the user's sidebar list
     new_sidebar_item_html = render_template(
         "partials/channel_list_item.html", channel=channel
     )
-    confirmation_message_html = '<span class="text-success fw-bold">Joined!</span>'
+    
+    # Re-query the channel with the creator info to render the confirmation message
+    channel_with_creator = (
+        Channel.select(Channel, User)
+        .join(User, join_type=JOIN.LEFT_OUTER, on=(Channel.created_by == User.id), attr='created_by')
+        .where(Channel.id == channel_id)
+        .get()
+    )
 
-    return new_sidebar_item_html + confirmation_message_html
+    # This is the main response, which renders our new partial for the joined state.
+    confirmation_html = render_template(
+        "partials/joined_channel_item.html", channel=channel_with_creator
+    )
+
+    return new_sidebar_item_html + confirmation_html
 
 
 # --- MESSAGE EDIT AND DELETE ROUTES ---

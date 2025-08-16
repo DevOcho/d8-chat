@@ -1,9 +1,5 @@
 Current issues with the slack_clone:
 
-New messages in #general are showing up with the mention badge even though users aren't mentioned.
-
-We can't send HTML in code blocks because it is scrubbed out.  We need to make the HTML escaped instead of removing it.
-
 Search for messages.
 
 We need to be able to upload files and have avatars and inline images.

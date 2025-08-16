@@ -1,0 +1,37 @@
+{# 
+  This partial renders the list of channels and the "Load More" button.
+  It's used for both the initial load and for subsequent search/pagination requests.
+#}
+<div class="list-group list-group-flush {% if current_page > 1 %}border-top{% endif %}">
+    {% for channel in channels %}
+        <div id="joinable-channel-{{ channel.id }}" class="list-group-item d-flex justify-content-between align-items-center">
+            <div>
+                <h6 class="mb-0">#{{ channel.name }}</h6>
+                <small class="text-muted d-block mb-1">{{ channel.topic or 'No topic set.' }}</small>
+                <small class="text-muted">
+                    Created by {{ channel.created_by.username if channel.created_by else 'Unknown' }} on {{ channel.created_at.strftime("%b %d, %Y") }}
+                </small>
+            </div>
+            <button class="btn btn-sm btn-success"
+                    hx-post="{{ url_for('main.join_channel', channel_id=channel.id) }}"
+                    hx-target="closest .list-group-item"
+                    hx-swap="outerHTML">Join</button>
+        </div>
+    {% else %}
+        {% if request.args.get('q') %}
+             <div class="list-group-item text-muted">No channels match your search.</div>
+        {% endif %}
+    {% endfor %}
+</div>
+
+{# "Load More" button for pagination #}
+{% if has_more_pages %}
+<div class="mt-3 text-center"
+     hx-get="{{ url_for('main.search_channels', q=request.args.get('q', ''), page=current_page + 1) }}"
+     hx-target="this"
+     hx-swap="outerHTML">
+    <button class="btn btn-outline-secondary">
+        Load More
+    </button>
+</div>
+{% endif %}

@@ -13,6 +13,59 @@ from app.models import (
 from peewee import IntegrityError
 
 
+def _seed_channels(workspace):
+    """Creates a large number of diverse channels for testing purposes."""
+    print("\nSeeding additional channels...")
+    channel_names = [
+        # Project Channels
+        "project-phoenix", "project-pegasus", "q3-marketing-campaign",
+        "website-redesign-2025", "mobile-app-v3", "api-deprecation-taskforce",
+        "tiger-team", "d8-chat-meta",
+
+        # Department & Team Channels
+        "engineering-all", "design-ux-ui", "product-management", "sales-team",
+        "customer-support", "human-resources", "finance-dept", "it-support",
+
+        # Location-based Channels
+        "office-london", "office-san-francisco", "remote-first",
+
+        # Guild & Help Channels
+        "frontend-guild", "backend-guild", "testing-qa", "documentation",
+        "help-python", "help-javascript", "help-css", "cloud-aws",
+
+        # General & Feedback Channels
+        "product-feedback", "feature-requests", "bug-reports", "competitive-intel",
+        "wins-and-shoutouts",
+
+        # Social & Fun Channels
+        "random", "water-cooler", "starwars", "marvel-vs-dc", "gaming-lounge",
+        "music-lovers", "pets-of-devocho", "book-club", "cooking-and-recipes",
+        "sports", "memes",
+
+        # Company & HR Channels
+        "hiring-and-recruitment", "social-committee", "company-culture",
+        "new-hires", "learning-and-development", "security-updates",
+    ]
+
+    channels_created_count = 0
+    for name in channel_names:
+        # Create the channel
+        channel, created = Channel.get_or_create(
+            workspace=workspace,
+            name=name,
+            defaults={"is_private": False}
+        )
+        if created:
+            # Also create the corresponding conversation record for the channel
+            Conversation.get_or_create(
+                conversation_id_str=f"channel_{channel.id}",
+                defaults={"type": "channel"},
+            )
+            channels_created_count += 1
+
+    print(f"-> Created {channels_created_count} new public channels.")
+
+
 def seed_data():
     """Populate the database with initial test data."""
     try:
@@ -51,6 +104,13 @@ def seed_data():
             user=users["user2"], workspace=workspace, defaults={"role": "member"}
         )
         print("Assigned users to workspace.")
+        
+        #
+        # This is the new function call to seed all the extra channels.
+        # It's placed here to ensure the workspace it needs already exists.
+        #
+        _seed_channels(workspace)
+
 
         print("\nDatabase seeding complete!")
 
