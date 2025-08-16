@@ -19,6 +19,7 @@ from .models import (
     db,
     UserConversationStatus,
     Mention,
+    Reaction,
 )
 from .sso import oauth  # Import the oauth object
 import functools
@@ -281,6 +282,42 @@ def get_channel_chat(channel_id):
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
 
+    # After fetching messages, fetch all their reactions in a single, efficient query.
+    reactions_map = {}
+    if messages:
+        message_ids = [m.id for m in messages]
+        # This query fetches all reactions for the visible messages
+        reactions_query = (
+            Reaction.select(Reaction, User.id, User.username)
+            .join(User)
+            .where(Reaction.message_id.in_(message_ids))
+            .order_by(Reaction.created_at)
+        )
+
+        # Now, process these reactions into a structure the template can easily use:
+        # { message_id: { emoji: { emoji, count, users, usernames } } }
+        reactions_by_message = {}
+        for r in reactions_query:
+            mid = r.message_id
+            if mid not in reactions_by_message:
+                reactions_by_message[mid] = {}
+            if r.emoji not in reactions_by_message[mid]:
+                reactions_by_message[mid][r.emoji] = {
+                    "emoji": r.emoji,
+                    "count": 0,
+                    "users": [],
+                    "usernames": [],
+                }
+
+            group = reactions_by_message[mid][r.emoji]
+            group["count"] += 1
+            group["users"].append(r.user.id)
+            group["usernames"].append(r.user.username)
+
+        # Convert the inner dict to a list for the template
+        for mid, emoji_groups in reactions_by_message.items():
+            reactions_map[mid] = list(emoji_groups.values())
+
     # We will use a header and a message template to display with HTMX OOB swaps
     header_html = render_template(
         "partials/channel_header.html", channel=channel, members_count=members_count
@@ -292,6 +329,7 @@ def get_channel_chat(channel_id):
         last_read_timestamp=last_read_timestamp,
         mention_message_ids=mention_message_ids,
         PAGE_SIZE=PAGE_SIZE,
+        reactions_map=reactions_map,
     )
 
     # After marking as read, send back a command to clear the badge
@@ -1112,10 +1150,67 @@ def update_address():
     return make_response(header_html + display_html)
 
 
-@main_bp.route("/test-chat")
+@main_bp.route("/chat/message/<int:message_id>/react", methods=["POST"])
 @login_required
-def test_chat():
-    return render_template("websocket_test.html")
+def toggle_reaction(message_id):
+    """Adds or removes an emoji reaction from a message for the current user."""
+    emoji = request.form.get("emoji")
+    message = Message.get_or_none(id=message_id)
+
+    if not emoji or not message:
+        return "Invalid request.", 400
+
+    # Check if the reaction already exists for this user/message/emoji
+    existing_reaction = Reaction.get_or_none(user=g.user, message=message, emoji=emoji)
+
+    if existing_reaction:
+        # If it exists, delete it (this is the "toggle off" action).
+        existing_reaction.delete_instance()
+    else:
+        # If it doesn't exist, create it.
+        Reaction.create(user=g.user, message=message, emoji=emoji)
+
+    # After any change, fetch the new state of all reactions for the message
+    # This query groups reactions by emoji, counts them, and collects the
+    # user IDs and usernames for each emoji group.
+    reactions_query = (
+        Reaction.select(
+            Reaction.emoji,
+            fn.COUNT(Reaction.user_id).alias("count"),
+            fn.ARRAY_AGG(Reaction.user_id).alias("user_ids"),
+            fn.ARRAY_AGG(User.username).alias("usernames"),
+        )
+        .join(User)
+        .where(Reaction.message == message)
+        .group_by(Reaction.emoji)
+        .order_by(fn.MIN(Reaction.created_at))
+    )
+
+    # Convert the query results into a more usable list of objects
+    grouped_reactions = []
+    for r in reactions_query:
+        grouped_reactions.append(
+            {
+                "emoji": r.emoji,
+                "count": r.count,
+                "users": r.user_ids,
+                "usernames": r.usernames,
+            }
+        )
+
+    # Render the reactions partial with the new data
+    reactions_html_content = render_template(
+        "partials/reactions.html", message=message, grouped_reactions=grouped_reactions
+    )
+
+    broadcast_html = f'<div id="reactions-container-{message.id}" hx-swap-oob="innerHTML">{reactions_html_content}</div>'
+
+    # Broadcast the updated HTML to everyone in the conversation
+    conv_id_str = message.conversation.conversation_id_str
+    chat_manager.broadcast(conv_id_str, broadcast_html)
+
+    # Return an empty 200 OK to the user who initiated the action,
+    return "", 200
 
 
 # --- Admin Routes ---
@@ -1177,6 +1272,35 @@ def get_dm_chat(other_user_id):
     )
     messages = list(reversed(messages_query))
 
+    # Add reactions to messages
+    reactions_map = {}
+    if messages:
+        message_ids = [m.id for m in messages]
+        reactions_query = (
+            Reaction.select(Reaction, User.id, User.username)
+            .join(User)
+            .where(Reaction.message_id.in_(message_ids))
+            .order_by(Reaction.created_at)
+        )
+        reactions_by_message = {}
+        for r in reactions_query:
+            mid = r.message_id
+            if mid not in reactions_by_message:
+                reactions_by_message[mid] = {}
+            if r.emoji not in reactions_by_message[mid]:
+                reactions_by_message[mid][r.emoji] = {
+                    "emoji": r.emoji,
+                    "count": 0,
+                    "users": [],
+                    "usernames": [],
+                }
+            group = reactions_by_message[mid][r.emoji]
+            group["count"] += 1
+            group["users"].append(r.user.id)
+            group["usernames"].append(r.user.username)
+        for mid, emoji_groups in reactions_by_message.items():
+            reactions_map[mid] = list(emoji_groups.values())
+
     # Header and message templates for a HTMX OOB Swap
     header_html = render_template("partials/dm_header.html", other_user=other_user)
     messages_html = render_template(
@@ -1185,6 +1309,7 @@ def get_dm_chat(other_user_id):
         other_user=other_user,
         last_read_timestamp=last_read_timestamp,
         PAGE_SIZE=PAGE_SIZE,
+        reactions_map=reactions_map,
     )
 
     # Clear the new messages badge

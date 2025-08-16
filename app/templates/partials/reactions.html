@@ -1,0 +1,16 @@
+<!-- This partial renders the list of reaction "pills" for a message. -->
+<!-- It's designed to be swapped in via an OOB WebSocket broadcast. -->
+{% for reaction in grouped_reactions %}
+    {% set emoji = reaction.emoji %}
+    {% set count = reaction.count %}
+    {% set users = reaction.users %}
+    {# Determine if the current logged-in user reacted with this emoji #}
+    {% set user_has_reacted = g.user.id in users %}
+    <button class="btn btn-sm reaction-pill {{ 'user-reacted' if user_has_reacted else '' }}"
+            hx-post="{{ url_for('main.toggle_reaction', message_id=message.id) }}"
+            hx-vals='{"emoji": "{{ emoji }}"}'
+            title="Reacted by: {{ reaction.usernames|join(", ") }}">
+        <span>{{ emoji }}</span>
+        <span class="reaction-count">{{ count }}</span>
+    </button>
+{% endfor %}

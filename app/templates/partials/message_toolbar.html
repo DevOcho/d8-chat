@@ -1,5 +1,11 @@
 <div class="message-toolbar">
     <button class="btn btn-sm btn-light"
+            data-bs-toggle="popover"
+            data-message-id="{{ message.id }}"
+            title="Add Reaction">
+        <i class="bi bi-emoji-smile"></i>
+    </button>
+    <button class="btn btn-sm btn-light"
             hx-get="/chat/message/{{ message.id }}/reply"
             hx-target="#chat-input-container"
             hx-swap="outerHTML"

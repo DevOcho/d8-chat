@@ -21,6 +21,15 @@
             </div>
         {% endif %}
         <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
+        <div id="reactions-container-{{ message.id }}"
+             class="mt-1 d-flex flex-wrap gap-1">
+            {# Check if there are reactions for this message in the map from the server #}
+            {% if reactions_map and message.id in reactions_map %}
+                {# If so, render them using the same partial the websocket uses #}
+                {% set grouped_reactions = reactions_map[message.id] %}
+                {% include 'partials/reactions.html' %}
+            {% endif %}
+        </div>
     </div>
     {% if g.user %}
         {% include 'partials/message_toolbar.html' %}

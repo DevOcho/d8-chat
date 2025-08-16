@@ -198,3 +198,54 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
 emoji-picker {
     --indicator-color: #ec729c; /* Change the selection indicator color */
 }
+
+/* --- Emoji Reaction Pill Styles --- */
+.reaction-pill {
+    --reaction-bg: #f8f9fa;
+    --reaction-border: #dee2e6;
+    --reaction-text: #212529;
+    --user-reaction-bg: #fdf5f8;
+    --user-reaction-border: #ec729c;
+    --user-reaction-text: #495057;
+
+    background-color: var(--reaction-bg);
+    border: 1px solid var(--reaction-border);
+    color: var(--reaction-text);
+    padding: 2px 8px;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    transition: all 0.2s ease-in-out;
+}
+
+.reaction-pill:hover {
+    border-color: #adb5bd;
+}
+
+.reaction-pill.user-reacted {
+    background-color: var(--user-reaction-bg);
+    border-color: var(--user-reaction-border);
+    color: var(--user-reaction-text);
+}
+
+.reaction-pill.user-reacted:hover {
+     border-color: #e35a8b;
+}
+
+[data-bs-theme="dark"] .reaction-pill {
+    --reaction-bg: #40444b;
+    --reaction-border: #2f3136;
+    --reaction-text: #dcddde;
+    --user-reaction-bg: #5c3f4a;
+    --user-reaction-border: #ec729c;
+    --user-reaction-text: #f0d8e1;
+}
+
+[data-bs-theme="dark"] .reaction-pill:hover {
+    border-color: #5d6268;
+}
+
+[data-bs-theme="dark"] .reaction-pill.user-reacted:hover {
+    border-color: #f0a2bd;
+}

@@ -401,6 +401,49 @@ const Editor = {
 document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
 
+     /**
+     * Initializes emoji reaction popovers on a given container.
+     * @param {HTMLElement} container The element to search for reaction buttons.
+     */
+    const initializeReactionPopovers = (container) => {
+        const popoverTriggerList = container.querySelectorAll('[data-bs-toggle="popover"]');
+
+        popoverTriggerList.forEach(popoverTriggerEl => {
+            // Avoid re-initializing
+            if (popoverTriggerEl.dataset.popoverInitialized) return;
+
+            const messageId = popoverTriggerEl.dataset.messageId;
+            if (!messageId) return;
+
+            const popover = new bootstrap.Popover(popoverTriggerEl, {
+                html: true,
+                sanitize: false, // We are inserting a trusted component
+                content: `<emoji-picker class="light"></emoji-picker>`
+            });
+
+            // When the popover is shown, add the event listener to the picker inside it
+            popoverTriggerEl.addEventListener('shown.bs.popover', () => {
+                const picker = document.querySelector(`.popover[role="tooltip"] emoji-picker`);
+                if (picker) {
+                    const pickerListener = event => {
+                        const selectedEmoji = event.detail.unicode;
+                        // Use htmx.ajax to manually send the request
+                        htmx.ajax('POST', `/chat/message/${messageId}/react`, {
+                            values: { emoji: selectedEmoji },
+                            swap: 'none' // We don't need to swap anything, the websocket will update the UI
+                        });
+                        // Hide the popover after selection
+                        popover.hide();
+                    };
+                    // Ensure we only have one listener on the picker
+                    picker.removeEventListener('emoji-click', pickerListener);
+                    picker.addEventListener('emoji-click', pickerListener, { once: true });
+                }
+            });
+            popoverTriggerEl.dataset.popoverInitialized = 'true';
+        });
+    };
+
     // Global HTMX Error Handling with Toasts
     const toastEl = document.getElementById('error-toast');
     if (toastEl) {
@@ -474,6 +517,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.addEventListener('htmx:afterSwap', (event) => {
         const target = event.detail.target;
         processCodeBlocks(target);
+        initializeReactionPopovers(target);
+
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
             scrollLastMessageIntoView();
             if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
@@ -495,6 +540,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             // Not JSON, fall through to process as HTML.
+        }
+
+        const messageList = document.getElementById('message-list');
+        if (messageList) {
+             initializeReactionPopovers(messageList);
         }
 
         // Process as an HTML swap for the message list

@@ -12,6 +12,7 @@ from app.models import (
     Conversation,
     UserConversationStatus,
     Mention,
+    Reaction,
 )
 from config import Config
 from playhouse.db_url import connect
@@ -27,6 +28,7 @@ ALL_MODELS = [
     Conversation,
     UserConversationStatus,
     Mention,
+    Reaction,
 ]
 
 
@@ -93,10 +95,11 @@ def seed_initial_data():
     announcements_channel, _ = Channel.get_or_create(
         workspace=workspace,
         name="announcements",
-        defaults={"is_private": False, 
-                  "topic": "Company-wide announcements.",
-                  "description": "Important, must-read announcements will be posted here.",
-                  "posting_restricted_to_admins": True,
+        defaults={
+            "is_private": False,
+            "topic": "Company-wide announcements.",
+            "description": "Important, must-read announcements will be posted here.",
+            "posting_restricted_to_admins": True,
         },
     )
     Conversation.get_or_create(

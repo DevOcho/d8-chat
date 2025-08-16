@@ -122,6 +122,18 @@ class Message(BaseModel):
     parent_message = ForeignKeyField("self", backref="replies", null=True)
 
 
+class Reaction(BaseModel):
+    """Tracks an emoji reaction from a user on a specific message."""
+
+    user = ForeignKeyField(User, backref="reactions")
+    message = ForeignKeyField(Message, backref="reactions")
+    emoji = CharField()  # Stores the actual unicode emoji character
+
+    class Meta:
+        # A user can only react with the same emoji once per message
+        primary_key = CompositeKey("user", "message", "emoji")
+
+
 class Mention(BaseModel):
     """
     Tracks when a user is mentioned in a message.
