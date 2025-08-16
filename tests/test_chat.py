@@ -51,7 +51,9 @@ def test_create_new_public_channel(logged_in_client):
     )
 
     assert response.status_code == 200
-    assert response.headers["HX-Trigger"] == "close-modal"
+    triggered_events = response.headers["HX-Trigger"].split(", ")
+    assert "close-modal" in triggered_events
+    assert "focus-chat-input" in triggered_events
 
     channel = Channel.get_or_none(name="general-test-channel")
     assert channel is not None
