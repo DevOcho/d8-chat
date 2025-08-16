@@ -23,3 +23,9 @@ repos:
    rev: 22.10.0
    hooks:
    -   id: black
+#- repo: https://github.com/eslint/eslint
+  #rev: v8.57.0 # Use a recent stable version of ESLint
+  #hooks:
+  #-   id: eslint
+      #files: \.(js|jsx|ts|tsx)$ # Target JavaScript, JSX, TypeScript, and TSX files
+      #args: [--fix] # Optional: automatically fix linting issues

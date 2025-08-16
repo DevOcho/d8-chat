@@ -46,13 +46,13 @@
         {% block scripts %}{% endblock %}
         <!-- Toast container for displaying errors -->
         <div class="toast-container position-fixed bottom-0 end-0 p-3">
-            <div id="error-toast"
+            <div id="app-toast"
                  class="toast"
                  role="alert"
                  aria-live="assertive"
                  aria-atomic="true">
-                <div class="toast-header bg-danger text-white">
-                    <strong class="me-auto">An Error Occurred</strong>
+                <div id="toast-header" class="toast-header bg-danger text-white">
+                    <strong id="toast-title" class="me-auto">An Error Occurred</strong>
                     <button type="button"
                             class="btn-close btn-close-white"
                             data-bs-dismiss="toast"

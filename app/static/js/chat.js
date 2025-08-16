@@ -395,138 +395,82 @@ const Editor = {
     }
 };
 
-
 // --- 2. GENERAL PAGE-LEVEL LOGIC ---
-
 document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
 
-    /**
-     * Finds and initializes all Bootstrap tooltips within a given container.
-     * @param {HTMLElement} container
-     */
-    const initializeTooltips = (container) => {
-        const tooltipTriggerList = container.querySelectorAll('[data-bs-toggle="tooltip"]');
-        [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+    const ToastManager = {
+        toastEl: document.getElementById('app-toast'),
+        headerEl: document.getElementById('toast-header'),
+        titleEl: document.getElementById('toast-title'),
+        bodyEl: document.getElementById('toast-body-content'),
+        bootstrapToast: null,
+        initialize: function() { if (this.toastEl) this.bootstrapToast = new bootstrap.Toast(this.toastEl, { delay: 5000 }); },
+        show: function(title, message, level = 'danger', autohide = true) {
+            if (!this.bootstrapToast || !this.titleEl || !this.bodyEl) return;
+            this.titleEl.textContent = title;
+            this.bodyEl.textContent = message;
+            this.headerEl.className = 'toast-header';
+            this.headerEl.classList.add(`bg-${level}`, 'text-white');
+            this.bootstrapToast = new bootstrap.Toast(this.toastEl, { autohide: autohide, delay: 5000 });
+            this.bootstrapToast.show();
+        },
+        hide: function() { if (this.bootstrapToast) { this.bootstrapToast.hide(); } }
     };
+    ToastManager.initialize();
 
-    /**
-     * Finds all reaction pills in a container and applies the 'user-reacted'
-     * class if the current user is in the list of reactors.
-     * @param {HTMLElement} container The element to search within.
-     */
-    const updateReactionHighlights = (container) => {
-        const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
-        if (!currentUserId) return;
+    document.body.addEventListener('htmx:responseError', function(evt) {
+        if (evt.detail.target.tagName === 'MAIN' && evt.detail.target.hasAttribute('ws-connect')) return;
+        if (evt.detail.xhr.responseText) {
+            ToastManager.show('An Error Occurred', evt.detail.xhr.responseText, 'danger');
+        }
+    });
 
-        const reactionPills = container.querySelectorAll('.reaction-pill');
-        reactionPills.forEach(pill => {
-            const reactorIds = pill.dataset.reactorIds || '';
-            const hasReacted = reactorIds.split(',').includes(currentUserId);
-            pill.classList.toggle('user-reacted', hasReacted);
-        });
-    };
+    document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
+        const targetId = evt.detail.content.id || 'unknown';
+        if (targetId.startsWith('status-dot-')) {
+            console.log(`Ignoring harmless presence update for target: #${targetId}`);
+            return;
+        }
+        const errorMessage = `A UI update failed because the target '#${targetId}' could not be found.`;
+        ToastManager.show('UI Sync Error', errorMessage, 'warning');
+    });
 
-     /**
-     * Initializes emoji reaction popovers on a given container.
-     * @param {HTMLElement} container The element to search for reaction buttons.
-     */
-    const initializeReactionPopovers = (container) => {
-        const popoverTriggerList = container.querySelectorAll('[data-bs-toggle="popover"]');
-
-        popoverTriggerList.forEach(popoverTriggerEl => {
-            // Avoid re-initializing
-            if (popoverTriggerEl.dataset.popoverInitialized) return;
-
-            const messageId = popoverTriggerEl.dataset.messageId;
-            if (!messageId) return;
-
-            const popover = new bootstrap.Popover(popoverTriggerEl, {
-                html: true,
-                sanitize: false, // We are inserting a trusted component
-                content: `<emoji-picker class="light"></emoji-picker>`
-            });
-
-            // When the popover is shown, add the event listener to the picker inside it
-            popoverTriggerEl.addEventListener('shown.bs.popover', () => {
-                const picker = document.querySelector(`.popover[role="tooltip"] emoji-picker`);
-                if (picker) {
-                    const pickerListener = event => {
-                        const selectedEmoji = event.detail.unicode;
-                        // Use htmx.ajax to manually send the request
-                        htmx.ajax('POST', `/chat/message/${messageId}/react`, {
-                            values: { emoji: selectedEmoji },
-                            swap: 'none' // We don't need to swap anything, the websocket will update the UI
-                        });
-                        // Hide the popover after selection
-                        popover.hide();
-                    };
-                    // Ensure we only have one listener on the picker
-                    picker.removeEventListener('emoji-click', pickerListener);
-                    picker.addEventListener('emoji-click', pickerListener, { once: true });
-                }
-            });
-            popoverTriggerEl.dataset.popoverInitialized = 'true';
-        });
-    };
-
-    // Global HTMX Error Handling with Toasts
-    const toastEl = document.getElementById('error-toast');
-    if (toastEl) {
-        const toastBody = document.getElementById('toast-body-content');
-        const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
-
-        document.body.addEventListener('htmx:responseError', function(evt) {
-            console.error("HTMX Response Error:", evt.detail.xhr);
-            // Use the response text from the server as the toast message
-            if (toastBody && evt.detail.xhr.responseText) {
-                toastBody.textContent = evt.detail.xhr.responseText;
-                toast.show();
+    const connectionStatusBar = document.getElementById('connection-status-bar');
+    let isReconnecting = false;
+    document.body.addEventListener('htmx:wsError', function(evt) {
+        if (!isReconnecting) {
+            console.warn("WebSocket Connection Error. Will retry.");
+            isReconnecting = true;
+            if (connectionStatusBar) {
+                connectionStatusBar.style.display = 'block';
             }
-        });
+        }
+    });
 
-        // Listener for CLIENT-SIDE swap errors (e.g., target element not found)
-        document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
-            console.error("HTMX OOB Target Error:", evt.detail);
+    document.body.addEventListener('htmx:wsOpen', function(evt) {
+        console.log("WebSocket Connection Opened.");
+        if (isReconnecting && connectionStatusBar) {
+            connectionStatusBar.classList.replace('bg-warning', 'bg-success');
+            connectionStatusBar.innerHTML = 'Connection restored.';
+            setTimeout(() => {
+                connectionStatusBar.style.display = 'none';
+                connectionStatusBar.classList.replace('bg-success', 'bg-warning');
+                connectionStatusBar.innerHTML = `<div class="spinner-border spinner-border-sm me-2"></div> Connection lost. Attempting to reconnect...`;
+            }, 2000);
+        }
+        const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+        const typingSender = document.getElementById('typing-sender');
+        if (activeConv && activeConv.dataset.conversationId && typingSender) {
+            const subscribeMsg = { type: "subscribe", conversation_id: activeConv.dataset.conversationId };
+            typingSender.setAttribute('hx-vals', JSON.stringify(subscribeMsg));
+            htmx.trigger(typingSender, 'typing-event');
+        }
+        isReconnecting = false;
+    });
 
-            // Create a user-friendly message
-            const targetId = evt.detail.target.id;
-            const errorMessage = `A UI update failed because the target element '#${targetId}' could not be found. This can happen during rapid operations.`;
-
-            if (toastBody) {
-                toastBody.textContent = errorMessage;
-                toast.show();
-            }
-        });
-
-    }
-
-
-
-    // --- Element References ---
     const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
-
-    // Custom event listener to focus the chat input after certain actions
-    document.body.addEventListener('focus-chat-input', () => {
-        // We can reuse the focus function we already wrote in our Editor object
-        if (Editor && typeof Editor.focusActiveInput === 'function') {
-            Editor.focusActiveInput();
-        }
-    });
-
-    // Listen for our custom event to initialize the chat editor scripts.
-    document.body.addEventListener('chatInputLoaded', () => Editor.initialize());
-    // Global click listener to hide the emoji picker if clicked outside
-    document.addEventListener('click', (e) => {
-        const pickerContainer = document.getElementById('emoji-picker-container');
-        if (pickerContainer && pickerContainer.style.display === 'block') {
-            // Hide if the click is outside the picker AND not on the toggle button
-            if (!pickerContainer.contains(e.target) && !e.target.closest('#emoji-btn')) {
-                pickerContainer.style.display = 'none';
-            }
-        }
-    });
 
     const isUserNearBottom = () => {
         if (!messagesContainer) return false;
@@ -535,9 +479,53 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const scrollLastMessageIntoView = () => {
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
-        if (lastMessage) lastMessage.scrollIntoView({ behavior: "smooth", block: "end" });
+        if (lastMessage) {
+            lastMessage.scrollIntoView({ behavior: "smooth", block: "end" });
+        }
     };
 
+    const scrollToBottomForce = () => {
+        if (messagesContainer) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    };
+
+    /** Helper Functions for UI initialization **/
+    const initializeTooltips = (container) => {
+        const tooltipTriggerList = container.querySelectorAll('[data-bs-toggle="tooltip"]');
+        [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
+    };
+    const updateReactionHighlights = (container) => {
+        const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
+        if (!currentUserId) return;
+        const reactionPills = container.querySelectorAll('.reaction-pill');
+        reactionPills.forEach(pill => {
+            const reactorIds = pill.dataset.reactorIds || '';
+            const hasReacted = reactorIds.split(',').includes(currentUserId);
+            pill.classList.toggle('user-reacted', hasReacted);
+        });
+    };
+    const initializeReactionPopovers = (container) => {
+        const popoverTriggerList = container.querySelectorAll('[data-bs-toggle="popover"]');
+        popoverTriggerList.forEach(popoverTriggerEl => {
+            if (popoverTriggerEl.dataset.popoverInitialized) return;
+            const messageId = popoverTriggerEl.dataset.messageId;
+            if (!messageId) return;
+            const popover = new bootstrap.Popover(popoverTriggerEl, { html: true, sanitize: false, content: `<emoji-picker class="light"></emoji-picker>` });
+            popoverTriggerEl.addEventListener('shown.bs.popover', () => {
+                const picker = document.querySelector(`.popover[role="tooltip"] emoji-picker`);
+                if (picker) {
+                    const pickerListener = event => {
+                        htmx.ajax('POST', `/chat/message/${messageId}/react`, { values: { emoji: event.detail.unicode }, swap: 'none' });
+                        popover.hide();
+                    };
+                    picker.removeEventListener('emoji-click', pickerListener);
+                    picker.addEventListener('emoji-click', pickerListener, { once: true });
+                }
+            });
+            popoverTriggerEl.dataset.popoverInitialized = 'true';
+        });
+    };
     const processCodeBlocks = (container) => {
         const MAX_HEIGHT = 300;
         const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');
@@ -557,6 +545,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    /** Main Event Listeners **/
+    document.body.addEventListener('focus-chat-input', () => { if (Editor && typeof Editor.focusActiveInput === 'function') Editor.focusActiveInput(); });
+    document.body.addEventListener('chatInputLoaded', () => Editor.initialize());
+    document.addEventListener('click', (e) => {
+        const pickerContainer = document.getElementById('emoji-picker-container');
+        if (pickerContainer && pickerContainer.style.display === 'block') {
+            if (!pickerContainer.contains(e.target) && !e.target.closest('#emoji-btn')) {
+                pickerContainer.style.display = 'none';
+            }
+        }
+    });
+
+    let userWasNearBottom = false;
+    document.body.addEventListener('htmx:wsBeforeMessage', function() {
+        userWasNearBottom = isUserNearBottom();
+    });
+
     document.body.addEventListener('htmx:afterSwap', (event) => {
         const target = event.detail.target;
         processCodeBlocks(target);
@@ -565,9 +570,9 @@ document.addEventListener('DOMContentLoaded', () => {
         initializeTooltips(target);
 
         if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
-            scrollLastMessageIntoView();
+            // On initial load, force scroll to the very bottom instantly.
+            setTimeout(scrollToBottomForce, 50);
             if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
-
             Editor.focusActiveInput();
         }
     });
@@ -576,45 +581,48 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const data = JSON.parse(event.detail.message);
             if (typeof data === 'object' && data.type) {
-                if (data.type === 'notification') {
-                    NotificationManager.showNotification(data);
-                } else if (data.type === 'sound') {
-                    NotificationManager.playSound();
-                }
-                return; // Message was a JSON payload, stop processing.
+                if (data.type === 'notification') NotificationManager.showNotification(data);
+                else if (data.type === 'sound') NotificationManager.playSound();
+                return;
             }
-        } catch (e) {
-            // Not JSON, fall through to process as HTML.
-        }
+        } catch (e) { /* Fall through to process as HTML */ }
 
-        const messageList = document.getElementById('message-list');
-        if (messageList) {
-             initializeReactionPopovers(messageList);
-             updateReactionHighlights(messageList);
-        }
-
-        // Process as an HTML swap for the message list
+        const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
-        if (lastMessage) {
-            setTimeout(() => processCodeBlocks(lastMessage), 50);
-        }
 
-        if (isUserNearBottom()) {
-            scrollLastMessageIntoView();
-        } else {
-            if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
+        if (lastMessage) {
+            const messageAuthorId = lastMessage.dataset.userId;
+
+            if (messageAuthorId === currentUserId) {
+                // If I sent the message, always scroll to see it.
+                setTimeout(scrollLastMessageIntoView, 0);
+            } else {
+                // If someone else sent it, only scroll if I was already near the bottom.
+                if (userWasNearBottom) {
+                    setTimeout(scrollLastMessageIntoView, 0);
+                } else {
+                    if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
+                }
+            }
+
+            // Initialize components on the new message
+            initializeReactionPopovers(lastMessage);
+            updateReactionHighlights(lastMessage);
+            processCodeBlocks(lastMessage);
         }
     });
 
     if (messagesContainer) {
         messagesContainer.addEventListener('scroll', () => {
-            if (isUserNearBottom() && jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
+            if (isUserNearBottom() && jumpToBottomBtn) {
+                jumpToBottomBtn.style.display = 'none';
+            }
         });
     }
 
     if (jumpToBottomBtn) {
         jumpToBottomBtn.addEventListener('click', () => {
-            setTimeout(() => messagesContainer.scrollTop = messagesContainer.scrollHeight, 50);
+            setTimeout(scrollLastMessageIntoView, 50);
             jumpToBottomBtn.style.display = 'none';
         });
     }
@@ -625,20 +633,17 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.addEventListener('close-modal', () => htmxModal.hide());
         htmxModalEl.addEventListener('hidden.bs.modal', () => {
             const modalContent = document.getElementById('htmx-modal-content');
-            if (modalContent) modalContent.innerHTML = `<div class="modal-body text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>`;
+            if (modalContent) modalContent.innerHTML = `<div class="modal-body text-center"><div class="spinner-border" role="status"></div></div>`;
         });
     }
 
-    // Logic to control the right-side slide-out panel (Offcanvas)
     const rightPanelOffcanvasEl = document.getElementById('right-panel-offcanvas');
     if (rightPanelOffcanvasEl) {
         const rightPanelOffcanvas = new bootstrap.Offcanvas(rightPanelOffcanvasEl);
-        // Listen for our custom event sent from the server to close the panel
-        document.body.addEventListener('close-offcanvas', () => {
-            rightPanelOffcanvas.hide();
-        });
+        document.body.addEventListener('close-offcanvas', () => rightPanelOffcanvas.hide());
     }
 
+    // Initializations on page load
     processCodeBlocks(document.body);
     initializeReactionPopovers(document.body);
     updateReactionHighlights(document.body);

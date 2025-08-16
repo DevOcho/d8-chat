@@ -153,7 +153,18 @@
     <main class="main-content"
           ws-connect="/ws/chat"
           hx-ext="ws"
+          ws-disable-replay="true"
           data-current-user-id="{{ g.user.id }}">
+        <!-- Connection Status Bar -->
+        <div id="connection-status-bar"
+             class="p-2 bg-warning text-dark text-center"
+             style="display: none;
+                    flex-shrink: 0">
+            <div class="spinner-border spinner-border-sm me-2" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            Connection lost. Attempting to reconnect...
+        </div>
         <div id="chat-header-container"
              class="p-3 border-bottom bg-white"
              style="flex-shrink: 0">
