@@ -59,16 +59,16 @@
         <ul id="channel-list" class="list-unstyled">
             {% for channel in channels %}
                 {% set conv_id_str = "channel_" ~ channel.id %}
-                {% set count = unread_counts.get(conv_id_str, 0) %}
+                {% set info = unread_info.get(conv_id_str, {'mentions': 0, 'has_unread': False}) %}
                 <li id="channel-item-{{ channel.id }}">
                     <div class="d-flex justify-content-between align-items-center">
                         <a href="#"
                            id="link-{{ conv_id_str }}"
-                           class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-secondary' }}"
+                           class="text-decoration-none {{ 'fw-bold text-white' if info.has_unread else 'text-secondary' }}"
                            hx-get="/chat/channel/{{ channel.id }}"
                            hx-target="#chat-messages-container"># {{ channel.name }}</a>
                         <span id="unread-badge-{{ conv_id_str }}">
-                            {% if count > 0 %}<span class="badge rounded-pill bg-danger float-end">{{ count }}</span>{% endif %}
+                            {% if info.mentions > 0 %}<span class="badge rounded-pill bg-danger float-end">{{ info.mentions }}</span>{% endif %}
                         </span>
                     </div>
                 </li>
@@ -116,7 +116,7 @@
             {% for user in direct_message_users %}
                 {% set user_ids = [g.user.id, user.id] | sort %}
                 {% set conv_id_str = "dm_" ~ user_ids|join('_') %}
-                {% set count = unread_counts.get(conv_id_str, 0) %}
+                {% set info = unread_info.get(conv_id_str, {'mentions': 0, 'has_unread': False}) %}
                 <li>
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center">
@@ -137,12 +137,12 @@
                                          transition: background-color 0.3s ease"></span>
                             <a href="#"
                                id="link-{{ conv_id_str }}"
-                               class="text-decoration-none {{ 'fw-bold text-white' if count > 0 else 'text-secondary' }}"
+                               class="text-decoration-none {{ 'fw-bold text-white' if info.has_unread else 'text-secondary' }}"
                                hx-get="/chat/dm/{{ user.id }}"
                                hx-target="#chat-messages-container">{{ user.display_name or user.username }}</a>
                         </div>
                         <span id="unread-badge-{{ conv_id_str }}">
-                            {% if count > 0 %}<span class="badge rounded-pill bg-danger">{{ count }}</span>{% endif %}
+                            {% if info.mentions > 0 %}<span class="badge rounded-pill bg-danger">{{ info.mentions }}</span>{% endif %}
                         </span>
                     </div>
                 </li>

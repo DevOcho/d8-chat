@@ -180,9 +180,6 @@ def profile():
 
 
 # --- CHAT INTERFACE ROUTES ---
-# Replace the existing chat_interface function with this one
-
-
 @main_bp.route("/chat")
 @login_required
 def chat_interface():
@@ -229,8 +226,11 @@ def chat_interface():
     # 4. Fetch the User objects for the DM sidebar.
     direct_message_users = User.select().where(User.id.in_(list(dm_partner_ids)))
 
-    # 5. Calculate Unread Counts for all relevant conversations.
-    unread_counts = {}
+    # 5. Calculate Unread Information for all relevant conversations.
+    #    For channels, we differentiate between any unread messages (for bolding)
+    #    and unread mentions (for a red badge). For DMs, any unread message
+    #    gets a badge.
+    unread_info = {}
     if all_conversations:
         user_statuses = (
             UserConversationStatus.select()
@@ -246,23 +246,56 @@ def chat_interface():
 
         for conv in all_conversations:
             last_read_time = last_read_map.get(conv.id, datetime.datetime.min)
-            count = (
-                Message.select()
-                .where(
-                    (Message.conversation_id == conv.id)
-                    & (Message.created_at > last_read_time)
-                    & (Message.user != g.user)
+            mention_count = 0
+            has_unread = False
+
+            if conv.type == "channel":
+                # For channels, the count is only for mentions.
+                mention_count = (
+                    Mention.select()
+                    .join(Message)
+                    .where(
+                        (Mention.user == g.user)
+                        & (Message.conversation == conv)
+                        & (Message.created_at > last_read_time)
+                    )
+                    .count()
                 )
-                .count()
-            )
-            unread_counts[conv.conversation_id_str] = count
+                # And we separately check for any unread messages to make the link bold.
+                has_unread = (
+                    mention_count > 0
+                    or Message.select()
+                    .where(
+                        (Message.conversation == conv)
+                        & (Message.created_at > last_read_time)
+                        & (Message.user != g.user)
+                    )
+                    .exists()
+                )
+            else:  # It's a DM
+                # For DMs, the count is for all unread messages.
+                mention_count = (
+                    Message.select()
+                    .where(
+                        (Message.conversation_id == conv.id)
+                        & (Message.created_at > last_read_time)
+                        & (Message.user != g.user)
+                    )
+                    .count()
+                )
+                has_unread = mention_count > 0
+
+            unread_info[conv.conversation_id_str] = {
+                "mentions": mention_count,
+                "has_unread": has_unread,
+            }
 
     return render_template(
         "chat.html",
         channels=user_channels,
         direct_message_users=direct_message_users,
         online_users=chat_manager.online_users,
-        unread_counts=unread_counts,
+        unread_info=unread_info,
         theme=g.user.theme,
     )
 
