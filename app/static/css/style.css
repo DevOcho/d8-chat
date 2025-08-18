@@ -106,6 +106,21 @@ html.login-page, body.login-page { overflow: auto; }
 .channel-sidebar a { color: #a9a9a9; transition: color 0.2s ease-in-out; }
 .channel-sidebar a:hover, .channel-sidebar a.fw-bold.text-white { color: #ffffff !important; }
 
+/* --- Custom Pink Button Style --- */
+.btn-pink {
+    --bs-btn-color: #fff;
+    --bs-btn-bg: #ec729c;
+    --bs-btn-border-color: #db618b;
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #e35a8b;
+    --bs-btn-hover-border-color: #e35a8b;
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: #d8487b;
+    --bs-btn-active-border-color: #d8487b;
+    --bs-btn-disabled-bg: #ec729c;
+    --bs-btn-disabled-border-color: #ec729c;
+}
+
 /* --- WYSIWYG Editor Styles --- */
 .wysiwyg-editor-container { border: 1px solid #ced4da; border-radius: 0.25rem; background-color: #fff; transition: border-color 0.15s ease-in-out; }
 .wysiwyg-toolbar { padding: 0.375rem 0.75rem; background-color: #f8f9fa; border-bottom: 1px solid #dee2e6; display: flex; flex-wrap: wrap; gap: 0.5rem; }

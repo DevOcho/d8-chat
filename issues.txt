@@ -1,9 +1,5 @@
 Current issues with the slack_clone:
 
-We need to be able to archive a channel.
-
-Search for messages.
-
 We need to be able to upload files and have avatars and inline images.
 
 We need a way to search and add gifs
@@ -11,8 +7,6 @@ We need a way to search and add gifs
 I also think we are going to need to implement threads but I only want them in channels.
 
 Group DMs (talk with more than one person) and also the ability to promote a group conversation to a channel.
-
-If the last admin leaves a channel and there are no other admins then we need to require the elect an admin before they leave.
 
 We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
 
