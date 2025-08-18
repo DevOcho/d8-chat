@@ -20,6 +20,11 @@ I want the side bar to only show a max number of people on the side nav.  Let's 
 
 ---
 
+There is a full page refresh when you leave a channel.  This should probably be an OOB to update things
+instead but it was causing issues and it's 10pm and I want this to work.  So I'm risking someone sending
+you a message at the exact same second you click the leave button (websocket disconnects).  That message will
+be missed until you reload the browser.
+
 Add Bots and webhooks
 
 We need a help screen or perhaps a full docs setup for the options in the chat.

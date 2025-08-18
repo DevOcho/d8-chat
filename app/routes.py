@@ -1747,6 +1747,46 @@ def jump_to_message(message_id):
     return response
 
 
+@main_bp.route("/chat/dm/<int:other_user_id>/details", methods=["GET"])
+@login_required
+def get_dm_details(other_user_id):
+    """Renders the details panel for a direct message conversation."""
+    other_user = User.get_or_none(id=other_user_id)
+    if not other_user:
+        return "User not found", 404
+
+    return render_template("partials/dm_details.html", other_user=other_user)
+
+
+@main_bp.route("/chat/dm/<int:other_user_id>/leave", methods=["DELETE"])
+@login_required
+def leave_dm(other_user_id):
+    """
+    'Leaves' a DM by deleting the UserConversationStatus for the current user,
+    which removes it from their sidebar. The message history is preserved.
+    """
+    # Find the conversation
+    user_ids = sorted([g.user.id, other_user_id])
+    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
+    conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
+
+    if conversation:
+        # Delete the status record for the current user, effectively hiding the DM
+        (
+            UserConversationStatus.delete()
+            .where(
+                (UserConversationStatus.user == g.user)
+                & (UserConversationStatus.conversation == conversation)
+            )
+            .execute()
+        )
+
+    # Put them back on the (you) chat
+    response = make_response("")
+    response.headers["HX-Redirect"] = url_for("main.chat_interface")
+    return response
+
+
 # --- WebSocket Handler ---
 @sock.route("/ws/chat")
 def chat(ws):
