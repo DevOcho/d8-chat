@@ -46,9 +46,34 @@ def create_app(config_class=Config):
 
         # Define the tags and attributes that we will allow in the final HTML
         allowed_tags = [
-            "p", "br", "strong", "em", "del", "sub", "sup", "ul", "ol", "li",
-            "blockquote", "pre", "code", "span", "div", "a", "h1", "h2", "h3",
-            "h4", "h5", "h6", "table", "thead", "tbody", "tr", "th", "td",
+            "p",
+            "br",
+            "strong",
+            "em",
+            "del",
+            "sub",
+            "sup",
+            "ul",
+            "ol",
+            "li",
+            "blockquote",
+            "pre",
+            "code",
+            "span",
+            "div",
+            "a",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
         ]
         allowed_attrs = {
             "*": ["class"],
@@ -57,6 +82,7 @@ def create_app(config_class=Config):
 
         # --- Pass 1: Extract and process code blocks separately ---
         code_blocks = []
+
         def extract_and_process_code_block(m):
             # The full match (e.g., ```python...```) is m.group(0)
             # Process this block with Markdown to get syntax highlighting and escaping
@@ -80,24 +106,20 @@ def create_app(config_class=Config):
         content_without_code = re.sub(
             r"(?s)(```.*?```|~~~.*?~~~)",
             extract_and_process_code_block,
-            content_with_emojis
+            content_with_emojis,
         )
 
         # Pre-process the remaining content to escape lone ">" characters
         # that would otherwise be incorrectly interpreted as empty blockquotes.
         # This looks for any line that *only* contains a ">".
         content_without_code = re.sub(
-            r"^(\s*)>(\s*)$",
-            r"\1&gt;\2",
-            content_without_code,
-            flags=re.MULTILINE
+            r"^(\s*)>(\s*)$", r"\1&gt;\2", content_without_code, flags=re.MULTILINE
         )
 
         # --- Pass 2: Process the main content (without code blocks) ---
         # Process the remaining markdown, but disable codehilite for this pass.
         main_html = markdown.markdown(
-            content_without_code,
-            extensions=["extra", "pymdownx.tilde", 'nl2br']
+            content_without_code, extensions=["extra", "pymdownx.tilde", "nl2br"]
         )
 
         # Linkify and then sanitize the main content.
@@ -118,10 +140,10 @@ def create_app(config_class=Config):
         for i, block_html in enumerate(code_blocks):
             # Use the new, safe placeholder for replacement
             placeholder = f"D8CHATCODEBLOCKPLACEHOLDER{i}"
-            
+
             # Markdown sometimes wraps standalone placeholders in <p> tags, so we must replace that.
             placeholder_with_p_tags = f"<p>{placeholder}</p>"
-            
+
             if placeholder_with_p_tags in safe_html:
                 safe_html = safe_html.replace(placeholder_with_p_tags, block_html)
             else:
@@ -129,10 +151,28 @@ def create_app(config_class=Config):
 
         return Markup(safe_html)
 
+    # --- Register custom template filter for highlighting search terms ---
+    @app.template_filter("highlight")
+    def highlight_filter(text, query):
+        """Wraps occurrences of the query in the text with <mark> tags."""
+        if not query or not text:
+            return text
+        # Use re.escape to handle special characters in the query
+        # Use re.IGNORECASE for case-insensitive matching
+        highlighted_text = re.sub(
+            f"({re.escape(query)})",
+            r"<mark>\1</mark>",
+            str(text),
+            flags=re.IGNORECASE,
+        )
+        return Markup(highlighted_text)
+
     # Import and register blueprints
     from .routes import main_bp, admin_bp
+    from .blueprints.search import search_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(admin_bp, url_prefix="/admin")
+    app.register_blueprint(search_bp)
 
     return app

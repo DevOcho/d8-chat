@@ -1,0 +1,24 @@
+<!-- This partial renders a list of channel results and a "Load More" button -->
+{% for channel in channels %}
+    {# [THE FIX] Use a DIV instead of an A tag to prevent default browser navigation #}
+    <div class="text-decoration-none text-body search-result-item d-block py-2"
+         style="cursor: pointer"
+         hx-get="{{ url_for('main.get_channel_chat', channel_id=channel.id) }}"
+         hx-target="#chat-messages-container"
+         hx-swap="innerHTML">
+        <h6>#{{ channel.name | highlight(query) }}</h6>
+        <small class="text-muted">{{ channel.topic or "No topic set." }}</small>
+    </div>
+{% else %}
+    {% if not request.args.get('page') or request.args.get('page') == '1' %}
+        <p class="text-muted">No channels found matching your search.</p>
+    {% endif %}
+{% endfor %}
+{% if has_more_channels %}
+    <div class="mt-3 text-center"
+         hx-get="{{ url_for('search.search_channels_paginated', q=query, page=current_page + 1) }}"
+         hx-target="this"
+         hx-swap="outerHTML">
+        <button class="btn btn-outline-secondary">Load More</button>
+    </div>
+{% endif %}

@@ -154,6 +154,24 @@
           hx-ext="ws"
           ws-disable-replay="true"
           data-current-user-id="{{ g.user.id }}">
+        <!-- Global Search Bar -->
+        <div id="global-search-container" class="p-2 border-bottom">
+            <div class="global-search-wrapper">
+                <form hx-get="{{ url_for('search.search') }}"
+                      hx-target="#search-results-overlay"
+                      hx-swap="innerHTML">
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="search"
+                               id="global-search-input"
+                               name="q"
+                               class="form-control"
+                               placeholder="Search DevOcho"
+                               autocomplete="off">
+                    </div>
+                </form>
+            </div>
+        </div>
         <!-- Connection Status Bar -->
         <div id="connection-status-bar"
              class="p-2 bg-warning text-dark text-center"
@@ -201,6 +219,12 @@
                     <span class="visually-hidden">Loading input...</span>
                 </div>
             </div>
+        </div>
+        <!-- Search Results Overlay -->
+        <div id="search-results-overlay"
+             style="display: none;
+                    flex-direction: column">
+            <!-- HTMX will populate this container with the search_results.html partial -->
         </div>
     </main>
     <!-- Slide-Out Panel -->

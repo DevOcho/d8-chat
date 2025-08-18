@@ -7,17 +7,17 @@
 </div>
 <div class="modal-body">
     <p>Select a user to start a new conversation.</p>
-    <ul class="list-group">
+    <div class="list-group">
         {% for user in users_to_start_dm %}
-            <li class="list-group-item list-group-item-action">
-                <a href="#"
-                   class="text-decoration-none text-dark"
-                   hx-get="/chat/dm/{{ user.id }}"
-                   hx-target="#chat-messages-container"
-                   data-bs-dismiss="modal">{{ user.username }}</a>
-            </li>
+            <a href="#"
+               class="list-group-item list-group-item-action"
+               hx-get="/chat/dm/{{ user.id }}"
+               hx-target="#chat-messages-container"
+               data-bs-dismiss="modal">
+                {{ user.display_name ~ ' (' ~ user.username ~ ')' if user.display_name else user.username }}
+            </a>
         {% else %}
-            <li class="list-group-item">No new users to message.</li>
+            <p class="list-group-item">No new users to message.</p>
         {% endfor %}
-    </ul>
+    </div>
 </div>

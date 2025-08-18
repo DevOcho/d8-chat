@@ -1,0 +1,62 @@
+<!-- This is the main shell for the search results, loaded by the initial search -->
+<div id="search-results-content">
+    <div class="d-flex justify-content-between align-items-center p-3 border-bottom">
+        <h5 id="search-results-header" class="mb-0">Search results for “{{ query }}”</h5>
+        <button type="button"
+                id="close-search-btn"
+                class="btn-close"
+                aria-label="Close"></button>
+    </div>
+    <!-- Tab Navigation -->
+    <ul class="nav nav-tabs px-3" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active"
+                    data-bs-toggle="tab"
+                    data-bs-target="#messages-tab-pane"
+                    type="button">
+                Messages <span class="badge bg-secondary rounded-pill">{{ message_count }}</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    data-bs-toggle="tab"
+                    data-bs-target="#channels-tab-pane"
+                    type="button"
+                    hx-get="{{ url_for('search.search_channels_paginated', q=query) }}"
+                    hx-trigger="click once"
+                    hx-target="#channels-tab-pane">
+                Channels <span class="badge bg-secondary rounded-pill">{{ channel_count }}</span>
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link"
+                    data-bs-toggle="tab"
+                    data-bs-target="#users-tab-pane"
+                    type="button"
+                    hx-get="{{ url_for('search.search_users_paginated', q=query) }}"
+                    hx-trigger="click once"
+                    hx-target="#users-tab-pane">
+                People <span class="badge bg-secondary rounded-pill">{{ user_count }}</span>
+            </button>
+        </li>
+    </ul>
+    <!-- Tab Content -->
+    <div class="tab-content search-results-container p-3">
+        <div class="tab-pane fade show active"
+             id="messages-tab-pane"
+             role="tabpanel">
+            <!-- The first page of message results is included on initial load -->
+            {% include 'partials/search_results_messages.html' %}
+        </div>
+        <div class="tab-pane fade" id="channels-tab-pane" role="tabpanel">
+            <div class="text-center p-5">
+                <div class="spinner-border spinner-border-sm"></div>
+            </div>
+        </div>
+        <div class="tab-pane fade" id="users-tab-pane" role="tabpanel">
+            <div class="text-center p-5">
+                <div class="spinner-border spinner-border-sm"></div>
+            </div>
+        </div>
+    </div>
+</div>

@@ -396,6 +396,7 @@ const Editor = {
 };
 
 // --- 2. GENERAL PAGE-LEVEL LOGIC ---
+// --- 2. GENERAL PAGE-LEVEL LOGIC ---
 document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
 
@@ -418,6 +419,62 @@ document.addEventListener('DOMContentLoaded', () => {
         hide: function() { if (this.bootstrapToast) { this.bootstrapToast.hide(); } }
     };
     ToastManager.initialize();
+
+    // --- [CONSOLIDATED] Global Search and Interaction Logic ---
+    const searchInput = document.getElementById('global-search-input');
+    const searchOverlay = document.getElementById('search-results-overlay');
+    const channelSidebar = document.querySelector('.channel-sidebar');
+
+    const hideSearch = () => {
+        if (!searchOverlay || !searchInput) return;
+        searchOverlay.style.display = 'none';
+        searchInput.value = '';
+        htmx.trigger(searchInput, 'htmx:abort');
+        //searchOverlay.innerHTML = '';
+    };
+
+    document.body.addEventListener('htmx:afterSwap', (evt) => {
+        if (evt.detail.target.id === 'search-results-overlay') {
+            if (!evt.detail.xhr.responseText.trim()) {
+                hideSearch();
+                return;
+            }
+            searchOverlay.style.display = 'flex';
+            const closeSearchBtn = document.getElementById('close-search-btn');
+            if (closeSearchBtn) {
+                closeSearchBtn.addEventListener('click', hideSearch);
+            }
+        }
+    });
+
+    if (searchOverlay) {
+        searchOverlay.addEventListener('click', (e) => {
+            if (e.target.closest('div.search-result-item')) {
+                hideSearch();
+            }
+        });
+    }
+
+    if (channelSidebar) {
+        channelSidebar.addEventListener('click', (e) => {
+            if (searchOverlay && e.target.closest('a[hx-get]') && searchOverlay.style.display !== 'none') {
+                hideSearch();
+            }
+        });
+    }
+
+    document.body.addEventListener('jumpToMessage', (evt) => {
+        const selector = evt.detail.value;
+        const targetMessage = document.querySelector(selector);
+        if (targetMessage) {
+            targetMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
+            targetMessage.classList.add('mentioned-message');
+            setTimeout(() => {
+                targetMessage.classList.remove('mentioned-message');
+            }, 2000);
+        }
+    });
+
 
     document.body.addEventListener('htmx:responseError', function(evt) {
         if (evt.detail.target.tagName === 'MAIN' && evt.detail.target.hasAttribute('ws-connect')) return;
@@ -564,16 +621,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.body.addEventListener('htmx:afterSwap', (event) => {
         const target = event.detail.target;
-        processCodeBlocks(target);
-        initializeReactionPopovers(target);
-        updateReactionHighlights(target);
-        initializeTooltips(target);
+        // The search logic now lives inside the consolidated block above, so we only handle non-search swaps here.
+        if (target.id !== 'search-results-overlay') {
+            processCodeBlocks(target);
+            initializeReactionPopovers(target);
+            updateReactionHighlights(target);
+            initializeTooltips(target);
 
-        if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
-            // On initial load, force scroll to the very bottom instantly.
-            setTimeout(scrollToBottomForce, 50);
-            if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
-            Editor.focusActiveInput();
+            if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
+                setTimeout(scrollToBottomForce, 50);
+                if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
+                Editor.focusActiveInput();
+            }
         }
     });
 
@@ -592,20 +651,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (lastMessage) {
             const messageAuthorId = lastMessage.dataset.userId;
-
             if (messageAuthorId === currentUserId) {
-                // If I sent the message, always scroll to see it.
                 setTimeout(scrollLastMessageIntoView, 0);
             } else {
-                // If someone else sent it, only scroll if I was already near the bottom.
                 if (userWasNearBottom) {
                     setTimeout(scrollLastMessageIntoView, 0);
                 } else {
                     if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
                 }
             }
-
-            // Initialize components on the new message
             initializeReactionPopovers(lastMessage);
             updateReactionHighlights(lastMessage);
             processCodeBlocks(lastMessage);
@@ -642,6 +696,37 @@ document.addEventListener('DOMContentLoaded', () => {
         const rightPanelOffcanvas = new bootstrap.Offcanvas(rightPanelOffcanvasEl);
         document.body.addEventListener('close-offcanvas', () => rightPanelOffcanvas.hide());
     }
+
+    // This listener handles closing the top-most active UI element when the Escape key is pressed.
+    document.body.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            // Check for search overlay first
+            if (searchOverlay && searchOverlay.style.display !== 'none') {
+                e.preventDefault();
+                const closeBtn = document.getElementById('close-search-btn');
+                if (closeBtn) closeBtn.click();
+                return;
+            }
+            if (rightPanelOffcanvasEl && rightPanelOffcanvasEl.classList.contains('show')) {
+                 e.preventDefault();
+                 const offcanvasInstance = bootstrap.Offcanvas.getInstance(rightPanelOffcanvasEl);
+                 if (offcanvasInstance) offcanvasInstance.hide();
+                 return;
+            }
+            if (htmxModalEl && htmxModalEl.classList.contains('show')) {
+                e.preventDefault();
+                const modalInstance = bootstrap.Modal.getInstance(htmxModalEl);
+                if (modalInstance) modalInstance.hide();
+                return;
+            }
+            const emojiPickerContainer = document.getElementById('emoji-picker-container');
+             if (emojiPickerContainer && emojiPickerContainer.style.display !== 'none') {
+                e.preventDefault();
+                emojiPickerContainer.style.display = 'none';
+                return;
+            }
+        }
+    });
 
     // Initializations on page load
     processCodeBlocks(document.body);

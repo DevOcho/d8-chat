@@ -306,49 +306,31 @@ def chat_interface():
 @main_bp.route("/chat/channel/<int:channel_id>")
 @login_required
 def get_channel_chat(channel_id):
-    channel = (
-        Channel.select()
-        .join(ChannelMember)
-        .where(Channel.id == channel_id, ChannelMember.user == g.user)
-        .get_or_none()
+    channel = Channel.get_or_none(id=channel_id)
+    if not channel:
+        return "Channel not found", 404
+
+    is_member = (
+        ChannelMember.select()
+        .where((ChannelMember.user == g.user) & (ChannelMember.channel == channel))
+        .exists()
     )
 
-    if not channel:
-        return "Not a member of this channel", 403
+    if channel.is_private and not is_member:
+        return "You are not a member of this private channel.", 403
 
-    # Find or create the corresponding conversation record
+    add_to_sidebar_html = ""
+    # [THE FIX] If user is joining a public channel for the first time, add it to their sidebar
+    if not channel.is_private and not is_member:
+        ChannelMember.create(user=g.user, channel=channel)
+        add_to_sidebar_html = render_template(
+            "partials/channel_list_item.html", channel=channel
+        )
+
     conv_id_str = f"channel_{channel_id}"
     conversation, _ = Conversation.get_or_create(
         conversation_id_str=conv_id_str, defaults={"type": "channel"}
     )
-
-    # Fetch the specific mention records for this user and conversation.
-    mentions_to_clear = list(
-        Mention.select()
-        .join(Message)
-        .where((Message.conversation == conversation) & (Mention.user == g.user))
-    )
-
-    # Get the IDs of the messages to highlight in the template.
-    mention_message_ids = {m.message_id for m in mentions_to_clear}
-
-    # If there are mentions, delete them using their composite primary key.
-    if mentions_to_clear:
-        # Create a list of individual expressions. Each expression is a complete
-        # condition for one row, e.g., (Mention.user == 1) & (Mention.message == 123)
-        expressions = [
-            (Mention.user == m.user_id) & (Mention.message == m.message_id)
-            for m in mentions_to_clear
-        ]
-
-        # Use reduce() with operator.or_ to chain the expressions together,
-        # creating a single WHERE clause like: (expr1) OR (expr2) OR ...
-        where_clause = reduce(operator.or_, expressions)
-
-        # Execute the single DELETE query.
-        Mention.delete().where(where_clause).execute()
-
-    # Mark conversation as read
     status, _ = UserConversationStatus.get_or_create(
         user=g.user, conversation=conversation
     )
@@ -356,36 +338,35 @@ def get_channel_chat(channel_id):
     status.last_read_timestamp = datetime.datetime.now()
     status.save()
 
-    # Get the messages and count of the members for the template
-    messages_query = (
+    messages = list(
         Message.select()
         .where(Message.conversation == conversation)
         .order_by(Message.created_at.desc())
         .limit(PAGE_SIZE)
     )
-    messages = list(reversed(messages_query))
+    messages.reverse()
+    reactions_map = get_reactions_for_messages(messages)
     members_count = (
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
 
-    # After fetching messages, fetch all their reactions in a single, efficient query.
-    reactions_map = get_reactions_for_messages(messages)
-
-    # We will use a header and a message template to display with HTMX OOB swaps
-    header_html = render_template(
+    # [THE FIX] Construct the response as a string of HTML fragments
+    header_html_content = render_template(
         "partials/channel_header.html", channel=channel, members_count=members_count
     )
+    header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
+
+    # This is the main content for the target
     messages_html = render_template(
         "partials/channel_messages.html",
         channel=channel,
         messages=messages,
         last_read_timestamp=last_read_timestamp,
-        mention_message_ids=mention_message_ids,
+        mention_message_ids=set(),
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
     )
 
-    # After marking as read, send back a command to clear the badge
     clear_badge_html = render_template(
         "partials/clear_badge.html",
         conv_id_str=conv_id_str,
@@ -393,10 +374,9 @@ def get_channel_chat(channel_id):
         link_text=f"# {channel.name}",
     )
 
-    # Add the HX-Trigger header to fire the custom even on the client (scrolling-chat window)
-    response = make_response(header_html + messages_html + clear_badge_html)
+    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
+    response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
-
     return response
 
 
@@ -476,7 +456,7 @@ def get_channel_details_members_tab(channel_id):
         .where((ChannelMember.channel == channel) & (ChannelMember.role == "member"))
         .order_by(User.username)
     )
-    
+
     # We no longer pre-load the list of users to invite.
     return render_template(
         "partials/channel_details_tab_members.html",
@@ -649,8 +629,8 @@ def search_users_to_add(channel_id):
         User.select()
         .join(WorkspaceMember)
         .where(
-            (User.id.not_in(members_subquery)) &
-            (WorkspaceMember.workspace == channel.workspace)
+            (User.id.not_in(members_subquery))
+            & (WorkspaceMember.workspace == channel.workspace)
         )
     )
 
@@ -658,10 +638,10 @@ def search_users_to_add(channel_id):
     if search_term:
         # Search against username OR display name
         query = query.where(
-            (User.username.contains(search_term)) |
-            (User.display_name.contains(search_term))
+            (User.username.contains(search_term))
+            | (User.display_name.contains(search_term))
         )
-    
+
     total_users = query.count()
     users_for_page = query.order_by(User.username).paginate(page, per_page)
     has_more_pages = total_users > (page * per_page)
@@ -671,7 +651,7 @@ def search_users_to_add(channel_id):
         channel=channel,
         users_to_invite=users_for_page,
         has_more_pages=has_more_pages,
-        current_page=page
+        current_page=page,
     )
 
 
@@ -1109,28 +1089,33 @@ def get_browse_channels_modal():
     # We also join the User table to fetch the creator's username.
     query = (
         Channel.select(Channel, User)
-        .join(User, join_type=JOIN.LEFT_OUTER, on=(Channel.created_by == User.id), attr='created_by')
+        .join(
+            User,
+            join_type=JOIN.LEFT_OUTER,
+            on=(Channel.created_by == User.id),
+            attr="created_by",
+        )
         .where(
             (Channel.is_private == False)
             & (Channel.id.not_in(member_of_channels_subquery))
         )
         .order_by(Channel.name)
     )
-    
+
     # Get the total count before paginating
     total_channels = query.count()
-    
+
     # Fetch the channels for the current page
     channels_for_page = query.paginate(page, per_page)
-    
+
     # Determine if there's a next page
     has_more_pages = total_channels > (page * per_page)
 
     return render_template(
-        "partials/browse_channels_modal.html", 
+        "partials/browse_channels_modal.html",
         channels=channels_for_page,
         has_more_pages=has_more_pages,
-        current_page=page
+        current_page=page,
     )
 
 
@@ -1153,7 +1138,12 @@ def search_channels():
     # Base query for channels, joining User to get creator info.
     query = (
         Channel.select(Channel, User)
-        .join(User, join_type=JOIN.LEFT_OUTER, on=(Channel.created_by == User.id), attr='created_by')
+        .join(
+            User,
+            join_type=JOIN.LEFT_OUTER,
+            on=(Channel.created_by == User.id),
+            attr="created_by",
+        )
         .where(
             (Channel.is_private == False)
             & (Channel.id.not_in(member_of_channels_subquery))
@@ -1166,7 +1156,7 @@ def search_channels():
 
     # Get the total count of matching channels before paginating
     total_channels = query.count()
-    
+
     # Fetch the specific page of channels
     channels_for_page = query.order_by(Channel.name).paginate(page, per_page)
 
@@ -1175,11 +1165,12 @@ def search_channels():
 
     # Render *only* the results partial.
     return render_template(
-        "partials/joinable_channel_results.html", 
+        "partials/joinable_channel_results.html",
         channels=channels_for_page,
         has_more_pages=has_more_pages,
-        current_page=page
+        current_page=page,
     )
+
 
 @main_bp.route("/chat/channel/<int:channel_id>/join", methods=["POST"])
 @login_required
@@ -1205,11 +1196,16 @@ def join_channel(channel_id):
     new_sidebar_item_html = render_template(
         "partials/channel_list_item.html", channel=channel
     )
-    
+
     # Re-query the channel with the creator info to render the confirmation message
     channel_with_creator = (
         Channel.select(Channel, User)
-        .join(User, join_type=JOIN.LEFT_OUTER, on=(Channel.created_by == User.id), attr='created_by')
+        .join(
+            User,
+            join_type=JOIN.LEFT_OUTER,
+            on=(Channel.created_by == User.id),
+            attr="created_by",
+        )
         .where(Channel.id == channel_id)
         .get()
     )
@@ -1375,10 +1371,12 @@ def toggle_reaction(message_id):
         # If it doesn't exist, create it.
         Reaction.create(user=g.user, message=message, emoji=emoji)
 
-    # Convert the dictionary's values to a list for the template.
-    grouped_reactions = get_reactions_for_messages([message])
+    # 1. Call the helper function to get the dictionary of reactions.
+    reactions_data = get_reactions_for_messages([message])
+    # 2. Correctly extract the LIST of reactions for this specific message.
+    grouped_reactions = reactions_data.get(message.id, [])
 
-    # Render the reactions partial with the new data
+    # Render the reactions partial with the new, correct data
     reactions_html_content = render_template(
         "partials/reactions.html", message=message, grouped_reactions=grouped_reactions
     )
@@ -1386,12 +1384,15 @@ def toggle_reaction(message_id):
     # Wrap the content in the container div for the OOB broadcast
     broadcast_html = f'<div id="reactions-container-{message.id}" hx-swap-oob="innerHTML">{reactions_html_content}</div>'
 
-    # Broadcast the updated HTML to everyone in the conversation
+    # Broadcast the updated HTML to everyone else in the conversation
     conv_id_str = message.conversation.conversation_id_str
-    chat_manager.broadcast(conv_id_str, broadcast_html)
+    # We exclude the sender because we're about to send them the response directly.
+    chat_manager.broadcast(
+        conv_id_str, broadcast_html, sender_ws=chat_manager.all_clients.get(g.user.id)
+    )
 
-    # Return an empty 200 OK to the user who initiated the action,
-    return "", 200
+    # Return the HTML directly to the user who clicked. HTMX will swap it instantly.
+    return broadcast_html, 200
 
 
 # --- Admin Routes ---
@@ -1418,7 +1419,6 @@ def create_user():
     return redirect(url_for("admin.create_user_form"))
 
 
-# --- WebSocket Route ---
 @main_bp.route("/chat/dm/<int:other_user_id>")
 @login_required
 def get_dm_chat(other_user_id):
@@ -1426,38 +1426,36 @@ def get_dm_chat(other_user_id):
     if not other_user:
         return "User not found", 404
 
-    # Create the canonical conversation ID string by sorting user IDs
     user_ids = sorted([g.user.id, other_user.id])
     conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
-
     conversation, _ = Conversation.get_or_create(
         conversation_id_str=conv_id_str, defaults={"type": "dm"}
     )
 
-    # Ensure a status record exists for the current user
+    # [THE FIX] Use the 'created' flag from get_or_create to reliably know if this is a new DM for the user
     status, created = UserConversationStatus.get_or_create(
         user=g.user, conversation=conversation
     )
     last_read_timestamp = status.last_read_timestamp
     status.last_read_timestamp = datetime.datetime.now()
     status.save()
-
-    # Also ensure a status record exists for the other user
     UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
 
-    messages_query = (
+    messages = list(
         Message.select()
         .where(Message.conversation == conversation)
         .order_by(Message.created_at.desc())
         .limit(PAGE_SIZE)
     )
-    messages = list(reversed(messages_query))
-
-    # Add reactions to messages
+    messages.reverse()
     reactions_map = get_reactions_for_messages(messages)
 
-    # Header and message templates for a HTMX OOB Swap
-    header_html = render_template("partials/dm_header.html", other_user=other_user)
+    header_html_content = render_template(
+        "partials/dm_header.html", other_user=other_user
+    )
+    header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
+
+    # This is the main content
     messages_html = render_template(
         "partials/dm_messages.html",
         messages=messages,
@@ -1467,33 +1465,28 @@ def get_dm_chat(other_user_id):
         reactions_map=reactions_map,
     )
 
-    # Clear the new messages badge
     clear_badge_html = ""
-    if other_user.id != g.user.id:
+    add_to_sidebar_html = ""
+    # If the DM already existed for this user, send command to clear the badge.
+    if not created and other_user.id != g.user.id:
         clear_badge_html = render_template(
             "partials/clear_badge.html",
             conv_id_str=conv_id_str,
             hx_get_url=url_for("main.get_dm_chat", other_user_id=other_user.id),
             link_text=other_user.display_name or other_user.username,
         )
-
-    # If a status was just created, it means this user wasn't in the DM list.
-    # So, we send an OOB swap to add them.
-    add_user_to_sidebar_html = ""
-    if created and other_user.id != g.user.id:
-        add_user_to_sidebar_html = render_template(
+    # If this is the first time this user is opening this DM, send command to add it to the sidebar.
+    elif created and other_user.id != g.user.id:
+        add_to_sidebar_html = render_template(
             "partials/dm_list_item_oob.html",
             user=other_user,
             conv_id_str=conv_id_str,
             is_online=other_user.id in chat_manager.online_users,
         )
 
-    # HX-Trigger the chat window to load (allows scrolling to new messages).
-    response = make_response(
-        header_html + messages_html + clear_badge_html + add_user_to_sidebar_html
-    )
+    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
+    response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
-
     return response
 
 
@@ -1637,6 +1630,121 @@ def get_older_messages(conversation_id):
         conversation_id=conversation_id,
         PAGE_SIZE=PAGE_SIZE,
     )
+
+
+@main_bp.route("/chat/message/<int:message_id>/context")
+@login_required
+def jump_to_message(message_id):
+    """
+    Finds a message, loads its conversation context with the message
+    in the middle, and returns the full chat view for that context.
+    """
+    try:
+        target_message = Message.get_by_id(message_id)
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+    conversation = target_message.conversation
+    is_member = (
+        UserConversationStatus.select()
+        .where(
+            (UserConversationStatus.user == g.user)
+            & (UserConversationStatus.conversation == conversation)
+        )
+        .exists()
+    )
+    if not is_member:
+        return "Unauthorized", 403
+
+    messages_before = list(
+        Message.select()
+        .where(
+            (Message.conversation == conversation) & (Message.id < target_message.id)
+        )
+        .order_by(Message.created_at.desc())
+        .limit(30)
+    )
+    messages_before.reverse()
+    messages_after = list(
+        Message.select()
+        .where(
+            (Message.conversation == conversation) & (Message.id > target_message.id)
+        )
+        .order_by(Message.created_at.asc())
+        .limit(30)
+    )
+    messages = messages_before + [target_message] + messages_after
+    reactions_map = get_reactions_for_messages(messages)
+    status, created = UserConversationStatus.get_or_create(
+        user=g.user, conversation=conversation
+    )
+
+    add_to_sidebar_html = ""
+    clear_badge_html = ""
+
+    if conversation.type == "channel":
+        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        members_count = (
+            ChannelMember.select().where(ChannelMember.channel == channel).count()
+        )
+        header_html_content = render_template(
+            "partials/channel_header.html", channel=channel, members_count=members_count
+        )
+        messages_html = render_template(
+            "partials/channel_messages.html",
+            channel=channel,
+            messages=messages,
+            last_read_timestamp=status.last_read_timestamp,
+            mention_message_ids=set(),
+            PAGE_SIZE=PAGE_SIZE,
+            reactions_map=reactions_map,
+        )
+        clear_badge_html = render_template(
+            "partials/clear_badge.html",
+            conv_id_str=conversation.conversation_id_str,
+            hx_get_url=url_for("main.get_channel_chat", channel_id=channel.id),
+            link_text=f"# {channel.name}",
+        )
+    else:  # DM
+        user_ids = [int(uid) for uid in conversation.conversation_id_str.split("_")[1:]]
+        other_user_id = next((uid for uid in user_ids if uid != g.user.id), g.user.id)
+        other_user = User.get_by_id(other_user_id)
+        header_html_content = render_template(
+            "partials/dm_header.html", other_user=other_user
+        )
+        messages_html = render_template(
+            "partials/dm_messages.html",
+            messages=messages,
+            other_user=other_user,
+            last_read_timestamp=status.last_read_timestamp,
+            PAGE_SIZE=PAGE_SIZE,
+            reactions_map=reactions_map,
+        )
+
+        if not created and other_user.id != g.user.id:
+            clear_badge_html = render_template(
+                "partials/clear_badge.html",
+                conv_id_str=conversation.conversation_id_str,
+                hx_get_url=url_for("main.get_dm_chat", other_user_id=other_user.id),
+                link_text=other_user.display_name or other_user.username,
+            )
+        elif created and other_user.id != g.user.id:
+            add_to_sidebar_html = render_template(
+                "partials/dm_list_item_oob.html",
+                user=other_user,
+                conv_id_str=conversation.conversation_id_str,
+                is_online=other_user.id in chat_manager.online_users,
+            )
+
+    header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
+
+    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
+    response = make_response(full_response)
+    response.headers["HX-Trigger"] = json.dumps(
+        {"jumpToMessage": f"#message-{message_id}"}
+    )
+
+    return response
 
 
 # --- WebSocket Handler ---

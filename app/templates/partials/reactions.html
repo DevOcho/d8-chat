@@ -1,5 +1,3 @@
-<!-- This partial renders the list of reaction "pills" for a message. -->
-<!-- It's designed to be swapped in via an OOB WebSocket broadcast. -->
 {% for reaction in grouped_reactions %}
     {% set emoji = reaction.emoji %}
     {% set count = reaction.count %}
