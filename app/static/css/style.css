@@ -332,3 +332,18 @@ emoji-picker {
 .search-result-item:last-child {
     border-bottom: none;
 }
+
+/* --- Custom Emoji Popover Styles --- */
+.popover.emoji-popover {
+    --bs-popover-max-width: 360px; /* Set max-width to fit the picker */
+    border: none;
+    box-shadow: var(--bs-box-shadow);
+}
+
+.popover.emoji-popover .popover-header {
+    display: none; /* The picker has its own header/search */
+}
+
+.popover.emoji-popover .popover-body {
+    padding: 0; /* Remove default padding so the picker fits snugly */
+}

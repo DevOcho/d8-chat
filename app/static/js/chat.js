@@ -568,7 +568,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (popoverTriggerEl.dataset.popoverInitialized) return;
             const messageId = popoverTriggerEl.dataset.messageId;
             if (!messageId) return;
-            const popover = new bootstrap.Popover(popoverTriggerEl, { html: true, sanitize: false, content: `<emoji-picker class="light"></emoji-picker>` });
+            const popover = new bootstrap.Popover(popoverTriggerEl, {
+                html: true,
+                sanitize: false,
+                content: `<emoji-picker class="light"></emoji-picker>`,
+                placement: 'left',
+                customClass: 'emoji-popover'
+            });
             popoverTriggerEl.addEventListener('shown.bs.popover', () => {
                 const picker = document.querySelector(`.popover[role="tooltip"] emoji-picker`);
                 if (picker) {
@@ -700,25 +706,46 @@ document.addEventListener('DOMContentLoaded', () => {
     // This listener handles closing the top-most active UI element when the Escape key is pressed.
     document.body.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            // Check for search overlay first
+            // 1. Check for search overlay
             if (searchOverlay && searchOverlay.style.display !== 'none') {
                 e.preventDefault();
                 const closeBtn = document.getElementById('close-search-btn');
                 if (closeBtn) closeBtn.click();
                 return;
             }
+
+            // 2. [THE FIX] Check for an open emoji reaction popover
+            const visiblePopover = document.querySelector('.popover.show');
+            if (visiblePopover) {
+                e.preventDefault();
+                // Find the button that triggered this popover
+                const triggerEl = document.querySelector(`[aria-describedby="${visiblePopover.id}"]`);
+                if (triggerEl) {
+                    const popoverInstance = bootstrap.Popover.getInstance(triggerEl);
+                    if (popoverInstance) {
+                        popoverInstance.hide();
+                    }
+                }
+                return;
+            }
+
+            // 3. Check for the slide-out right panel
             if (rightPanelOffcanvasEl && rightPanelOffcanvasEl.classList.contains('show')) {
                  e.preventDefault();
                  const offcanvasInstance = bootstrap.Offcanvas.getInstance(rightPanelOffcanvasEl);
                  if (offcanvasInstance) offcanvasInstance.hide();
                  return;
             }
+
+            // 4. Check for the main HTMX modal
             if (htmxModalEl && htmxModalEl.classList.contains('show')) {
                 e.preventDefault();
                 const modalInstance = bootstrap.Modal.getInstance(htmxModalEl);
                 if (modalInstance) modalInstance.hide();
                 return;
             }
+
+            // 5. Check for the main chat input's emoji picker
             const emojiPickerContainer = document.getElementById('emoji-picker-container');
              if (emojiPickerContainer && emojiPickerContainer.style.display !== 'none') {
                 e.preventDefault();

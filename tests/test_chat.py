@@ -100,16 +100,16 @@ def test_access_channel_as_member(logged_in_client):
 
 def test_access_channel_as_non_member(logged_in_client):
     """
-    GIVEN a channel that the user is NOT a member of
+    GIVEN a private channel that the user is NOT a member of
     WHEN the user requests the channel chat
     THEN check for a 403 Forbidden response.
     """
-    # Create a channel but DO NOT add the user as a member
-    channel = Channel.create(workspace_id=1, name="secret-channel")
+    # Create a *private* channel but DO NOT add the user as a member
+    channel = Channel.create(workspace_id=1, name="secret-channel", is_private=True)
 
     response = logged_in_client.get(f"/chat/channel/{channel.id}")
     assert response.status_code == 403
-    assert b"Not a member of this channel" in response.data
+    assert b"You are not a member of this private channel." in response.data
 
 
 def test_add_channel_member_success(logged_in_client, setup_channel_and_users):

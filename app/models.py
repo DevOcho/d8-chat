@@ -126,7 +126,7 @@ class Reaction(BaseModel):
     """Tracks an emoji reaction from a user on a specific message."""
 
     user = ForeignKeyField(User, backref="reactions")
-    message = ForeignKeyField(Message, backref="reactions")
+    message = ForeignKeyField(Message, backref="reactions", on_delete="CASCADE")
     emoji = CharField()  # Stores the actual unicode emoji character
 
     class Meta:
@@ -141,7 +141,7 @@ class Mention(BaseModel):
     """
 
     user = ForeignKeyField(User, backref="mentions")
-    message = ForeignKeyField(Message, backref="mentions")
+    message = ForeignKeyField(Message, backref="mentions", on_delete="CASCADE")
 
     class Meta:
         # A user can only be mentioned once per message
