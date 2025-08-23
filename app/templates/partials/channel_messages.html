@@ -1,5 +1,7 @@
 <!-- This content goes into the main hx-target -->
-<div class="h-100" data-conversation-id="channel_{{ channel.id }}">
+<div class="h-100"
+     data-conversation-id="channel_{{ channel.id }}"
+     data-conversation-db-id="{{ conversation_id }}">
     <div ws-send
          hx-trigger="load"
          hx-vals='{"type": "subscribe", "conversation_id": "channel_{{ channel.id }}"}'></div>

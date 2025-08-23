@@ -3,6 +3,7 @@ Current issues with the slack_clone:
 Kenny: The "is typing" indicator should only appear when you are in the same channel or dm as the person is typing in.  It also might get stuck if you switch channels when they are typing. It's the second one.
 
 Kate: @ button on the bottom doesn't work
+We also need to be able to @channel and @here
 
 Kate: If you type something and then try to click the Aa button or reply to someone the text you typed disappears
 

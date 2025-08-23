@@ -810,7 +810,7 @@ def jump_to_message(message_id):
         clear_badge_html = render_template(
             "partials/clear_badge.html",
             conv_id_str=conversation.conversation_id_str,
-            hx_get_url=url_for("main.get_channel_chat", channel_id=channel.id),
+            hx_get_url=url_for("channels.get_channel_chat", channel_id=channel.id),
             link_text=f"# {channel.name}",
         )
     else:  # DM
@@ -1062,7 +1062,7 @@ def chat(ws):
                     )
                     link_text = f"# {channel_model.name}"
                     hx_get_url = url_for(
-                        "main.get_channel_chat", channel_id=channel_model.id
+                        "channels.get_channel_chat", channel_id=channel_model.id
                     )
                     new_mention_count = (
                         Mention.select()
@@ -1075,19 +1075,10 @@ def chat(ws):
                         .count()
                     )
                     if new_mention_count > 0:
-                        total_mentions = (
-                            Mention.select()
-                            .join(Message)
-                            .where(
-                                (Mention.user == member)
-                                & (Message.conversation == conversation)
-                            )
-                            .count()
-                        )
                         notification_html = render_template(
                             "partials/unread_badge.html",
                             conv_id_str=conv_id_str,
-                            count=total_mentions,
+                            count=new_mention_count,
                             link_text=link_text,
                             hx_get_url=hx_get_url,
                         )

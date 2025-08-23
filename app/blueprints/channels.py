@@ -63,6 +63,7 @@ def get_channel_chat(channel_id):
         user=g.user, conversation=conversation
     )
     last_read_timestamp = status.last_read_timestamp
+    last_seen_mention = status.last_seen_mention_id or 0
     status.last_read_timestamp = datetime.datetime.now()
     status.save()
 
@@ -83,9 +84,13 @@ def get_channel_chat(channel_id):
     mention_messages_query = (
         Message.select(Message.id)
         .join(Mention)
-        .where((Message.conversation == conversation) & (Mention.user == g.user))
+        .where(
+            (Message.conversation == conversation)
+            & (Mention.user == g.user)
+            & (Message.id > last_seen_mention)  # Only get mentions with a higher ID
+        )
     )
-    # Convert the query to a set of IDs for efficient lookup in the template.
+    # Convert the query to a set of IDs for lookup in the template
     mention_message_ids = {m.id for m in mention_messages_query}
 
     header_html_content = render_template(
@@ -101,6 +106,7 @@ def get_channel_chat(channel_id):
         mention_message_ids=mention_message_ids,
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
+        conversation_id=conversation.id,
     )
 
     clear_badge_html = render_template(
@@ -114,6 +120,30 @@ def get_channel_chat(channel_id):
     response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
     return response
+
+
+@channels_bp.route(
+    "/chat/conversation/<int:conversation_id>/seen_mentions", methods=["POST"]
+)
+@login_required
+def update_seen_mentions(conversation_id):
+    """
+    Updates the user's status to indicate they have seen mentions up to a certain message ID.
+    """
+    last_message_id = request.form.get("last_message_id", type=int)
+    if not last_message_id:
+        return "Invalid request", 400
+
+    (
+        UserConversationStatus.update(last_seen_mention_id=last_message_id)
+        .where(
+            (UserConversationStatus.user == g.user)
+            & (UserConversationStatus.conversation == conversation_id)
+        )
+        .execute()
+    )
+
+    return "", 204  # Return "No Content" on success
 
 
 @channels_bp.route("/chat/channel/<int:channel_id>/details", methods=["GET"])

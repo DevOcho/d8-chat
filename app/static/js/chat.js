@@ -396,7 +396,6 @@ const Editor = {
 };
 
 // --- 2. GENERAL PAGE-LEVEL LOGIC ---
-// --- 2. GENERAL PAGE-LEVEL LOGIC ---
 document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
 
@@ -433,19 +432,6 @@ document.addEventListener('DOMContentLoaded', () => {
         //searchOverlay.innerHTML = '';
     };
 
-    document.body.addEventListener('htmx:afterSwap', (evt) => {
-        if (evt.detail.target.id === 'search-results-overlay') {
-            if (!evt.detail.xhr.responseText.trim()) {
-                hideSearch();
-                return;
-            }
-            searchOverlay.style.display = 'flex';
-            const closeSearchBtn = document.getElementById('close-search-btn');
-            if (closeSearchBtn) {
-                closeSearchBtn.addEventListener('click', hideSearch);
-            }
-        }
-    });
 
     if (searchOverlay) {
         searchOverlay.addEventListener('click', (e) => {
@@ -608,6 +594,40 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
+    const handleMentionHighlights = (container, conversationId) => {
+        const mentions = container.querySelectorAll('.mentioned-message');
+        if (mentions.length === 0) return;
+
+        let latestMentionId = 0;
+        mentions.forEach(mentionEl => {
+            // Get the message ID from the element's id attribute (e.g., "message-123")
+            const messageId = parseInt(mentionEl.id.split('-')[1]);
+            if (messageId > latestMentionId) {
+                latestMentionId = messageId;
+            }
+
+            // After a delay, remove the highlight class to trigger the CSS fade-out.
+            setTimeout(() => {
+                mentionEl.classList.remove('mentioned-message');
+            }, 3000); // 3-second delay
+        });
+
+        // If we found new mentions, send an update to the server so they don't
+        // get highlighted again on the next page load.
+        if (latestMentionId > 0 && conversationId) {
+            const updateUrl = `/chat/conversation/${conversationId}/seen_mentions`;
+            // We use a small, temporary HTMX element to send the request declaratively.
+            const triggerEl = document.createElement('div');
+            triggerEl.setAttribute('hx-post', updateUrl);
+            triggerEl.setAttribute('hx-vals', `{"last_message_id": ${latestMentionId}}`);
+            triggerEl.setAttribute('hx-trigger', 'load');
+            document.body.appendChild(triggerEl);
+            htmx.process(triggerEl);
+            // Clean up the temporary element after it fires.
+            setTimeout(() => document.body.removeChild(triggerEl), 100);
+        }
+    };
+
     /** Main Event Listeners **/
     document.body.addEventListener('focus-chat-input', () => { if (Editor && typeof Editor.focusActiveInput === 'function') Editor.focusActiveInput(); });
     document.body.addEventListener('chatInputLoaded', () => Editor.initialize());
@@ -620,7 +640,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    document.body.addEventListener('htmx:beforeSwap', (evt) => {
         // We are listening for the moment right before HTMX swaps in the content
         // for a new channel or DM.
         //
@@ -640,19 +660,42 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
         userWasNearBottom = isUserNearBottom();
     });
 
+// This is the complete, consolidated listener (around line 812)
     document.body.addEventListener('htmx:afterSwap', (event) => {
         const target = event.detail.target;
-        // The search logic now lives inside the consolidated block above, so we only handle non-search swaps here.
-        if (target.id !== 'search-results-overlay') {
-            processCodeBlocks(target);
-            initializeReactionPopovers(target);
-            updateReactionHighlights(target);
-            initializeTooltips(target);
 
-            if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
-                setTimeout(scrollToBottomForce, 50);
-                if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
-                Editor.focusActiveInput();
+        // --- Logic for Search ---
+        if (target.id === 'search-results-overlay') {
+            if (!event.detail.xhr.responseText.trim()) {
+                hideSearch();
+                return;
+            }
+            searchOverlay.style.display = 'flex';
+            const closeSearchBtn = document.getElementById('close-search-btn');
+            if (closeSearchBtn) {
+                closeSearchBtn.addEventListener('click', hideSearch);
+            }
+            // Early return after handling search
+            return;
+        }
+
+        // --- Logic for all other swaps (chat, modals, etc.) ---
+        processCodeBlocks(target);
+        initializeReactionPopovers(target);
+        updateReactionHighlights(target);
+        initializeTooltips(target);
+
+        // This block handles initial channel/DM loads
+        if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
+            setTimeout(scrollToBottomForce, 50);
+            if(jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
+            Editor.focusActiveInput();
+
+            // Check for and handle any new mention highlights
+            const conversationDiv = target.querySelector('[data-conversation-db-id]');
+            if (conversationDiv) {
+                const conversationId = conversationDiv.dataset.conversationDbId;
+                handleMentionHighlights(target, conversationId);
             }
         }
     });
@@ -685,6 +728,7 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
             }
             initializeReactionPopovers(lastMessage);
             processCodeBlocks(lastMessage);
+            handleMentionHighlights(lastMessage, null);
         }
     });
 

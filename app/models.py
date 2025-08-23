@@ -153,6 +153,7 @@ class UserConversationStatus(BaseModel):
     conversation = ForeignKeyField(Conversation, backref="user_statuses")
     last_read_timestamp = DateTimeField(default=datetime.datetime.now)
     last_notified_timestamp = DateTimeField(null=True)
+    last_seen_mention_id = BigIntegerField(null=True)
 
     class Meta:
         # Ensures a user has only one status per conversation

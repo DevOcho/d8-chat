@@ -102,7 +102,11 @@ html.login-page, body.login-page { overflow: auto; }
 @media (max-width: 992px) { .login-page-container { flex-direction: column; } .feature-panel { flex-basis: auto; padding: 2rem; text-align: center; } .feature-list li { justify-content: center; } .login-logo { margin-left: auto; margin-right: auto; } .login-panel { flex-basis: auto; flex-grow: 1; } }
 
 /* --- General App Styles --- */
-.mentioned-message { background-color: #fffbeA; border-left: 3px solid #ffd700; }
+.mentioned-message {
+  background-color: #fffbeA;
+  border-left: 3px solid #ffd700;
+  transition: background-color 0.5s ease-in-out;
+}
 .channel-sidebar a { color: #a9a9a9; transition: color 0.2s ease-in-out; }
 .channel-sidebar a:hover, .channel-sidebar a.fw-bold.text-white { color: #ffffff !important; }
 
@@ -199,6 +203,14 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     /* Presence dot borders */
     .profile-avatar .presence-indicator { border-color: #1a1d21; }
     .profile-header-avatar .presence-indicator { border-color: #2f3136; }
+
+    /* Mentioned messages */
+    .mentioned-message {
+        background-color: #494a2b; /* A muted, dark yellow */
+        border-left-color: #ffd700;
+        color: #dcddde;
+    }
+
 }
 
 /* --- Emoji Picker Styles --- */
