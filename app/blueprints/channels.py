@@ -873,18 +873,54 @@ def join_channel(channel_id):
 @login_required
 def mention_search(conversation_id_str):
     """
-    Searches for users within a given conversation (channel or DM)
-    to populate the @mention popover.
+    Searches for users and special keywords (@here, @channel) within a
+    given conversation to populate the @mention popover.
     """
+
+    # local vars
+    members = []
+    special_mentions = []
+
     query = request.args.get("q", "").lower()
     conversation = Conversation.get_or_none(conversation_id_str=conversation_id_str)
 
     if not conversation:
         return "", 404
 
-    members = []
     if conversation.type == "channel":
         channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        channel_member_count = (
+            ChannelMember.select().where(ChannelMember.channel == channel).count()
+        )
+        member_ids_query = ChannelMember.select(ChannelMember.user_id).where(
+            ChannelMember.channel == channel
+        )
+        member_ids = {m.user_id for m in member_ids_query}
+        online_ids = member_ids.intersection(chat_manager.online_users.keys())
+        online_member_count = len(online_ids)
+
+        # Helper for pluralizing "member" vs "members"
+        channel_plural = "member" if channel_member_count == 1 else "members"
+        online_plural = "member" if online_member_count == 1 else "members"
+        # --- End of calculation block ---
+
+        if not query or "here".startswith(query):
+            special_mentions.append(
+                {
+                    "username": "here",
+                    "display_name": "@here",
+                    "description": f"Notifies {online_member_count} online {online_plural}.",
+                }
+            )
+        if not query or "channel".startswith(query):
+            special_mentions.append(
+                {
+                    "username": "channel",
+                    "display_name": "@channel",
+                    "description": f"Notifies all {channel_member_count} {channel_plural}.",
+                }
+            )
+
         members_query = (
             User.select()
             .join(ChannelMember)
@@ -910,4 +946,8 @@ def mention_search(conversation_id_str):
         )
         members = list(members_query)
 
-    return render_template("partials/mention_results.html", users=members)
+    return render_template(
+        "partials/mention_results.html",
+        users=members,
+        special_mentions=special_mentions,
+    )

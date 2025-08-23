@@ -963,13 +963,59 @@ def chat(ws):
                     content=chat_text,
                     parent_message=parent_id if parent_id else None,
                 )
+
+                # 1. Handle regular @username mentions
                 mentioned_usernames = set(re.findall(r"@(\w+)", chat_text))
+                mentioned_usernames.discard("here")
+                mentioned_usernames.discard("channel")
+
                 if mentioned_usernames:
                     mentioned_users = User.select().where(
                         User.username.in_(list(mentioned_usernames))
                     )
                     for mentioned_user in mentioned_users:
                         Mention.get_or_create(user=mentioned_user, message=new_message)
+
+                # 2. Handle @channel and @here mentions (only applies to channels)
+                if conversation.type == "channel":
+                    channel = Channel.get_by_id(
+                        conversation.conversation_id_str.split("_")[1]
+                    )
+                    target_users_for_mention = set()
+
+                    # Handle @channel - all members
+                    if "@channel" in chat_text:
+                        all_members = (
+                            User.select()
+                            .join(ChannelMember)
+                            .where(ChannelMember.channel == channel)
+                        )
+                        for member in all_members:
+                            target_users_for_mention.add(member)
+
+                    # Handle @here - only online members
+                    if "@here" in chat_text:
+                        member_ids_query = ChannelMember.select(
+                            ChannelMember.user_id
+                        ).where(ChannelMember.channel == channel)
+                        member_ids = {m.user_id for m in member_ids_query}
+                        online_channel_members_ids = member_ids.intersection(
+                            chat_manager.online_users.keys()
+                        )
+                        if online_channel_members_ids:
+                            online_users = User.select().where(
+                                User.id.in_(list(online_channel_members_ids))
+                            )
+                            for member in online_users:
+                                target_users_for_mention.add(member)
+
+                    # 3. Create Mention records for the collected users
+                    for user_to_mention in target_users_for_mention:
+                        # Don't create a mention for the person who sent the message
+                        if user_to_mention.id != ws.user.id:
+                            Mention.get_or_create(
+                                user=user_to_mention, message=new_message
+                            )
 
             if (
                 conversation.type == "dm"
@@ -1122,16 +1168,19 @@ def chat(ws):
 
                 # 2. Handle Desktop Notification with Cooldown
                 now = datetime.datetime.now()
-                send_notification = False
-                if status.last_notified_timestamp is None or (
-                    now - status.last_notified_timestamp
-                ) > datetime.timedelta(seconds=60):
-                    send_notification = True
 
-                if send_notification:
+                # Check if this new message is a direct mention for this member.
+                is_a_mention = (
+                    Mention.select()
+                    .where((Mention.message == new_message) & (Mention.user == member))
+                    .exists()
+                )
+
+                # Rule #1: Mentions are high-priority and always send a full notification.
+                if is_a_mention:
                     notification_payload = {
                         "type": "notification",
-                        "title": f"New message from {new_message.user.display_name or new_message.user.username}",
+                        "title": f"New mention from {new_message.user.display_name or new_message.user.username}",
                         "body": new_message.content,
                         "icon": url_for(
                             "static", filename="favicon.ico", _external=True
@@ -1139,13 +1188,22 @@ def chat(ws):
                         "tag": conv_id_str,
                     }
                     member_ws.send(json.dumps(notification_payload))
-                    # Update the timestamp in the database
+                    # Update the timestamp to reset the cooldown period.
                     status.last_notified_timestamp = now
                     status.save()
+
+                # Rule #2: Non-mentions are low-priority and respect the cooldown.
                 else:
-                    # 3. If notification is on cooldown, just send a sound trigger
-                    sound_payload = {"type": "sound"}
-                    member_ws.send(json.dumps(sound_payload))
+                    should_notify = status.last_notified_timestamp is None or (
+                        now - status.last_notified_timestamp
+                    ) > datetime.timedelta(seconds=30)
+                    if should_notify:
+                        # For regular messages, just send a sound, not a full desktop notification.
+                        sound_payload = {"type": "sound"}
+                        member_ws.send(json.dumps(sound_payload))
+                        # Update the timestamp to reset the cooldown period.
+                        status.last_notified_timestamp = now
+                        status.save()
 
     except Exception as e:
         print(

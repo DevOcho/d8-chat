@@ -482,6 +482,10 @@ const Editor = {
     setupKeydownListeners: function() {
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const keydownHandler = (e) => {
+            // If the mention popover is active, do nothing and let it handle the event.
+            if (MentionManager.state.active) {
+                return;
+            }
             if (!this.state.isMarkdownMode && e.key === 'Enter' && !e.shiftKey) {
                 const selection = window.getSelection();
                 if (selection.rangeCount) {
