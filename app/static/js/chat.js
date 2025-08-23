@@ -620,6 +620,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+document.body.addEventListener('htmx:beforeSwap', (evt) => {
+        // We are listening for the moment right before HTMX swaps in the content
+        // for a new channel or DM.
+        //
+        // By clearing the typing indicator here, we prevent a stale "user is typing"
+        // message from the *previous* conversation from getting stuck on the screen
+        // after the user has switched to a new one.
+        if (evt.detail.target.id === 'chat-messages-container' && evt.detail.requestConfig.verb === 'get') {
+            const typingIndicator = document.getElementById('typing-indicator');
+            if (typingIndicator) {
+                typingIndicator.innerHTML = '';
+            }
+        }
+    });
+
     let userWasNearBottom = false;
     document.body.addEventListener('htmx:wsBeforeMessage', function() {
         userWasNearBottom = isUserNearBottom();
@@ -652,6 +667,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) { /* Fall through to process as HTML */ }
 
+        updateReactionHighlights(document.body);
+
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
 
@@ -667,7 +684,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             initializeReactionPopovers(lastMessage);
-            updateReactionHighlights(lastMessage);
             processCodeBlocks(lastMessage);
         }
     });

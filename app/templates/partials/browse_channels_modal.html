@@ -1,10 +1,8 @@
 <div class="modal-header">
     <h5 class="modal-title">Browse Channels</h5>
     <button class="btn btn-success ms-auto me-2"
-            hx-get="{{ url_for('main.get_create_channel_form') }}"
-            hx-target="#htmx-modal-content">
-        Create Channel
-    </button>
+            hx-get="{{ url_for('channels.get_create_channel_form') }}"
+            hx-target="#htmx-modal-content">Create Channel</button>
     <button type="button"
             class="btn-close"
             data-bs-dismiss="modal"
@@ -19,19 +17,19 @@
                name="q"
                placeholder="Search for channels to join"
                autocomplete="off"
-               hx-get="{{ url_for('main.search_channels') }}"
+               hx-get="{{ url_for('channels.search_channels') }}"
                hx-trigger="keyup changed delay:300ms, search"
                hx-target="#joinable-channels-results"
                hx-indicator="#search-spinner">
     </div>
-
     <!-- HTMX loading indicator -->
     <div class="text-center">
-        <div id="search-spinner" class="spinner-border htmx-indicator" role="status">
+        <div id="search-spinner"
+             class="spinner-border htmx-indicator"
+             role="status">
             <span class="visually-hidden">Loading...</span>
         </div>
     </div>
-    
     <!-- Container for the search results -->
     <div id="joinable-channels-results">
         {# On initial load, we include the first page of results #}

@@ -170,9 +170,11 @@ def create_app(config_class=Config):
     # Import and register blueprints
     from .routes import main_bp, admin_bp
     from .blueprints.search import search_bp
+    from .blueprints.channels import channels_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(search_bp)
+    app.register_blueprint(channels_bp)
 
     return app

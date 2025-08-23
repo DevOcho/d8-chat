@@ -18,7 +18,7 @@
                     {% if member.role == 'member' %}
                         <li>
                             <button class="dropdown-item"
-                                    hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
+                                    hx-put="{{ url_for('channels.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
                                     hx-vals='{"role": "admin"}'
                                     hx-target="#members-tab-pane"
                                     hx-swap="innerHTML">Make Admin</button>
@@ -26,7 +26,7 @@
                     {% else %}
                         <li>
                             <button class="dropdown-item"
-                                    hx-put="{{ url_for('main.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
+                                    hx-put="{{ url_for('channels.update_member_role', channel_id=channel.id, user_id_to_modify=member.user.id) }}"
                                     hx-vals='{"role": "member"}'
                                     hx-target="#members-tab-pane"
                                     hx-swap="innerHTML">Make Member</button>
@@ -37,7 +37,7 @@
                     </li>
                     <li>
                         <button class="dropdown-item text-danger"
-                                hx-delete="{{ url_for('main.remove_channel_member', channel_id=channel.id, user_id_to_remove=member.user.id) }}"
+                                hx-delete="{{ url_for('channels.remove_channel_member', channel_id=channel.id, user_id_to_remove=member.user.id) }}"
                                 hx-target="#members-tab-pane"
                                 hx-swap="innerHTML"
                                 hx-confirm="Are you sure you want to remove {{ member.user.username }} from the channel?">

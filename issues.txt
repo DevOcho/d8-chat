@@ -1,12 +1,12 @@
 Current issues with the slack_clone:
 
+Kenny: The "is typing" indicator should only appear when you are in the same channel or dm as the person is typing in.  It also might get stuck if you switch channels when they are typing. It's the second one.
+
 Kate: @ button on the bottom doesn't work
 
 Kate: If you type something and then try to click the Aa button or reply to someone the text you typed disappears
 
 Ambar: When you go to your profile, you appear offline
-
-Robert: you can only type one emoji at a time
 
 Kate: If someone else is typing the emoji thing moves
 
@@ -14,9 +14,7 @@ Kate: mentions are not working
 
 Natalie: pasting doesn't work
 
-Sagrario: Hash tags are being formatted as headers in markdown
-
-Kenny: The "is typing" indicator should only appear when you are in the same channel or dm as the person is typing in.  It also might get stuck if you switch channels when they are typing. It's the second one.
+Sagrario: She doesn't like that Hash tags are being formatted as headers in markdown
 
 The new indicator needs to move if I read the message and then the window looses focus and then I come back to it.  This might not be possible but it would be nice.
 
@@ -34,14 +32,16 @@ We need to be able to archive a channel to some fun archive spot that is still s
 
 I want the side bar to only show a max number of people on the side nav.  Let's say we have 10,000 users in the chat.  We only want to show people we've initiated a DM with or that have initiated a DM with us. We also don't want to show more than ~20 people total.
 
-We need to create a full administration section 
+We need to create a full administration section
   - Users Management
   - Channel Management
   - Audit Log (feature that logs all chats and channel changes)
 
-i18n 
+i18n
 
 ---
+
+Robert: you can only type one emoji at a time
 
 There is a full page refresh when you leave a channel.  This should probably be an OOB to update things
 instead but it was causing issues and it's 10pm and I want this to work.  So I'm risking someone sending

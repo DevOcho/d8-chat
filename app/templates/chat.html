@@ -35,7 +35,7 @@
                 <button class="btn btn-sm text-secondary pt-4"
                         data-bs-toggle="modal"
                         data-bs-target="#htmx-modal"
-                        hx-get="{{ url_for('main.get_browse_channels_modal') }}"
+                        hx-get="{{ url_for('channels.get_browse_channels_modal') }}"
                         hx-target="#htmx-modal-content"
                         title="Browse public channels">
                     <i class="bi bi-search"></i>
@@ -43,7 +43,7 @@
                 <button class="btn btn-sm text-secondary pt-4"
                         data-bs-toggle="modal"
                         data-bs-target="#htmx-modal"
-                        hx-get="{{ url_for('main.get_create_channel_form') }}"
+                        hx-get="{{ url_for('channels.get_create_channel_form') }}"
                         hx-target="#htmx-modal-content"
                         title="Create a new channel">
                     <i class="bi bi-plus-square"></i>
@@ -65,7 +65,7 @@
                         <a href="#"
                            id="link-{{ conv_id_str }}"
                            class="text-decoration-none {{ 'fw-bold text-white' if info.has_unread else 'text-secondary' }}"
-                           hx-get="/chat/channel/{{ channel.id }}"
+                           hx-get="{{ url_for('channels.get_channel_chat', channel_id=channel.id) }}"
                            hx-target="#chat-messages-container"># {{ channel.name }}</a>
                         <span id="unread-badge-{{ conv_id_str }}">
                             {% if info.mentions > 0 %}<span class="badge rounded-pill bg-danger float-end">{{ info.mentions }}</span>{% endif %}

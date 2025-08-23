@@ -40,7 +40,7 @@
                 </small>
             {% else %}
                 <button class="btn btn-sm btn-outline-danger w-100"
-                        hx-post="{{ url_for('main.leave_channel', channel_id=channel.id) }}"
+                        hx-post="{{ url_for('channels.leave_channel', channel_id=channel.id) }}"
                         hx-confirm="Are you sure you want to leave #{{ channel.name }}?"
                         title="Leave this channel">Leave Channel</button>
             {% endif %}
