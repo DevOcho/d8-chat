@@ -45,6 +45,9 @@ body, html {
   padding: 1rem;
   background-color: #f8f9fa;
 }
+#message-form {
+  position: relative;
+}
 .message-container {
   position: relative;
   padding: 0.5rem;

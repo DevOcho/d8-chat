@@ -57,6 +57,180 @@ const NotificationManager = {
     }
 };
 
+const MentionManager = {
+    state: {},
+
+    initialize: function(editorState) {
+        const popoverContainer = document.createElement('div');
+        popoverContainer.id = 'mention-popover-container';
+        popoverContainer.className = 'border rounded shadow-sm bg-body';
+        popoverContainer.style.position = 'absolute';
+        popoverContainer.style.bottom = '100%';
+        popoverContainer.style.left = '40px';
+        popoverContainer.style.zIndex = '1060';
+        popoverContainer.style.display = 'none';
+        popoverContainer.style.maxHeight = '250px';
+        popoverContainer.style.width = '300px';
+        popoverContainer.style.overflowY = 'auto';
+
+        // Append the container to the form so it's positioned correctly
+        editorState.messageForm.appendChild(popoverContainer);
+
+
+        this.state = {
+            editorState: editorState,
+            popoverContainer: popoverContainer,
+            active: false,
+            triggerPosition: -1,
+            query: '',
+            isSelecting: false
+        };
+        this.bindEvents();
+    },
+
+    bindEvents: function() {
+        const { editor, markdownView } = this.state.editorState;
+        editor.addEventListener('input', this.handleInput.bind(this));
+        markdownView.addEventListener('input', this.handleInput.bind(this));
+
+        editor.addEventListener('keydown', this.handleKeyDown.bind(this));
+        markdownView.addEventListener('keydown', this.handleKeyDown.bind(this));
+
+        // Listen for clicks on suggestion items (delegated)
+        this.state.popoverContainer.addEventListener('click', (e) => {
+            const item = e.target.closest('.mention-suggestion-item');
+            if (item) {
+                this.selectItem(item);
+            }
+        });
+    },
+
+    handleInput: function() {
+        // This flag prevents the input event we fire in selectItem from re-triggering a search.
+        if (this.state.isSelecting) {
+            this.state.isSelecting = false;
+            return;
+        }
+
+        const { isMarkdownMode, markdownView, editor } = this.state.editorState;
+        let text, cursorPosition;
+
+        if (isMarkdownMode) {
+            text = markdownView.value;
+            cursorPosition = markdownView.selectionStart;
+        } else {
+            const selection = window.getSelection();
+            if (selection.rangeCount === 0) return;
+            const range = selection.getRangeAt(0);
+            text = editor.textContent;
+            cursorPosition = range.startOffset;
+        }
+
+        const textUpToCursor = text.substring(0, cursorPosition);
+        const triggerIndex = textUpToCursor.lastIndexOf('@');
+
+        if (triggerIndex !== -1 && (triggerIndex === 0 || /\s/.test(textUpToCursor[triggerIndex - 1]))) {
+            this.state.query = textUpToCursor.substring(triggerIndex + 1);
+            this.state.triggerPosition = triggerIndex;
+
+            // If the user types a space, the mention is complete, so hide the popover.
+            if (this.state.query.includes(' ')) {
+                this.hidePopover();
+                return;
+            }
+
+            this.fetchUsers(this.state.query);
+        } else {
+            this.hidePopover();
+        }
+    },
+
+    handleKeyDown: function(e) {
+        if (!this.state.active) return;
+
+        const items = this.state.popoverContainer.querySelectorAll('.mention-suggestion-item');
+        if (items.length === 0) return;
+
+        let activeItem = this.state.popoverContainer.querySelector('.mention-suggestion-item.active');
+
+        // Add 'Escape' to the list of keys we want to control.
+        if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (e.key === 'ArrowDown') {
+                const next = activeItem.nextElementSibling || items[0];
+                activeItem.classList.remove('active');
+                next.classList.add('active');
+            } else if (e.key === 'ArrowUp') {
+                const prev = activeItem.previousElementSibling || items[items.length - 1];
+                activeItem.classList.remove('active');
+                    prev.classList.add('active');
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                this.selectItem(activeItem);
+            } else if (e.key === 'Escape') {
+                this.hidePopover();
+            }
+        }
+    },
+
+    fetchUsers: function(query) {
+        const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+        if (!activeConv) {
+            this.hidePopover();
+            return;
+        }
+        const conversationIdStr = activeConv.dataset.conversationId;
+        const url = `/chat/conversation/${conversationIdStr}/mention_search?q=${encodeURIComponent(query)}`;
+
+        htmx.ajax('GET', url, { target: this.state.popoverContainer, swap: 'innerHTML' });
+        this.showPopover();
+    },
+
+    selectItem: function(item) {
+        this.state.isSelecting = true; // Set the flag before changing the input
+        const username = item.dataset.username;
+        const { isMarkdownMode, markdownView, editor } = this.state.editorState;
+
+        if (isMarkdownMode) {
+            const text = markdownView.value;
+            const pre = text.substring(0, this.state.triggerPosition);
+            const post = text.substring(markdownView.selectionStart);
+            markdownView.value = `${pre}@${username} ${post}`;
+            const newCursorPos = (pre + `@${username} `).length;
+            markdownView.focus();
+            markdownView.setSelectionRange(newCursorPos, newCursorPos);
+        } else { // ContentEditable
+            editor.focus();
+            const selection = window.getSelection();
+            const range = selection.getRangeAt(0);
+
+            // This logic is tricky. We need to find the correct text node.
+            let textNode = range.startContainer;
+            range.setStart(textNode, this.state.triggerPosition);
+            range.setEnd(textNode, range.startOffset);
+            range.deleteContents();
+            document.execCommand('insertText', false, `@${username} `);
+        }
+
+        this.hidePopover();
+        // Trigger input event so the editor resizes etc.
+        (isMarkdownMode ? markdownView : editor).dispatchEvent(new Event('input', { bubbles: true }));
+    },
+
+    showPopover: function() {
+        this.state.popoverContainer.style.display = 'block';
+        this.state.active = true;
+    },
+
+    hidePopover: function() {
+        this.state.popoverContainer.style.display = 'none';
+        this.state.popoverContainer.innerHTML = '';
+        this.state.active = false;
+    }
+};
+
+
 // --- 1. THE CHAT INPUT EDITOR ---
 const Editor = {
     // This state object holds all variables and element references for the editor instance.
@@ -114,6 +288,7 @@ const Editor = {
         this.setupFormListeners();
         this.setupToggleButtonListener();
         this.updateView();
+        this.initializeMentions();
     },
 
     /**
@@ -391,6 +566,22 @@ const Editor = {
                 values: { 'wysiwyg_enabled': wysiwygIsEnabled },
                 swap: 'none' // We don't need to swap any HTML content
             });
+        });
+    },
+
+    /* Mentions popover */
+    initializeMentions: function() {
+        const mentionButton = document.getElementById('mention-btn');
+        if (!mentionButton) return;
+
+        // Pass the main editor's state to the MentionManager
+        MentionManager.initialize(this.state);
+
+        mentionButton.addEventListener('click', () => {
+            this.insertText('@');
+            // Manually trigger the input event to open the popover
+            const activeInput = this.state.isMarkdownMode ? this.state.markdownView : this.state.editor;
+            activeInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
         });
     }
 };

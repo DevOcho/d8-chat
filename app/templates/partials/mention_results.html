@@ -1,0 +1,22 @@
+<div class="list-group list-group-flush">
+    {% for user in users %}
+        <button type="button"
+                class="list-group-item list-group-item-action mention-suggestion-item p-2 {% if loop.first %}active{% endif %}"
+                data-username="{{ user.username }}">
+            <div class="d-flex align-items-center">
+                <div class="flex-shrink-0">
+                    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center"
+                         style="width: 24px;
+                                height: 24px;
+                                font-size: 0.8rem">{{ (user.display_name or user.username)[0]|upper }}</div>
+                </div>
+                <div class="flex-grow-1 ms-2">
+                    <strong class="me-2">{{ user.display_name or user.username }}</strong>
+                    <small class="text-muted">{{ user.username }}</small>
+                </div>
+            </div>
+        </button>
+    {% else %}
+        <div class="list-group-item p-2 text-muted">No results found</div>
+    {% endfor %}
+</div>

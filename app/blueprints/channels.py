@@ -867,3 +867,47 @@ def join_channel(channel_id):
     )
 
     return new_sidebar_item_html + confirmation_html
+
+
+@channels_bp.route("/chat/conversation/<conversation_id_str>/mention_search")
+@login_required
+def mention_search(conversation_id_str):
+    """
+    Searches for users within a given conversation (channel or DM)
+    to populate the @mention popover.
+    """
+    query = request.args.get("q", "").lower()
+    conversation = Conversation.get_or_none(conversation_id_str=conversation_id_str)
+
+    if not conversation:
+        return "", 404
+
+    members = []
+    if conversation.type == "channel":
+        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        members_query = (
+            User.select()
+            .join(ChannelMember)
+            .where(
+                (ChannelMember.channel == channel)
+                & (
+                    (User.username.startswith(query))
+                    | (User.display_name.ilike(f"{query}%"))
+                )
+            )
+            .limit(10)
+        )
+        members = list(members_query)
+
+    elif conversation.type == "dm":
+        user_ids = [int(uid) for uid in conversation.conversation_id_str.split("_")[1:]]
+        members_query = User.select().where(
+            (User.id.in_(user_ids))
+            & (
+                (User.username.startswith(query))
+                | (User.display_name.ilike(f"{query}%"))
+            )
+        )
+        members = list(members_query)
+
+    return render_template("partials/mention_results.html", users=members)
