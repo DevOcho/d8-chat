@@ -171,10 +171,12 @@ def create_app(config_class=Config):
     from .routes import main_bp, admin_bp
     from .blueprints.search import search_bp
     from .blueprints.channels import channels_bp
+    from .blueprints.dms import dms_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(search_bp)
     app.register_blueprint(channels_bp)
+    app.register_blueprint(dms_bp)
 
     return app

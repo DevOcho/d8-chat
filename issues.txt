@@ -33,7 +33,11 @@ We need to create a full administration section
 
 i18n
 
+If the server disconnects, it will reconnect for users at different times.  Messages sent while the other user is reconnecting are lost until a page refresh when they will show up for a user.  On the reconnect we probably need to reload the messages or do a full page refresh.
+
 ---
+
+Hashtags as searchable keywords in messages.
 
 Robert: you can only type one emoji at a time
 

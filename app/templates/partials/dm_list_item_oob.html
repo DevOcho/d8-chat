@@ -8,7 +8,7 @@
             <a href="#"
                id="link-{{ conv_id_str }}"
                class="text-decoration-none text-light"
-               hx-get="/chat/dm/{{ user.id }}"
+               hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"
                hx-target="#chat-messages-container">{{ user.display_name or user.username }}</a>
         </div>
         <span id="unread-badge-{{ conv_id_str }}"></span>

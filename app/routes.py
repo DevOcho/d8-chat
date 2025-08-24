@@ -44,9 +44,6 @@ admin_bp = Blueprint("admin", __name__)
 # Number of messages per "page" meaning how many we will load at a time if they scroll back up
 PAGE_SIZE = 30
 
-# Number of users returned when you start a new DM and search for users
-DM_SEARCH_PAGE_SIZE = 20
-
 # A central map for presence status to Bootstrap CSS classes.
 STATUS_CLASS_MAP = {
     "online": "bg-success",
@@ -304,93 +301,6 @@ def chat_interface():
     )
 
 
-@main_bp.route("/chat/dms/start", methods=["GET"])
-@login_required
-def get_start_dm_form():
-    """
-    Renders the modal for starting a new DM, showing the first page of available users.
-    """
-    page = 1
-    # 1. Get the IDs of users the current user ALREADY has a DM with.
-    dm_conversations = (
-        Conversation.select()
-        .join(UserConversationStatus)
-        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
-    )
-    existing_partner_ids = {g.user.id}
-    for conv in dm_conversations:
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
-        partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
-        if partner_id:
-            existing_partner_ids.add(partner_id)
-
-    # 2. Base query for users not already in a DM, ordered alphabetically.
-    query = (
-        User.select()
-        .where(User.id.not_in(list(existing_partner_ids)))
-        .order_by(User.username)
-    )
-
-    # 3. Paginate the results.
-    total_users = query.count()
-    users_for_page = query.paginate(page, DM_SEARCH_PAGE_SIZE)
-    has_more_pages = total_users > (page * DM_SEARCH_PAGE_SIZE)
-
-    # 4. Render the main modal shell, which includes the first page of results.
-    return render_template(
-        "partials/start_dm_modal.html",
-        users_to_start_dm=users_for_page,
-        has_more_pages=has_more_pages,
-        current_page=page,
-    )
-
-
-@main_bp.route("/chat/dms/search", methods=["GET"])
-@login_required
-def search_users_for_dm():
-    """
-    Searches for users to start a new DM with, supporting pagination.
-    Returns an HTML fragment with the filtered list of users.
-    """
-    search_term = request.args.get("q", "").strip()
-    page = request.args.get("page", 1, type=int)
-
-    # Re-run the logic to find users already in DMs to exclude them from search.
-    dm_conversations = (
-        Conversation.select()
-        .join(UserConversationStatus)
-        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
-    )
-    existing_partner_ids = {g.user.id}
-    for conv in dm_conversations:
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
-        partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
-        if partner_id:
-            existing_partner_ids.add(partner_id)
-
-    # Base query for users not already in a DM.
-    query = User.select().where(User.id.not_in(list(existing_partner_ids)))
-
-    # Apply search filter if a query is provided.
-    if search_term:
-        query = query.where(
-            (User.username.contains(search_term))
-            | (User.display_name.contains(search_term))
-        )
-
-    total_users = query.count()
-    users_for_page = query.order_by(User.username).paginate(page, DM_SEARCH_PAGE_SIZE)
-    has_more_pages = total_users > (page * DM_SEARCH_PAGE_SIZE)
-
-    # Render *only* the results partial.
-    return render_template(
-        "partials/dm_user_results.html",
-        users_to_start_dm=users_for_page,
-        has_more_pages=has_more_pages,
-        current_page=page,
-    )
-
-
 # --- MESSAGE EDIT AND DELETE ROUTES ---
 @main_bp.route("/chat/message/<int:message_id>", methods=["GET"])
 @login_required
@@ -590,86 +500,6 @@ def create_user():
         User.create(username=username, email=email)
         return redirect(url_for("admin.list_users"))
     return redirect(url_for("admin.create_user_form"))
-
-
-@main_bp.route("/chat/dm/<int:other_user_id>")
-@login_required
-def get_dm_chat(other_user_id):
-    other_user = User.get_or_none(id=other_user_id)
-    if not other_user:
-        return "User not found", 404
-
-    user_ids = sorted([g.user.id, other_user.id])
-    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
-    conversation, _ = Conversation.get_or_create(
-        conversation_id_str=conv_id_str, defaults={"type": "dm"}
-    )
-
-    # When a DM is viewed, update the timestamp for BOTH users involved.
-    # This ensures the "read" status is synced for the sender and receiver.
-
-    # First, ensure status records exist for both users.
-    status, created = UserConversationStatus.get_or_create(
-        user=g.user, conversation=conversation
-    )
-    UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
-
-    # Get the current user's last read time *before* we update it, so we know where to put the "NEW" separator.
-    last_read_timestamp = status.last_read_timestamp
-
-    # Now, execute a single query to update both records to the current time.
-    now = datetime.datetime.now()
-    UserConversationStatus.update(last_read_timestamp=now).where(
-        UserConversationStatus.conversation == conversation
-    ).execute()
-
-    messages = list(
-        Message.select()
-        .where(Message.conversation == conversation)
-        .order_by(Message.created_at.desc())
-        .limit(PAGE_SIZE)
-    )
-    messages.reverse()
-    reactions_map = get_reactions_for_messages(messages)
-
-    header_html_content = render_template(
-        "partials/dm_header.html", other_user=other_user
-    )
-    header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
-
-    # This is the main content
-    messages_html = render_template(
-        "partials/dm_messages.html",
-        messages=messages,
-        other_user=other_user,
-        last_read_timestamp=last_read_timestamp,
-        PAGE_SIZE=PAGE_SIZE,
-        reactions_map=reactions_map,
-    )
-
-    clear_badge_html = ""
-    add_to_sidebar_html = ""
-    # If the DM already existed for this user, send command to clear the badge.
-    if not created and other_user.id != g.user.id:
-        clear_badge_html = render_template(
-            "partials/clear_badge.html",
-            conv_id_str=conv_id_str,
-            hx_get_url=url_for("main.get_dm_chat", other_user_id=other_user.id),
-            link_text=other_user.display_name or other_user.username,
-        )
-    # If this is the first time this user is opening this DM, send command to add it to the sidebar.
-    elif created and other_user.id != g.user.id:
-        add_to_sidebar_html = render_template(
-            "partials/dm_list_item_oob.html",
-            user=other_user,
-            conv_id_str=conv_id_str,
-            is_online=other_user.id in chat_manager.online_users,
-        )
-
-    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
-    response = make_response(full_response)
-    response.headers["HX-Trigger"] = "load-chat-history"
-    return response
 
 
 @main_bp.route("/profile/status", methods=["PUT"])
@@ -907,7 +737,7 @@ def jump_to_message(message_id):
             clear_badge_html = render_template(
                 "partials/clear_badge.html",
                 conv_id_str=conversation.conversation_id_str,
-                hx_get_url=url_for("main.get_dm_chat", other_user_id=other_user.id),
+                hx_get_url=url_for("dms.get_dm_chat", other_user_id=other_user.id),
                 link_text=other_user.display_name or other_user.username,
             )
         elif created and other_user.id != g.user.id:
@@ -926,46 +756,6 @@ def jump_to_message(message_id):
         {"jumpToMessage": f"#message-{message_id}"}
     )
 
-    return response
-
-
-@main_bp.route("/chat/dm/<int:other_user_id>/details", methods=["GET"])
-@login_required
-def get_dm_details(other_user_id):
-    """Renders the details panel for a direct message conversation."""
-    other_user = User.get_or_none(id=other_user_id)
-    if not other_user:
-        return "User not found", 404
-
-    return render_template("partials/dm_details.html", other_user=other_user)
-
-
-@main_bp.route("/chat/dm/<int:other_user_id>/leave", methods=["DELETE"])
-@login_required
-def leave_dm(other_user_id):
-    """
-    'Leaves' a DM by deleting the UserConversationStatus for the current user,
-    which removes it from their sidebar. The message history is preserved.
-    """
-    # Find the conversation
-    user_ids = sorted([g.user.id, other_user_id])
-    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
-    conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
-
-    if conversation:
-        # Delete the status record for the current user, effectively hiding the DM
-        (
-            UserConversationStatus.delete()
-            .where(
-                (UserConversationStatus.user == g.user)
-                & (UserConversationStatus.conversation == conversation)
-            )
-            .execute()
-        )
-
-    # Put them back on the (you) chat
-    response = make_response("")
-    response.headers["HX-Redirect"] = url_for("main.chat_interface")
     return response
 
 
@@ -1014,7 +804,6 @@ def chat(ws):
             if not conversation:
                 continue
 
-            # Check posting permissions before calling the service
             if conversation.type == "channel":
                 channel = Channel.get_by_id(
                     conversation.conversation_id_str.split("_")[1]
@@ -1024,9 +813,8 @@ def chat(ws):
                         user=ws.user, channel=channel
                     )
                     if not membership or membership.role != "admin":
-                        continue  # Silently ignore
+                        continue
 
-            # 1. Delegate business logic to the testable service
             new_message = chat_service.handle_new_message(
                 sender=ws.user,
                 conversation=conversation,
@@ -1034,7 +822,6 @@ def chat(ws):
                 parent_id=parent_id,
             )
 
-            # 2. Prepare HTML payloads based on the result
             new_message_html = render_template(
                 "partials/message.html", message=new_message
             )
@@ -1042,17 +829,14 @@ def chat(ws):
                 f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
             )
 
-            # 3. Broadcast to other users in the channel
             chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
 
-            # 4. Send the message back to the sender (and reset input if it was a reply)
             message_for_sender = message_to_broadcast
             if parent_id:
                 input_html = render_template("partials/chat_input_default.html")
                 message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
             ws.send(message_for_sender)
 
-            # mark the message as read for active viewers
             current_time = datetime.datetime.now()
             if conv_id_str in chat_manager.active_connections:
                 with db.atomic():
@@ -1068,13 +852,13 @@ def chat(ws):
                             .execute()
                         )
 
-            # 5. Handle notifications for other members (this logic remains here for now)
-            # This block is still complex but now operates on the clean result from the service.
             if conversation.type == "channel":
+                channel_id = conversation.conversation_id_str.split("_")[1]
+                channel = Channel.get_by_id(channel_id)
                 members = (
                     User.select()
                     .join(ChannelMember)
-                    .where(ChannelMember.channel_id == channel.id)
+                    .where(ChannelMember.channel == channel)
                 )
             else:
                 user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
@@ -1091,9 +875,101 @@ def chat(ws):
                 status, _ = UserConversationStatus.get_or_create(
                     user=member, conversation=conversation
                 )
-                # (Notification logic remains the same for now, but is now much cleaner)
-                # ... (the existing notification logic block from the original file)
-                # ... (This can be a future refactoring step if desired)
+
+                notification_html = None
+                if conversation.type == "channel":
+                    channel_model = Channel.get_by_id(
+                        conversation.conversation_id_str.split("_")[1]
+                    )
+                    link_text = f"# {channel_model.name}"
+                    hx_get_url = url_for(
+                        "channels.get_channel_chat", channel_id=channel_model.id
+                    )
+                    new_mention_count = (
+                        Mention.select()
+                        .join(Message)
+                        .where(
+                            (Message.created_at > status.last_read_timestamp)
+                            & (Mention.user == member)
+                            & (Message.conversation == conversation)
+                        )
+                        .count()
+                    )
+                    if new_mention_count > 0:
+                        notification_html = render_template(
+                            "partials/unread_badge.html",
+                            conv_id_str=conv_id_str,
+                            count=new_mention_count,
+                            link_text=link_text,
+                            hx_get_url=hx_get_url,
+                        )
+                    elif (
+                        Message.select()
+                        .where(
+                            (Message.conversation == conversation)
+                            & (Message.created_at > status.last_read_timestamp)
+                        )
+                        .exists()
+                    ):
+                        notification_html = render_template(
+                            "partials/bold_link.html",
+                            conv_id_str=conv_id_str,
+                            link_text=link_text,
+                            hx_get_url=hx_get_url,
+                        )
+                else:  # DM
+                    link_text = ws.user.display_name or ws.user.username
+                    hx_get_url = url_for("dms.get_dm_chat", other_user_id=ws.user.id)
+                    new_count = (
+                        Message.select()
+                        .where(
+                            (Message.conversation == conversation)
+                            & (Message.created_at > status.last_read_timestamp)
+                            & (Message.user != member)
+                        )
+                        .count()
+                    )
+                    if new_count > 0:
+                        notification_html = render_template(
+                            "partials/unread_badge.html",
+                            conv_id_str=conv_id_str,
+                            count=new_count,
+                            link_text=link_text,
+                            hx_get_url=hx_get_url,
+                        )
+
+                if notification_html:
+                    member_ws.send(notification_html)
+
+                now = datetime.datetime.now()
+                is_a_mention = (
+                    Mention.select()
+                    .where((Mention.message == new_message) & (Mention.user == member))
+                    .exists()
+                )
+
+                if is_a_mention:
+                    notification_payload = {
+                        "type": "notification",
+                        "title": f"New mention from {new_message.user.display_name or new_message.user.username}",
+                        "body": new_message.content,
+                        "icon": url_for(
+                            "static", filename="favicon.ico", _external=True
+                        ),
+                        "tag": conv_id_str,
+                    }
+                    member_ws.send(json.dumps(notification_payload))
+                    status.last_notified_timestamp = now
+                    status.save()
+                else:
+                    should_notify = status.last_notified_timestamp is None or (
+                        now - status.last_notified_timestamp
+                    ) > datetime.timedelta(seconds=60)
+                    if should_notify:
+                        sound_payload = {"type": "sound"}
+                        member_ws.send(json.dumps(sound_payload))
+                        status.last_notified_timestamp = now
+                        status.save()
 
     except Exception as e:
         print(

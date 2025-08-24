@@ -82,7 +82,7 @@
             <button class="btn btn-sm text-secondary"
                     data-bs-toggle="modal"
                     data-bs-target="#htmx-modal"
-                    hx-get="/chat/dms/start"
+                    hx-get="{{ url_for('dms.get_start_dm_form') }}"
                     hx-target="#htmx-modal-content"
                     title="Start a new message">
                 <i class="bi bi-plus-square"></i>
@@ -106,7 +106,7 @@
                     <a href="#"
                        class="text-decoration-none text-light"
                        id="link-{{ self_conv_id_str }}"
-                       hx-get="/chat/dm/{{ g.user.id }}"
+                       hx-get="{{ url_for('dms.get_dm_chat', other_user_id=g.user.id) }}"
                        hx-target="#chat-messages-container">{{ g.user.display_name or g.user.username }} (you)</a>
                 </div>
                 <span id="unread-badge-{{ self_conv_id_str }}"></span>
@@ -137,7 +137,7 @@
                             <a href="#"
                                id="link-{{ conv_id_str }}"
                                class="text-decoration-none {{ 'fw-bold text-white' if info.has_unread else 'text-secondary' }}"
-                               hx-get="/chat/dm/{{ user.id }}"
+                               hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"
                                hx-target="#chat-messages-container">{{ user.display_name or user.username }}</a>
                         </div>
                         <span id="unread-badge-{{ conv_id_str }}">
