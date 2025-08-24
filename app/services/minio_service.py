@@ -70,3 +70,19 @@ def get_presigned_url(object_name):
     except S3Error as exc:
         print("Error generating presigned URL:", exc)
         return None
+
+
+def delete_file(object_name):
+    """Deletes a file from the configured Minio bucket."""
+    if not minio_client:
+        raise Exception("Minio client not initialized.")
+
+    try:
+        minio_client.remove_object(
+            bucket_name=current_app.config["MINIO_BUCKET_NAME"], object_name=object_name
+        )
+        print(f"Successfully deleted {object_name} from Minio.")
+        return True
+    except S3Error as exc:
+        print(f"Error deleting file {object_name} from Minio:", exc)
+        return False

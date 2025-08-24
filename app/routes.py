@@ -453,6 +453,7 @@ def upload_avatar():
     ):
         return "File type not allowed", 400
 
+    old_avatar_file = g.user.avatar
     original_filename = secure_filename(file.filename)
     file_ext = original_filename.rsplit(".", 1)[1].lower()
     stored_filename = f"{uuid.uuid4()}.{file_ext}"
@@ -464,8 +465,6 @@ def upload_avatar():
     try:
         file.save(temp_path)
         file_size = os.path.getsize(temp_path)
-
-        from .services import minio_service
 
         success = minio_service.upload_file(
             object_name=stored_filename, file_path=temp_path, content_type=file.mimetype
@@ -481,6 +480,18 @@ def upload_avatar():
             )
             g.user.avatar = new_file
             g.user.save()
+
+            # If an old avatar existed, delete it now.
+            if old_avatar_file:
+                try:
+                    # Delete from Minio
+                    minio_service.delete_file(old_avatar_file.stored_filename)
+                    # Delete from our database
+                    old_avatar_file.delete_instance()
+                except Exception as e:
+                    # If cleanup fails, log it but don't fail the whole request.
+                    # The user's avatar has been successfully updated.
+                    print(f"Error during old avatar cleanup: {e}")
 
             # Broadcast a JSON event for EVERYONE ELSE to update their views.
             avatar_update_payload = {
@@ -625,22 +636,21 @@ def update_presence_status():
         user.presence_status = new_status
         user.save()
 
-        # --- Broadcast the changes to all connected clients ---
+        # Broadcast the DM list update to EVERYONE. This is a public change.
         status_class = STATUS_CLASS_MAP.get(new_status, "bg-secondary")
         dm_list_presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
         chat_manager.broadcast_to_all(dm_list_presence_html)
 
-        profile_status_map = {
-            "online": "presence-online",
-            "away": "presence-away",
-            "busy": "presence-busy",
-        }
-        profile_status_class = profile_status_map.get(new_status, "presence-away")
-        sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user.id}" class="presence-indicator {profile_status_class}" hx-swap-oob="true"></span>'
-        chat_manager.broadcast_to_all(sidebar_presence_html)
+        # Prepare the multi-part HTTP response for the user who made the change.
+        #  - The main response updates the profile header in the slide-out.
+        #  - The OOB swap updates their own sidebar button.
+        profile_header_html = render_template(
+            "partials/profile_header.html", user=g.user
+        )
+        sidebar_button_html = render_template("partials/_sidebar_profile_button.html")
+        sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
 
-        # Simply return the clean partial. The hx-target on the button will handle the swap.
-        return render_template("partials/profile_header.html", user=user)
+        return make_response(profile_header_html + sidebar_oob_swap)
 
     return "Invalid status", 400
 
