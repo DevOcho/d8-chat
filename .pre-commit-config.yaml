@@ -4,10 +4,17 @@ repos:
 -  repo: https://github.com/pre-commit/pre-commit-hooks
    rev: v3.2.0
    hooks:
-   -   id: trailing-whitespace
-   -   id: end-of-file-fixer
-   -   id: check-yaml
-   -   id: check-added-large-files
+      - id: check-added-large-files
+      - id: check-ast
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+      - id: check-executables-have-shebangs
+      - id: check-symlinks
+      - id: requirements-txt-fixer
   # djlint
 -  repo: https://github.com/djlint/djLint
    rev: v1.36.4
@@ -15,17 +22,8 @@ repos:
    -  id: djlint-reformat-jinja
       files: "\\.html"
       types_or: ["html"]
-   #-  id: djlint-jinja
-      #files: "\\.html"
-      #types_or: ["html"]
    # black
 -  repo: https://github.com/psf/black
    rev: 22.10.0
    hooks:
    -   id: black
-#- repo: https://github.com/eslint/eslint
-  #rev: v8.57.0 # Use a recent stable version of ESLint
-  #hooks:
-  #-   id: eslint
-      #files: \.(js|jsx|ts|tsx)$ # Target JavaScript, JSX, TypeScript, and TSX files
-      #args: [--fix] # Optional: automatically fix linting issues

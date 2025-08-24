@@ -192,6 +192,20 @@ def get_dm_chat(other_user_id):
             is_online=other_user.id in chat_manager.online_users,
         )
 
+        if other_user.id in chat_manager.all_clients:
+            try:
+                # The "user" in this context is the person starting the DM (g.user)
+                recipient_ws = chat_manager.all_clients[other_user.id]
+                new_contact_html = render_template(
+                    "partials/dm_list_item_oob.html",
+                    user=g.user,
+                    conv_id_str=conv_id_str,
+                    is_online=g.user.id in chat_manager.online_users,
+                )
+                recipient_ws.send(new_contact_html)
+            except Exception as e:
+                print(f"Could not send real-time DM add to user {other_user.id}: {e}")
+
     # Send everything we have
     full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
     response = make_response(full_response)

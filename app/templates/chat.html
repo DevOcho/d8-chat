@@ -6,28 +6,7 @@
         <!-- Workspace Logo -->
         <div class="workspace-logo mb-3">D8</div>
         <!-- user profile and status indicator -->
-        <div class="profile-button-container mt-auto">
-            <a href="#"
-               title="View your profile"
-               data-bs-toggle="offcanvas"
-               data-bs-target="#right-panel-offcanvas"
-               hx-get="{{ url_for('main.profile') }}"
-               hx-target="#right-panel-body">
-                <div class="profile-avatar">
-                    <!-- User's Initial -->
-                    <span>{{ (g.user.display_name or g.user.username)[0]|upper }}</span>
-                    <!-- Presence Indicator Dot -->
-                    {% set status_class = "presence-online" %}
-                    {% if g.user.presence_status == 'away' %}
-                        {% set status_class = "presence-away" %}
-                    {% elif g.user.presence_status == 'busy' %}
-                        {% set status_class = "presence-busy" %}
-                    {% endif %}
-                    <span id="sidebar-presence-indicator-{{ g.user.id }}"
-                          class="presence-indicator {{ status_class }}"></span>
-                </div>
-            </a>
-        </div>
+        <div class="profile-button-container mt-auto">{% include 'partials/_sidebar_profile_button.html' %}</div>
     </div>
     <!-- channels -->
     <div class="sidebar channel-sidebar p-3">

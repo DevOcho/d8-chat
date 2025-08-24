@@ -16,10 +16,13 @@ from peewee import (
     AutoField,
     SQL,
     CompositeKey,
+    DeferredForeignKey,
 )
 from playhouse.db_url import connect
 from urllib.parse import urlparse
 from config import Config
+
+from app.services import minio_service
 
 db = Proxy()
 
@@ -72,6 +75,24 @@ class User(BaseModel):
     presence_status = CharField(default="online")  # 'online', 'away', or 'busy'
     theme = CharField(default="system")  # 'light', 'dark', or 'system'
     wysiwyg_enabled = BooleanField(default=False, null=False)
+    avatar = DeferredForeignKey("UploadedFile", backref="user_avatar", null=True)
+
+    @property
+    def avatar_url(self):
+        """Returns a presigned URL for the user's avatar, or None."""
+        if self.avatar:
+            return minio_service.get_presigned_url(self.avatar.stored_filename)
+        return None
+
+
+class UploadedFile(BaseModel):
+    id = PrimaryKeyField()
+    uploader = ForeignKeyField(User, backref="files")
+    original_filename = CharField()
+    stored_filename = CharField(unique=True)  # The UUID-based name
+    mime_type = CharField()
+    file_size_bytes = BigIntegerField()
+    scan_status = CharField(default="pending")  # pending, clean, infected
 
 
 class WorkspaceMember(BaseModel):

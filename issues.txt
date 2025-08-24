@@ -1,6 +1,6 @@
 Current issues with the slack_clone:
 
-Ambar: When you go to your profile, you appear offline
+When you start a new DM the cursor should focus in the search window for searching for users.  After you select a user the cursor should jump to the chat input so you can start typing the message.
 
 Natalie: pasting doesn't work
 

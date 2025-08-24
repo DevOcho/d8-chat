@@ -952,6 +952,14 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const data = JSON.parse(event.detail.message);
             if (typeof data === 'object' && data.type) {
+                if (data.type === 'avatar_update') {
+                    const { user_id, avatar_url } = data;
+                    const avatarImages = document.querySelectorAll(`.avatar-image[data-user-id="${user_id}"]`);
+                    avatarImages.forEach(img => {
+                        img.src = avatar_url;
+                    });
+                    return; // Stop processing after handling the event
+                }
                 if (data.type === 'notification') NotificationManager.showNotification(data);
                 else if (data.type === 'sound') NotificationManager.playSound();
                 return;

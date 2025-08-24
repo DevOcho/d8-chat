@@ -1,3 +1,14 @@
+import datetime
+import functools
+from functools import reduce
+import json
+import markdown
+import operator
+import os
+import re
+import secrets
+import uuid
+
 from flask import (
     Blueprint,
     render_template,
@@ -7,7 +18,11 @@ from flask import (
     session,
     g,
     make_response,
+    current_app,
 )
+from peewee import fn
+from werkzeug.utils import secure_filename
+
 from .models import (
     User,
     Channel,
@@ -20,20 +35,12 @@ from .models import (
     UserConversationStatus,
     Mention,
     Reaction,
+    UploadedFile,
 )
 from .sso import oauth  # Import the oauth object
-import functools
-import secrets
 from . import sock
 from .chat_manager import chat_manager
-from .services import chat_service
-import json
-from peewee import fn
-import re
-import datetime
-from functools import reduce
-import operator
-import markdown
+from .services import chat_service, minio_service
 
 # Main blueprint for general app routes
 main_bp = Blueprint("main", __name__)
@@ -428,6 +435,85 @@ def get_reply_chat_input(message_id):
 def get_address_display():
     """Returns the read-only address display partial."""
     return render_template("partials/address_display.html", user=g.user)
+
+
+@main_bp.route("/profile/avatar", methods=["POST"])
+@login_required
+def upload_avatar():
+    if "avatar" not in request.files:
+        return "No file part", 400
+    file = request.files["avatar"]
+    if file.filename == "":
+        return "No selected file", 400
+
+    allowed_extensions = {"png", "jpg", "jpeg", "gif"}
+    if (
+        "." not in file.filename
+        or file.filename.rsplit(".", 1)[1].lower() not in allowed_extensions
+    ):
+        return "File type not allowed", 400
+
+    original_filename = secure_filename(file.filename)
+    file_ext = original_filename.rsplit(".", 1)[1].lower()
+    stored_filename = f"{uuid.uuid4()}.{file_ext}"
+
+    temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, stored_filename)
+
+    try:
+        file.save(temp_path)
+        file_size = os.path.getsize(temp_path)
+
+        from .services import minio_service
+
+        success = minio_service.upload_file(
+            object_name=stored_filename, file_path=temp_path, content_type=file.mimetype
+        )
+
+        if success:
+            new_file = UploadedFile.create(
+                uploader=g.user,
+                original_filename=original_filename,
+                stored_filename=stored_filename,
+                mime_type=file.mimetype,
+                file_size_bytes=file_size,
+            )
+            g.user.avatar = new_file
+            g.user.save()
+
+            # Broadcast a JSON event for EVERYONE ELSE to update their views.
+            avatar_update_payload = {
+                "type": "avatar_update",
+                "user_id": g.user.id,
+                "avatar_url": g.user.avatar_url,
+            }
+            chat_manager.broadcast(
+                None,
+                json.dumps(avatar_update_payload),
+                sender_ws=chat_manager.all_clients.get(g.user.id),
+                is_event=True,
+            )
+
+            # Prepare a multi-part HTTP response for the UPLOADER.
+            #  - The main response updates the profile header (the hx-target).
+            #  - The OOB swap updates the uploader's own sidebar button.
+            profile_header_html = render_template(
+                "partials/profile_header.html", user=g.user
+            )
+            sidebar_button_html = render_template(
+                "partials/_sidebar_profile_button.html"
+            )
+            sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
+
+            return make_response(profile_header_html + sidebar_oob_swap)
+
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    # Fallback in case of upload failure
+    return render_template("partials/profile_header.html", user=g.user)
 
 
 @main_bp.route("/profile/address/edit", methods=["GET"])

@@ -18,6 +18,13 @@ class Config:
     OIDC_CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET")
     OIDC_ISSUER_URL = os.environ.get("OIDC_ISSUER_URL")
 
+    # Minio/S3 Settings
+    MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
+    MINIO_ACCESS_KEY = os.environ.get("MINIO_ROOT_USER")
+    MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
+    MINIO_BUCKET_NAME = os.environ.get("MINIO_BUCKET_NAME", "d8chat")
+    MINIO_SECURE = os.environ.get("MINIO_SECURE", "False").lower() == "true"
+
 
 class TestConfig(Config):
     """Configuration for testing."""

@@ -60,18 +60,36 @@ class ChatManager:
                     del self.active_connections[channel_id]
             ws.channel_id = None
 
-    def broadcast(self, channel_id, message_html, sender_ws=None):
-        """Broadcasts a message to all clients in a specific channel, optionally excluding the sender."""
-        channel_id = str(channel_id)
-        if channel_id in self.active_connections:
-            # Create a copy of the set to iterate over, in case of modification
-            for client_ws in list(self.active_connections[channel_id]):
-                if client_ws != sender_ws:
-                    try:
-                        client_ws.send(message_html)
-                    except Exception as e:
-                        print(f"Error sending to client {client_ws}: {e}")
-                        self.unsubscribe(client_ws)
+    def broadcast(self, channel_id, message_html, sender_ws=None, is_event=False):
+        """
+        Broadcasts a message to clients.
+        If channel_id is provided, sends to that channel.
+        If channel_id is None and is_event is True, sends to all clients.
+        """
+        clients_to_send_to = []
+
+        if channel_id:  # Standard channel broadcast
+            channel_id = str(channel_id)
+            if channel_id in self.active_connections:
+                clients_to_send_to = list(self.active_connections[channel_id])
+        elif is_event:  # Global event broadcast
+            clients_to_send_to = self.all_clients.values()
+
+        for client_ws in clients_to_send_to:
+            if client_ws != sender_ws:
+                try:
+                    client_ws.send(message_html)
+                except Exception as e:
+                    print(f"Error sending to client {client_ws}: {e}")
+                    self.unsubscribe(client_ws)  # Unsubscribe from channels
+                    # We also need to remove them from the global list if they are disconnected
+                    user_id_to_remove = None
+                    for uid, ws in self.all_clients.items():
+                        if ws == client_ws:
+                            user_id_to_remove = uid
+                            break
+                    if user_id_to_remove:
+                        self.set_offline(user_id_to_remove)
 
 
 # Create a single global instance of the manager

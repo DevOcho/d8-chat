@@ -10,6 +10,7 @@ from markupsafe import Markup
 
 from .models import initialize_db
 from .sso import init_sso
+from .services import minio_service
 
 sock = Sock()  # Create a Sock instance
 
@@ -28,6 +29,9 @@ def create_app(config_class=Config):
         raise ValueError("A SECRET_KEY must be set in the configuration.")
 
     initialize_db(app)
+
+    # Initialize Minio Client
+    minio_service.init_app(app)
 
     # Initialize SSO
     init_sso(app)
@@ -167,16 +171,19 @@ def create_app(config_class=Config):
         )
         return Markup(highlighted_text)
 
-    # Import and register blueprints
+    # Import blueprints
     from .routes import main_bp, admin_bp
     from .blueprints.search import search_bp
     from .blueprints.channels import channels_bp
     from .blueprints.dms import dms_bp
+    from .blueprints.files import files_bp
 
+    # Register blueprints
     app.register_blueprint(main_bp)
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(search_bp)
     app.register_blueprint(channels_bp)
     app.register_blueprint(dms_bp)
+    app.register_blueprint(files_bp)
 
     return app

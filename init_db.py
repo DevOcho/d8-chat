@@ -10,6 +10,7 @@ from app.models import (
     ChannelMember,
     Message,
     Conversation,
+    UploadedFile,
     UserConversationStatus,
     Mention,
     Reaction,
@@ -29,6 +30,7 @@ ALL_MODELS = [
     UserConversationStatus,
     Mention,
     Reaction,
+    UploadedFile,
 ]
 
 

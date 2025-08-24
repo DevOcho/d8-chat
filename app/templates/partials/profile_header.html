@@ -1,28 +1,31 @@
-<!-- app/templates/partials/profile_header.html -->
 <div id="profile-header-card" class="card mb-4 border-0 shadow-sm">
     <div class="card-body p-3 d-flex align-items-center">
-        <!-- The dropdown trigger is the entire avatar container -->
-        <div class="dropdown">
-            <div class="profile-header-avatar"
-                 id="profile-status-dropdown"
+        <!-- AVATAR, UPLOAD, & STATUS DROPDOWN SECTION -->
+        <div class="flex-shrink-0 me-3 dropdown">
+            <!-- This div is now the trigger for the dropdown menu -->
+            <div id="avatar-dropdown-trigger"
                  data-bs-toggle="dropdown"
                  aria-expanded="false"
                  style="cursor: pointer"
-                 title="Set your status">
-                <!-- User's Initial -->
-                <span>{{ (user.display_name or user.username)[0]|upper }}</span>
-                <!-- Presence Indicator Dot -->
-                {% set status_class = "presence-online" %}
-                {% if user.presence_status == 'away' %}
-                    {% set status_class = "presence-away" %}
-                {% elif user.presence_status == 'busy' %}
-                    {% set status_class = "presence-busy" %}
-                {% endif %}
-                <span id="profile-presence-indicator-{{ user.id }}"
-                      class="presence-indicator {{ status_class }}"></span>
+                 title="Change status or avatar">
+                <div class="profile-header-avatar">
+                    {% with user=user, size=60 %}
+                        {% include 'partials/_avatar_display.html' %}
+                    {% endwith %}
+                    <!-- Presence Indicator -->
+                    {% set status_class = "presence-online" %}
+                    {% if user.presence_status == 'away' %}
+                        {% set status_class = "presence-away" %}
+                    {% endif %}
+                    {% if user.presence_status == 'busy' %}
+                        {% set status_class = "presence-busy" %}
+                    {% endif %}
+                    <span id="profile-presence-indicator-{{ user.id }}"
+                          class="presence-indicator {{ status_class }}"></span>
+                </div>
             </div>
-            <!-- Dropdown Menu -->
-            <ul class="dropdown-menu" aria-labelledby="profile-status-dropdown">
+            <!-- The Dropdown Menu for all avatar actions -->
+            <ul class="dropdown-menu" aria-labelledby="avatar-dropdown-trigger">
                 <li>
                     <h6 class="dropdown-header">Set your status</h6>
                 </li>
@@ -30,8 +33,8 @@
                     <button class="dropdown-item"
                             hx-put="{{ url_for('main.update_presence_status') }}"
                             hx-vals='{"status": "online"}'
-                            hx-swap="outerHTML"
-                            hx-target="#profile-header-card">
+                            hx-target="#profile-header-card"
+                            hx-swap="outerHTML">
                         <span class="presence-dot presence-online"></span> Online
                     </button>
                 </li>
@@ -39,8 +42,8 @@
                     <button class="dropdown-item"
                             hx-put="{{ url_for('main.update_presence_status') }}"
                             hx-vals='{"status": "away"}'
-                            hx-swap="outerHTML"
-                            hx-target="#profile-header-card">
+                            hx-target="#profile-header-card"
+                            hx-swap="outerHTML">
                         <span class="presence-dot presence-away"></span> Away
                     </button>
                 </li>
@@ -48,14 +51,37 @@
                     <button class="dropdown-item"
                             hx-put="{{ url_for('main.update_presence_status') }}"
                             hx-vals='{"status": "busy"}'
-                            hx-swap="outerHTML"
-                            hx-target="#profile-header-card">
+                            hx-target="#profile-header-card"
+                            hx-swap="outerHTML">
                         <span class="presence-dot presence-busy"></span> Busy
                     </button>
                 </li>
+                <li>
+                    <hr class="dropdown-divider">
+                </li>
+                <li>
+                    <!-- The Upload Form is now an item inside the dropdown -->
+                    <form hx-post="{{ url_for('main.upload_avatar') }}"
+                          hx-encoding="multipart/form-data"
+                          hx-target="#profile-header-card"
+                          hx-swap="outerHTML">
+                        <label for="avatar-upload-input"
+                               class="dropdown-item"
+                               style="cursor: pointer">
+                            <i class="bi bi-person-circle me-2"></i> Change Avatar
+                        </label>
+                        <input type="file"
+                               name="avatar"
+                               id="avatar-upload-input"
+                               class="d-none"
+                               accept="image/png, image/jpeg, image/gif"
+                               onchange="this.form.dispatchEvent(new Event('submit', { bubbles: true }))">
+                    </form>
+                </li>
             </ul>
         </div>
-        <div class="flex-grow-1 ms-3">
+        <!-- USER INFO SECTION -->
+        <div class="flex-grow-1">
             <h5 class="mb-0">{{ user.display_name or user.username }}</h5>
             <p class="mb-0 text-muted">{{ user.city or 'City' }}, {{ user.country or 'Country' }}</p>
         </div>

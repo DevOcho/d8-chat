@@ -3,9 +3,9 @@
      id="message-{{ message.id }}"
      data-user-id="{{ message.user.id }}">
     <div class="flex-shrink-0">
-        <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center"
-             style="width: 40px;
-                    height: 40px">{{ (message.user.display_name or message.user.username)[0]|upper }}</div>
+        {% with user=message.user, size=40 %}
+            {% include 'partials/_avatar_display.html' %}
+        {% endwith %}
     </div>
     <div class="flex-grow-1 ms-3">
         <div>
