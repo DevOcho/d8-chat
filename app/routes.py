@@ -44,6 +44,9 @@ admin_bp = Blueprint("admin", __name__)
 # Number of messages per "page" meaning how many we will load at a time if they scroll back up
 PAGE_SIZE = 30
 
+# Number of users returned when you start a new DM and search for users
+DM_SEARCH_PAGE_SIZE = 20
+
 # A central map for presence status to Bootstrap CSS classes.
 STATUS_CLASS_MAP = {
     "online": "bg-success",
@@ -304,26 +307,87 @@ def chat_interface():
 @main_bp.route("/chat/dms/start", methods=["GET"])
 @login_required
 def get_start_dm_form():
-    """Gets the list of users a new DM can be started with."""
+    """
+    Renders the modal for starting a new DM, showing the first page of available users.
+    """
+    page = 1
     # 1. Get the IDs of users the current user ALREADY has a DM with.
     dm_conversations = (
         Conversation.select()
         .join(UserConversationStatus)
         .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
     )
-
-    existing_partner_ids = {g.user.id}  # Always exclude the user themselves
+    existing_partner_ids = {g.user.id}
     for conv in dm_conversations:
         user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
         partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
         if partner_id:
             existing_partner_ids.add(partner_id)
 
-    # 2. Select all users whose IDs are NOT in our exclusion list.
-    users_to_start_dm = User.select().where(User.id.not_in(list(existing_partner_ids)))
+    # 2. Base query for users not already in a DM, ordered alphabetically.
+    query = (
+        User.select()
+        .where(User.id.not_in(list(existing_partner_ids)))
+        .order_by(User.username)
+    )
 
+    # 3. Paginate the results.
+    total_users = query.count()
+    users_for_page = query.paginate(page, DM_SEARCH_PAGE_SIZE)
+    has_more_pages = total_users > (page * DM_SEARCH_PAGE_SIZE)
+
+    # 4. Render the main modal shell, which includes the first page of results.
     return render_template(
-        "partials/start_dm_modal.html", users_to_start_dm=users_to_start_dm
+        "partials/start_dm_modal.html",
+        users_to_start_dm=users_for_page,
+        has_more_pages=has_more_pages,
+        current_page=page,
+    )
+
+
+@main_bp.route("/chat/dms/search", methods=["GET"])
+@login_required
+def search_users_for_dm():
+    """
+    Searches for users to start a new DM with, supporting pagination.
+    Returns an HTML fragment with the filtered list of users.
+    """
+    search_term = request.args.get("q", "").strip()
+    page = request.args.get("page", 1, type=int)
+
+    # Re-run the logic to find users already in DMs to exclude them from search.
+    dm_conversations = (
+        Conversation.select()
+        .join(UserConversationStatus)
+        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
+    )
+    existing_partner_ids = {g.user.id}
+    for conv in dm_conversations:
+        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+        partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
+        if partner_id:
+            existing_partner_ids.add(partner_id)
+
+    # Base query for users not already in a DM.
+    query = User.select().where(User.id.not_in(list(existing_partner_ids)))
+
+    # Apply search filter if a query is provided.
+    if search_term:
+        query = query.where(
+            (User.username.contains(search_term))
+            | (User.display_name.contains(search_term))
+        )
+
+    total_users = query.count()
+    users_for_page = query.order_by(User.username).paginate(page, DM_SEARCH_PAGE_SIZE)
+    has_more_pages = total_users > (page * DM_SEARCH_PAGE_SIZE)
+
+    # Render *only* the results partial.
+    return render_template(
+        "partials/dm_user_results.html",
+        users_to_start_dm=users_for_page,
+        has_more_pages=has_more_pages,
+        current_page=page,
     )
 
 
@@ -541,14 +605,23 @@ def get_dm_chat(other_user_id):
         conversation_id_str=conv_id_str, defaults={"type": "dm"}
     )
 
-    # [THE FIX] Use the 'created' flag from get_or_create to reliably know if this is a new DM for the user
+    # When a DM is viewed, update the timestamp for BOTH users involved.
+    # This ensures the "read" status is synced for the sender and receiver.
+
+    # First, ensure status records exist for both users.
     status, created = UserConversationStatus.get_or_create(
         user=g.user, conversation=conversation
     )
-    last_read_timestamp = status.last_read_timestamp
-    status.last_read_timestamp = datetime.datetime.now()
-    status.save()
     UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
+
+    # Get the current user's last read time *before* we update it, so we know where to put the "NEW" separator.
+    last_read_timestamp = status.last_read_timestamp
+
+    # Now, execute a single query to update both records to the current time.
+    now = datetime.datetime.now()
+    UserConversationStatus.update(last_read_timestamp=now).where(
+        UserConversationStatus.conversation == conversation
+    ).execute()
 
     messages = list(
         Message.select()
@@ -978,6 +1051,22 @@ def chat(ws):
                 input_html = render_template("partials/chat_input_default.html")
                 message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
             ws.send(message_for_sender)
+
+            # mark the message as read for active viewers
+            current_time = datetime.datetime.now()
+            if conv_id_str in chat_manager.active_connections:
+                with db.atomic():
+                    for viewer_ws in chat_manager.active_connections[conv_id_str]:
+                        (
+                            UserConversationStatus.update(
+                                last_read_timestamp=current_time
+                            )
+                            .where(
+                                (UserConversationStatus.user == viewer_ws.user)
+                                & (UserConversationStatus.conversation == conversation)
+                            )
+                            .execute()
+                        )
 
             # 5. Handle notifications for other members (this logic remains here for now)
             # This block is still complex but now operates on the clean result from the service.

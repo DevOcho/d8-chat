@@ -6,8 +6,6 @@ Ambar: When you go to your profile, you appear offline
 
 Kate: If someone else is typing the emoji thing moves
 
-Kate: mentions are not working
-
 Natalie: pasting doesn't work
 
 Sagrario: She doesn't like that Hash tags are being formatted as headers in markdown
