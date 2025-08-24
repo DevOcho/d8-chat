@@ -1,5 +1,13 @@
 import pytest
-from app.models import User, Channel, ChannelMember, Conversation, Message
+import json
+from app.models import (
+    User,
+    Channel,
+    ChannelMember,
+    Conversation,
+    Message,
+    UserConversationStatus,
+)
 from app.routes import PAGE_SIZE
 
 
@@ -24,6 +32,9 @@ def setup_conversation(test_db):
     # Add both users as members of the channel.
     ChannelMember.create(user=user1, channel=channel)
     ChannelMember.create(user=user2, channel=channel)
+
+    # Create the UserConversationStatus record
+    UserConversationStatus.create(user=user1, conversation=conv)
 
     # User 1 posts an initial message.
     message = Message.create(
@@ -241,3 +252,123 @@ def test_get_message_view(logged_in_client, setup_conversation):
     assert b"Original message content" in response.data
     # Ensure it's the display view, not the edit form
     assert b"<form" not in response.data
+
+
+def test_jump_to_message_unauthorized(logged_in_client, setup_conversation):
+    """
+    Covers: `jump_to_message` authorization check.
+    GIVEN a message in a private channel user2 is not part of
+    WHEN user2 tries to jump to that message
+    THEN they should receive a 403 Forbidden error.
+    """
+    message = setup_conversation["message"]
+    # Get the channel ID from the conversation string and query for the channel.
+    channel_id = int(message.conversation.conversation_id_str.split("_")[1])
+    channel = Channel.get_by_id(channel_id)
+
+    # Make the channel private
+    channel.is_private = True
+    channel.save()
+
+    # Remove user2 from the channel
+    user2 = setup_conversation["user2"]
+    ChannelMember.delete().where(
+        (ChannelMember.user == user2) & (ChannelMember.channel == channel)
+    ).execute()
+
+    # Log in as user2 and try to jump
+    with logged_in_client.session_transaction() as sess:
+        sess["user_id"] = user2.id
+
+    response = logged_in_client.get(f"/chat/message/{message.id}/context")
+    assert response.status_code == 403
+
+
+def test_get_reply_to_nonexistent_message(logged_in_client):
+    """
+    Covers: `get_reply_chat_input` error path for a message that does not exist.
+    """
+    response = logged_in_client.get("/chat/message/9999/reply")
+    assert response.status_code == 404
+
+
+def test_get_view_for_nonexistent_message(logged_in_client):
+    """
+    Covers: `get_message_view` error path for a message that does not exist.
+    """
+    response = logged_in_client.get("/chat/message/9999")
+    assert response.status_code == 404
+
+
+def test_react_with_invalid_data(logged_in_client, setup_conversation):
+    """
+    Covers: `toggle_reaction` error path for invalid data.
+    """
+    message = setup_conversation["message"]
+    # Test with no emoji
+    response1 = logged_in_client.post(
+        f"/chat/message/{message.id}/react", data={"emoji": ""}
+    )
+    assert response1.status_code == 400
+
+    # Test with a non-existent message id
+    response2 = logged_in_client.post("/chat/message/9999/react", data={"emoji": "👍"})
+    assert response2.status_code == 400
+
+
+def test_jump_to_message_in_channel(logged_in_client, setup_conversation):
+    """
+    Covers: The main success path of `jump_to_message` for a channel message.
+    """
+    message = setup_conversation["message"]
+    # [THE FIX] Get the correct channel directly from the message's conversation,
+    # not by randomly selecting the first one from the database.
+    channel_id = int(message.conversation.conversation_id_str.split("_")[1])
+    channel = Channel.get_by_id(channel_id)
+
+    response = logged_in_client.get(f"/chat/message/{message.id}/context")
+
+    assert response.status_code == 200
+    # Check for the HTMX trigger header
+    trigger_header = json.loads(response.headers["HX-Trigger"])
+    assert trigger_header["jumpToMessage"] == f"#message-{message.id}"
+
+    # Check that the response contains both the correct channel header and the message content
+    assert f"#{channel.name}".encode() in response.data
+    assert message.content.encode() in response.data
+
+
+def test_jump_to_message_in_dm(logged_in_client):
+    """
+    Covers: The main success path of `jump_to_message` for a DM.
+    """
+    user1 = User.get_by_id(1)
+    user2 = User.create(
+        id=2, username="dm_partner", email="dm@partner.com", display_name="DM Partner"
+    )
+
+    # Setup a DM conversation
+    conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"dm_{user1.id}_{user2.id}", type="dm"
+    )
+    UserConversationStatus.create(user=user1, conversation=conv)
+    message = Message.create(user=user2, conversation=conv, content="A message in a DM")
+
+    response = logged_in_client.get(f"/chat/message/{message.id}/context")
+
+    assert response.status_code == 200
+    # Check for the HTMX trigger header
+    trigger_header = json.loads(response.headers["HX-Trigger"])
+    assert trigger_header["jumpToMessage"] == f"#message-{message.id}"
+
+    # Check that the response contains the DM partner's name and the message content
+    assert b"DM Partner" in response.data
+    assert b"A message in a DM" in response.data
+
+
+def test_jump_to_nonexistent_message(logged_in_client):
+    """
+    Covers: The 404 error path for `jump_to_message`.
+    """
+    response = logged_in_client.get("/chat/message/9999/context")
+    assert response.status_code == 404

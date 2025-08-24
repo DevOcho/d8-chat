@@ -169,3 +169,18 @@ def test_set_wysiwyg_preference(logged_in_client):
     assert response_off.status_code == 204
     user_turned_off = User.get_by_id(1)
     assert user_turned_off.wysiwyg_enabled is False
+
+
+def test_update_theme_invalid(logged_in_client):
+    """
+    Covers: `update_theme` error path for invalid theme value.
+    """
+    user = User.get_by_id(1)
+    original_theme = user.theme
+
+    response = logged_in_client.put("/profile/theme", data={"theme": "invalid-theme"})
+    assert response.status_code == 400
+    assert b"Invalid theme" in response.data
+
+    user = User.get_by_id(user.id)
+    assert user.theme == original_theme

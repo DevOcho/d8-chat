@@ -130,3 +130,25 @@ def test_broadcast_handles_exceptions(chat_manager):
     # The most important check: the bad client (ws2) should have been removed
     assert ws2 not in chat_manager.active_connections[conv_id]
     assert len(chat_manager.active_connections[conv_id]) == 2
+
+
+def test_broadcast_to_all_handles_exceptions(chat_manager, mocker):
+    """
+    Covers: Exception handling in `broadcast_to_all`.
+    """
+    ws1 = mocker.Mock()
+    ws2 = mocker.Mock()
+    ws2.send.side_effect = Exception("Broken pipe")  # This client will fail
+
+    chat_manager.set_online(1, ws1)
+    chat_manager.set_online(2, ws2)
+
+    # This should execute without raising an exception
+    try:
+        chat_manager.broadcast_to_all("test message")
+    except Exception:
+        pytest.fail("broadcast_to_all should not propagate exceptions.")
+
+    # Verify that send was still called on both
+    ws1.send.assert_called_once_with("test message")
+    ws2.send.assert_called_once_with("test message")

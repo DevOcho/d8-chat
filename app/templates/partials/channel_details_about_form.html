@@ -1,4 +1,4 @@
-<form hx-put="{{ url_for('main.update_channel_about', channel_id=channel.id) }}"
+<form hx-put="{{ url_for('channels.update_channel_about', channel_id=channel.id) }}"
       hx-target="#about-section-wrapper"
       hx-swap="innerHTML">
     <div class="d-flex justify-content-between align-items-center mb-2">
@@ -22,7 +22,7 @@
     <div class="text-end">
         <button type="button"
                 class="btn btn-sm btn-secondary"
-                hx-get="{{ url_for('main.get_channel_details_about_display', channel_id=channel.id) }}"
+                hx-get="{{ url_for('channels.get_channel_details_about_display', channel_id=channel.id) }}"
                 hx-target="#about-section-wrapper"
                 hx-swap="innerHTML">Cancel</button>
         <button type="submit" class="btn btn-sm btn-primary">Save</button>

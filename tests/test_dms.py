@@ -54,9 +54,33 @@ def test_open_dm_chat_with_user(logged_in_client):
 
 def test_open_dm_with_nonexistent_user(logged_in_client):
     """
+    Covers: `get_dm_chat` error handling for invalid user ID.
     WHEN a user tries to open a DM with a user ID that doesn't exist
     THEN the server should return a 404 Not Found error.
     """
     response = logged_in_client.get("/chat/dm/9999")
     assert response.status_code == 404
     assert b"User not found" in response.data
+
+
+def test_leave_dm(logged_in_client):
+    """
+    Covers: `leave_dm` functionality.
+    GIVEN a user is in a DM with another user
+    WHEN they hit the leave_dm endpoint
+    THEN they should be redirected and the UserConversationStatus should be deleted.
+    """
+    user2 = User.create(id=2, username="dm_partner", email="partner@example.com")
+    # Simulate being in a DM by creating the conversation and status
+    conv, _ = Conversation.get_or_create(conversation_id_str="dm_1_2", type="dm")
+    UserConversationStatus.create(user_id=1, conversation=conv)
+
+    assert UserConversationStatus.get_or_none(user_id=1, conversation=conv) is not None
+
+    response = logged_in_client.delete(f"/chat/dm/{user2.id}/leave")
+
+    # Successful leave should redirect to the main chat interface
+    assert response.status_code == 200
+    assert response.headers["HX-Redirect"] == "/chat"
+    # Verify the status record was deleted from the database
+    assert UserConversationStatus.get_or_none(user_id=1, conversation=conv) is None

@@ -37,3 +37,20 @@ def test_markdown_filter(app):
 
     # Test case 4: Ensure it returns a Markup object
     assert isinstance(html_output_1, Markup)
+
+    # Test case 5: Fenced code block
+    md_input_5 = "Check out this code:\n```python\nprint('Hello')\n```"
+    html_output_5 = markdown_filter(md_input_5)
+    assert '<div class="codehilite">' in html_output_5
+    assert '<span class="nb">print</span>' in html_output_5
+
+
+def test_highlight_filter(app):
+    """
+    Covers: Custom 'highlight' template filter.
+    """
+    highlight_filter = app.jinja_env.filters["highlight"]
+    text = "This is a test sentence."
+    query = "test"
+    result = highlight_filter(text, query)
+    assert result == "This is a <mark>test</mark> sentence."

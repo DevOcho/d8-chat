@@ -222,3 +222,23 @@ def test_search_messages_pagination(logged_in_client, search_setup):
     assert (
         b'hx-get="/chat/search/messages?q=PAGINATION_TEST&amp;page=3"' not in res2.data
     )
+
+
+def test_search_for_message_in_dm_to_self(logged_in_client, search_setup):
+    """
+    Covers: `_get_message_context` logic for DMs with oneself.
+    """
+    user1 = search_setup["user1"]
+    # Create a conversation and a message from user1 to user1
+    self_conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"dm_{user1.id}_{user1.id}", type="dm"
+    )
+    UserConversationStatus.get_or_create(user=user1, conversation=self_conv)
+    Message.create(
+        user=user1, conversation=self_conv, content="A note to myself about kryptonite."
+    )
+
+    response = logged_in_client.get("/chat/search?q=kryptonite")
+    assert response.status_code == 200
+    # The context should show the user's own name with "(you)"
+    assert b"Test User (you)" in response.data

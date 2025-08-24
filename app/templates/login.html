@@ -4,6 +4,10 @@
         <div class="col-md-6">
             <div class="card">
                 <div class="card-body text-center">
+                    {# [THE FIX] Add this block to display errors #}
+                    {% if request.args.get('error') %}
+                        <div class="alert alert-danger" role="alert">{{ request.args.get("error") }}</div>
+                    {% endif %}
                     <h1 class="card-title">Login</h1>
                     <p>This application uses Single Sign-On.</p>
                     <a href="{{ url_for('main.sso_login') }}" class="btn btn-primary btn-lg">Login with SSO</a>

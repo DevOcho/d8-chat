@@ -68,17 +68,27 @@ def handle_auth_callback():
 
     with db.atomic():
         if user is None:
-            # If not found, let's create the user in the system and setup them up.
+            # No user found by SSO ID. Check if one exists with this email but no SSO ID.
             user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
-            print(f"Creating a new user '{username}' from SSO login.")
-            user = User.create(
-                sso_id=sso_id,
-                email=email,
-                username=username,
-                display_name=display_name,
-                sso_provider="authentik",
-                is_active=True,
-            )
+
+            if user:  # [THE FIX] User exists, link the account
+                print(f"Linking existing user '{user.username}' via SSO.")
+                user.sso_id = sso_id
+                user.sso_provider = "authentik"
+                # Optionally update their name from SSO
+                user.display_name = display_name
+                user.save()
+
+            else:  # User does not exist, create a new one
+                print(f"Creating a new user '{username}' from SSO login.")
+                user = User.create(
+                    sso_id=sso_id,
+                    email=email,
+                    username=username,
+                    display_name=display_name,
+                    sso_provider="authentik",
+                    is_active=True,
+                )
 
             # 1. Add to Workspace and Broadcast
             default_workspace = Workspace.get_or_none(Workspace.name == "DevOcho")
