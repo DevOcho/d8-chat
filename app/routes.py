@@ -381,26 +381,45 @@ def update_message(message_id):
 @login_required
 def delete_message(message_id):
     """
-    Deletes a message.
+    Deletes a message and its associated file attachment, if one exists.
     """
     message = Message.get_or_none(id=message_id)
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
 
-    # Get the conversation ID before deleting the message object
+    # [THE FIX] Check for an attachment *before* deleting the message.
+    attachment_to_delete = message.attachment
     conv_id_str = message.conversation.conversation_id_str
 
-    # Delete the message from the database
-    message.delete_instance()
+    try:
+        # Use a database transaction to ensure both deletes succeed or fail together.
+        with db.atomic():
+            # Delete the message from the database
+            message.delete_instance()
 
-    # Construct the OOB swap HTML to delete the element on all clients' screens
+            # If there was an attachment, delete it from our records and from Minio.
+            if attachment_to_delete:
+                try:
+                    # Delete from Minio storage first
+                    minio_service.delete_file(attachment_to_delete.stored_filename)
+                    # Then delete the record from our database
+                    attachment_to_delete.delete_instance()
+                except Exception as e:
+                    # If the file cleanup fails, log it but don't fail the whole request.
+                    # The user's primary goal was to delete the message.
+                    print(
+                        f"Error during attachment cleanup for message {message_id}: {e}"
+                    )
+
+    except Exception as e:
+        print(f"Error deleting message {message_id}: {e}")
+        return "Error deleting message", 500
+
+    # Construct and broadcast the UI update
     broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
-
-    # Broadcast the delete instruction
     chat_manager.broadcast(conv_id_str, broadcast_html)
 
-    # The hx-delete request expects an empty response since the target is removed
-    return "", 204
+    return "", 200  # Use 200 OK because we are broadcasting, 204 can be ignored by HTMX
 
 
 @main_bp.route("/chat/input/default")
@@ -911,8 +930,10 @@ def chat(ws):
             # --- New Message Handling ---
             chat_text = data.get("chat_message")
             parent_id = data.get("parent_message_id")
+            attachment_file_id = data.get("attachment_file_id")
 
-            if not (chat_text and conv_id_str):
+            # Confirm we have either a message or an attachment for this message
+            if not chat_text and not attachment_file_id:
                 continue
 
             conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
@@ -935,6 +956,7 @@ def chat(ws):
                 conversation=conversation,
                 chat_text=chat_text,
                 parent_id=parent_id,
+                attachment_file_id=attachment_file_id,
             )
 
             new_message_html = render_template(

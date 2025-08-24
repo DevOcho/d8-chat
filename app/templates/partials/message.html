@@ -21,6 +21,19 @@
             </div>
         {% endif %}
         <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
+        {% if message.attachment and message.attachment.mime_type.startswith('image/') %}
+            <div class="mt-2">
+                <a href="{{ message.attachment_url }}"
+                   target="_blank"
+                   title="View full image">
+                    <img src="{{ message.attachment_url }}"
+                         alt="User attachment: {{ message.attachment.original_filename }}"
+                         style="max-width: 300px;
+                                max-height: 200px;
+                                border-radius: 8px">
+                </a>
+            </div>
+        {% endif %}
         <div id="reactions-container-{{ message.id }}"
              class="mt-1 d-flex flex-wrap gap-1">
             {# Check if there are reactions for this message in the map from the server #}

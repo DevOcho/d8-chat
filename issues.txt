@@ -1,5 +1,7 @@
 Current issues with the slack_clone:
 
+avatars aren't showing up in the headers for DMs.
+
 When you start a new DM the cursor should focus in the search window for searching for users.  After you select a user the cursor should jump to the chat input so you can start typing the message.
 
 Natalie: pasting doesn't work

@@ -57,6 +57,87 @@ const NotificationManager = {
     }
 };
 
+const AttachmentManager = {
+    state: {},
+
+    initialize: function(editorState) {
+        this.state = {
+            editorState: editorState,
+            fileInput: document.getElementById('file-attachment-input'),
+            attachmentBtn: document.getElementById('file-attachment-btn'),
+            hiddenAttachmentId: document.getElementById('attachment-file-id'),
+            uploadInProgress: false
+        };
+        this.bindEvents();
+    },
+
+    bindEvents: function() {
+        if (!this.state.fileInput || !this.state.attachmentBtn) return;
+
+        this.state.attachmentBtn.addEventListener('click', () => {
+            this.state.fileInput.click(); // Trigger the hidden file input
+        });
+
+        this.state.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+    },
+
+    handleFileSelect: function(e) {
+        const file = e.target.files[0];
+        if (!file || this.state.uploadInProgress) return;
+
+        this.state.uploadInProgress = true;
+        console.log("Uploading file:", file.name);
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        // Use the browser's native `fetch` API for file upload.
+        fetch('/files/upload', {
+            method: 'POST',
+            body: formData,
+        })
+        .then(response => {
+            if (!response.ok) {
+                // If the server returns an error (like 400 or 500), throw an error
+                // to be caught by the .catch() block.
+                return response.json().then(err => { throw err; });
+            }
+            return response.json(); // If the response is OK, parse the JSON
+        })
+        .then(data => {
+            if (data && data.file_id) {
+                console.log("Upload successful. File ID:", data.file_id);
+                this.state.hiddenAttachmentId.value = data.file_id;
+
+                // [THE FIX] Manually construct the JSON payload for ws-send
+                const messageForm = this.state.editorState.messageForm;
+                const payload = {
+                    // Include the text content from the hidden input
+                    chat_message: this.state.editorState.hiddenInput.value,
+                    // And add our new attachment ID
+                    attachment_file_id: data.file_id
+                };
+
+                // Set the attribute that the htmx-ws extension will read from
+                messageForm.setAttribute('ws-send', JSON.stringify(payload));
+
+                // Now, trigger the form submission. htmx-ws will use our new attribute.
+                messageForm.requestSubmit();
+            }
+        })
+        .catch(error => {
+            const errorMessage = error.error || "An unknown upload error occurred.";
+            console.error("Upload failed:", errorMessage);
+            ToastManager.show('Upload Failed', errorMessage, 'danger');
+        })
+        .finally(() => {
+            this.state.uploadInProgress = false;
+            // Reset the file input so the user can select the same file again
+            this.state.fileInput.value = '';
+        });
+    }
+};
+
 const MentionManager = {
     state: {},
 
@@ -289,6 +370,7 @@ const Editor = {
         this.setupToggleButtonListener();
         this.updateView();
         this.initializeMentions();
+        AttachmentManager.initialize(this.state);
     },
 
     /**
@@ -524,38 +606,42 @@ const Editor = {
     setupFormListeners: function() {
         this.state.messageForm.addEventListener('submit', (e) => {
             if (this.state.isMarkdownMode) {
-                // Pre-process the markdown before assigning it to the hidden input
                 const rawMarkdown = this.state.markdownView.value;
                 this.state.hiddenInput.value = this.preprocessMarkdown(rawMarkdown);
             } else {
                 this.updateStateAndButtons();
             }
-            if (this.state.hiddenInput.value.trim() === '') {
+
+            // A message is valid if it has text OR an attachment
+            const hasText = this.state.hiddenInput.value.trim() !== '';
+            const hasAttachment = document.getElementById('attachment-file-id').value !== '';
+
+            if (!hasText && !hasAttachment) {
                 e.preventDefault();
                 return;
             }
+
             clearTimeout(this.state.typingTimer);
             this.sendTypingStatus(false);
         });
 
-        // This is the new, more robust logic for handling form clearing after send.
         this.state.messageForm.addEventListener('htmx:wsAfterSend', () => {
             const isReply = this.state.messageForm.querySelector('[name="parent_message_id"]');
 
-            // If it was a reply, the cleanest way to reset the UI is to
-            // reload the default input partial from the server.
             if (isReply) {
                 htmx.ajax('GET', '/chat/input/default', {
                     target: '#chat-input-container',
                     swap: 'outerHTML'
                 });
             } else {
-                // Otherwise, just clear the existing editor's fields.
                 const { editor, markdownView, hiddenInput } = this.state;
                 editor.innerHTML = '';
                 markdownView.value = '';
                 hiddenInput.value = '';
-                this.resizeActiveInput(); // Reset height
+                // reset the upload for the next one
+                document.getElementById('attachment-file-id').value = '';
+                this.state.messageForm.setAttribute('ws-send', '');
+                this.resizeActiveInput();
                 this.focusActiveInput();
             }
         });

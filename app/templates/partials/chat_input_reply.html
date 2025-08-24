@@ -1,5 +1,7 @@
 <div id="chat-input-container" class="chat-input-form">
     <form ws-send id="message-form" autocomplete="off">
+        <input type="file" id="file-attachment-input" class="d-none">
+        <input type="hidden" name="attachment_file_id" id="attachment-file-id">
         <input type="hidden" name="parent_message_id" value="{{ message.id }}">
         <div class="wysiwyg-editor-container">
             <!-- Quoted Message UI -->
@@ -72,6 +74,9 @@
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting">
                     <i class="bi bi-type"></i>
+                </button>
+                <button type="button" id="file-attachment-btn" title="Attach a file">
+                    <i class="bi bi-paperclip"></i>
                 </button>
                 <button type="button" id="mention-btn" title="Mention User">
                     <i class="bi bi-at"></i>

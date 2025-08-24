@@ -11,6 +11,8 @@
           hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/default', {target: '#chat-input-container', swap: 'outerHTML'})"
           id="message-form"
           autocomplete="off">
+        <input type="file" id="file-attachment-input" class="d-none">
+        <input type="hidden" name="attachment_file_id" id="attachment-file-id">
         <div class="wysiwyg-editor-container">
             <!-- Editing Block UI -->
             <div class="editing-block p-2 rounded">
@@ -75,6 +77,9 @@
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting">
                     <i class="bi bi-type"></i>
+                </button>
+                <button type="button" id="file-attachment-btn" title="Attach a file">
+                    <i class="bi bi-paperclip"></i>
                 </button>
                 <button type="button" id="mention-btn" title="Mention User">
                     <i class="bi bi-at"></i>

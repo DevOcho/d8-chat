@@ -85,16 +85,6 @@ class User(BaseModel):
         return None
 
 
-class UploadedFile(BaseModel):
-    id = PrimaryKeyField()
-    uploader = ForeignKeyField(User, backref="files")
-    original_filename = CharField()
-    stored_filename = CharField(unique=True)  # The UUID-based name
-    mime_type = CharField()
-    file_size_bytes = BigIntegerField()
-    scan_status = CharField(default="pending")  # pending, clean, infected
-
-
 class WorkspaceMember(BaseModel):
     id = PrimaryKeyField()
     user = ForeignKeyField(User, backref="workspaces")
@@ -135,12 +125,21 @@ class Conversation(BaseModel):
 
 class Message(BaseModel):
     id = PrimaryKeyField()
-    # Every message belongs to a single Conversation
     conversation = ForeignKeyField(Conversation, backref="messages")
     user = ForeignKeyField(User, backref="messages")
     content = TextField()
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField("self", backref="replies", null=True)
+    attachment = DeferredForeignKey(
+        "UploadedFile", backref="message_attachment", null=True
+    )
+
+    @property
+    def attachment_url(self):
+        """Returns a presigned URL for the message's attachment, or None."""
+        if self.attachment:
+            return minio_service.get_presigned_url(self.attachment.stored_filename)
+        return None
 
 
 class Reaction(BaseModel):
@@ -179,3 +178,13 @@ class UserConversationStatus(BaseModel):
     class Meta:
         # Ensures a user has only one status per conversation
         primary_key = CompositeKey("user", "conversation")
+
+
+class UploadedFile(BaseModel):
+    id = PrimaryKeyField()
+    uploader = ForeignKeyField(User, backref="files")
+    original_filename = CharField()
+    stored_filename = CharField(unique=True)  # The UUID-based name
+    mime_type = CharField()
+    file_size_bytes = BigIntegerField()
+    scan_status = CharField(default="pending")  # pending, clean, infected

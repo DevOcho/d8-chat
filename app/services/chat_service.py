@@ -6,7 +6,11 @@ import re
 
 
 def handle_new_message(
-    sender: User, conversation: Conversation, chat_text: str, parent_id: int = None
+    sender: User,
+    conversation: Conversation,
+    chat_text: str,
+    parent_id: int = None,
+    attachment_file_id: int = None,
 ):
     """
     Handles the business logic for creating a new message and its associated mentions.
@@ -26,6 +30,7 @@ def handle_new_message(
             conversation=conversation,
             content=chat_text,
             parent_message=parent_id if parent_id else None,
+            attachment=attachment_file_id if attachment_file_id else None,
         )
 
         # 1. Handle regular @username mentions
