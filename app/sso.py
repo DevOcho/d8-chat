@@ -132,4 +132,4 @@ def handle_auth_callback():
     # Store user ID in the session to log them in
     session["user_id"] = user.id
 
-    return redirect(url_for("main.profile"))
+    return redirect(url_for("main.chat_interface"))

@@ -562,13 +562,42 @@ const Editor = {
     },
     setupToggleButtonListener: function() {
         this.state.formatToggleButton.addEventListener('click', () => {
+            const { editor, markdownView, isMarkdownMode, turndownService } = this.state;
+
+            // Content preservation logic
+            if (isMarkdownMode) {
+                // Switching from Markdown to WYSIWYG
+                const markdownContent = markdownView.value;
+                if (markdownContent.trim() !== '') {
+                    // Use our new backend endpoint to convert MD to HTML
+                    htmx.ajax('POST', '/chat/utility/markdown-to-html', {
+                        values: { text: markdownContent },
+                        // The target is the editor div, but we only swap its content
+                        target: editor,
+                        swap: 'innerHTML'
+                    }).then(() => {
+                        this.updateStateAndButtons();
+                    });
+                } else {
+                    editor.innerHTML = '';
+                }
+            } else {
+                // Switching from WYSIWYG to Markdown
+                const htmlContent = editor.innerHTML;
+                if (editor.innerText.trim() !== '') {
+                    markdownView.value = turndownService.turndown(htmlContent);
+                } else {
+                    markdownView.value = '';
+                }
+            }
+
             this.state.isMarkdownMode = !this.state.isMarkdownMode;
             this.updateView();
 
             const wysiwygIsEnabled = !this.state.isMarkdownMode;
             htmx.ajax('PUT', '/chat/user/preference/wysiwyg', {
                 values: { 'wysiwyg_enabled': wysiwygIsEnabled },
-                swap: 'none' // We don't need to swap any HTML content
+                swap: 'none'
             });
         });
     },
@@ -656,6 +685,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Intercept reply clicks to preserve draft content.
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+        const trigger = evt.detail.elt;
+        const targetId = evt.detail.target.id;
+
+        // Check if a reply button was clicked and it's targeting the main input
+        if (targetId === 'chat-input-container' && trigger.dataset.action === 'reply') {
+            let draftContent = '';
+            if (Editor && Editor.state) {
+                if (Editor.state.isMarkdownMode) {
+                    draftContent = Editor.state.markdownView.value;
+                } else {
+                    // Update state to get the latest markdown from the WYSIWYG editor
+                    Editor.updateStateAndButtons();
+                    draftContent = Editor.state.hiddenInput.value;
+                }
+            }
+
+            if (draftContent.trim() !== '') {
+                // Add the draft content as a query parameter to the GET request
+                evt.detail.parameters['draft'] = draftContent;
+            }
+        }
+    });
 
     document.body.addEventListener('htmx:responseError', function(evt) {
         if (evt.detail.target.tagName === 'MAIN' && evt.detail.target.hasAttribute('ws-connect')) return;

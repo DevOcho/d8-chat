@@ -33,9 +33,9 @@ def test_sso_callback_creates_new_user(client, mocker):
 
     # --- 5. Assert the results ---
 
-    # Assert we were redirected to the profile page, indicating a successful login
+    # Assert we were redirected to the chat page, indicating a successful login
     assert response.status_code == 200
-    assert response.request.path == "/profile"
+    assert response.request.path == "/chat"
 
     # Assert a new user was created in the database with the correct details
     new_user = User.get_or_none(User.sso_id == "fake_sso_id_123")
@@ -149,4 +149,4 @@ def test_sso_new_user_handles_missing_defaults(client, mocker):
     # The function will print warnings, which is what we are covering.
     response = client.get("/auth", follow_redirects=True)
     assert response.status_code == 200
-    assert response.request.path == "/profile"
+    assert response.request.path == "/chat"

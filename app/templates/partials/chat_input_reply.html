@@ -57,15 +57,17 @@
             <div id="wysiwyg-editor"
                  class="wysiwyg-content"
                  contenteditable="true"
-                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"></div>
+                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}">
+                {{ draft_content_html | safe }}
+            </div>
             <!-- Markdown view -->
             <textarea id="markdown-toggle-view"
                       class="form-control"
                       placeholder="Write a reply..."
                       rows="1"
-                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}"></textarea>
+                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}">{{ draft_content }}</textarea>
             <!-- Hidden textarea for form submission -->
-            <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>
+            <textarea id="chat-message-input" name="chat_message" style="display: none;">{{ draft_content }}</textarea>
             <!-- Bottom Toolbar (always visible) -->
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting">

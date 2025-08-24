@@ -82,6 +82,15 @@ def to_html(text):
     return markdown.markdown(text, extensions=["extra", "codehilite", "pymdownx.tilde"])
 
 
+@main_bp.route("/chat/utility/markdown-to-html", methods=["POST"])
+@login_required
+def markdown_to_html():
+    """A utility endpoint to convert a snippet of markdown to HTML."""
+    markdown_text = request.form.get("text", "")
+    html = to_html(markdown_text)
+    return html
+
+
 def get_reactions_for_messages(messages):
     """
     Efficiently fetches and groups reactions for a given list of message objects.
@@ -177,7 +186,10 @@ def logout():
 @main_bp.route("/profile")
 @login_required
 def profile():
-    return render_template("profile.html", user=g.user, theme=g.user.theme)
+    """Renders the profile details partial for the offcanvas panel."""
+    return render_template(
+        "partials/profile_details.html", user=g.user, theme=g.user.theme
+    )
 
 
 # --- CHAT INTERFACE ROUTES ---
@@ -397,8 +409,16 @@ def get_reply_chat_input(message_id):
     message_to_reply_to = Message.get_or_none(id=message_id)
     if not message_to_reply_to:
         return "Message not found", 404
+
+    # Check for draft content from the client and keep it
+    draft_content = request.args.get("draft", "")
+    draft_content_html = to_html(draft_content) if draft_content else ""
+
     return render_template(
-        "partials/chat_input_reply.html", message=message_to_reply_to
+        "partials/chat_input_reply.html",
+        message=message_to_reply_to,
+        draft_content=draft_content,
+        draft_content_html=draft_content_html,
     )
 
 
@@ -427,11 +447,17 @@ def update_address():
     user.timezone = request.form.get("timezone")
     user.save()
 
-    # IMPORTANT: Update the header and then return the display partial
-    header_html = render_template("partials/profile_header_oob.html", user=user)
+    # This is the primary, "in-band" response for the hx-target.
     display_html = render_template("partials/address_display.html", user=user)
 
-    return make_response(header_html + display_html)
+    # Explicitly create the OOB swap for the header in the backend.
+    header_html_content = render_template("partials/profile_header.html", user=user)
+    header_oob_swap = f'<div id="profile-header-card" hx-swap-oob="outerHTML">{header_html_content}</div>'
+
+    # Combine them.
+    full_response = display_html + header_oob_swap
+
+    return make_response(full_response)
 
 
 @main_bp.route("/chat/message/<int:message_id>/react", methods=["POST"])
@@ -469,6 +495,7 @@ def toggle_reaction(message_id):
 
     # Broadcast the updated HTML to everyone else in the conversation
     conv_id_str = message.conversation.conversation_id_str
+
     # We exclude the sender because we're about to send them the response directly.
     chat_manager.broadcast(
         conv_id_str, broadcast_html, sender_ws=chat_manager.all_clients.get(g.user.id)
@@ -513,14 +540,10 @@ def update_presence_status():
         user.save()
 
         # --- Broadcast the changes to all connected clients ---
-
-        # 1. Broadcast the update for the DM list dots (uses bg-* classes)
         status_class = STATUS_CLASS_MAP.get(new_status, "bg-secondary")
         dm_list_presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
         chat_manager.broadcast_to_all(dm_list_presence_html)
 
-        # 2. [THE FIX] Broadcast a SECOND, separate update for the sidebar profile button
-        #    This uses the custom presence-* classes.
         profile_status_map = {
             "online": "presence-online",
             "away": "presence-away",
@@ -530,11 +553,7 @@ def update_presence_status():
         sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user.id}" class="presence-indicator {profile_status_class}" hx-swap-oob="true"></span>'
         chat_manager.broadcast_to_all(sidebar_presence_html)
 
-        # 3. Also update the indicator on the profile page itself (if other tabs are open)
-        profile_page_presence_html = f'<span id="profile-presence-indicator-{user.id}" class="presence-indicator {profile_status_class}" hx-swap-oob="true"></span>'
-        chat_manager.broadcast_to_all(profile_page_presence_html)
-
-        # Return the updated profile header to the user who made the change
+        # Simply return the clean partial. The hx-target on the button will handle the swap.
         return render_template("partials/profile_header.html", user=user)
 
     return "Invalid status", 400

@@ -1,7 +1,5 @@
 <!-- app/templates/partials/profile_header.html -->
-<div id="profile-header-card"
-     class="card mb-4 border-0 shadow-sm"
-     hx-swap-oob="true">
+<div id="profile-header-card" class="card mb-4 border-0 shadow-sm">
     <div class="card-body p-3 d-flex align-items-center">
         <!-- The dropdown trigger is the entire avatar container -->
         <div class="dropdown">
@@ -32,7 +30,7 @@
                     <button class="dropdown-item"
                             hx-put="{{ url_for('main.update_presence_status') }}"
                             hx-vals='{"status": "online"}'
-                            hx-swap-oob="true"
+                            hx-swap="outerHTML"
                             hx-target="#profile-header-card">
                         <span class="presence-dot presence-online"></span> Online
                     </button>
@@ -41,7 +39,7 @@
                     <button class="dropdown-item"
                             hx-put="{{ url_for('main.update_presence_status') }}"
                             hx-vals='{"status": "away"}'
-                            hx-swap-oob="true"
+                            hx-swap="outerHTML"
                             hx-target="#profile-header-card">
                         <span class="presence-dot presence-away"></span> Away
                     </button>
@@ -50,7 +48,7 @@
                     <button class="dropdown-item"
                             hx-put="{{ url_for('main.update_presence_status') }}"
                             hx-vals='{"status": "busy"}'
-                            hx-swap-oob="true"
+                            hx-swap="outerHTML"
                             hx-target="#profile-header-card">
                         <span class="presence-dot presence-busy"></span> Busy
                     </button>

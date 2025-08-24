@@ -184,3 +184,16 @@ def test_update_theme_invalid(logged_in_client):
 
     user = User.get_by_id(user.id)
     assert user.theme == original_theme
+
+
+def test_profile_access(logged_in_client):
+    """
+    WHEN the '/profile' partial is requested by a logged-in user
+    THEN check for a 200 OK response and that the partial contains the user's data.
+    """
+    response = logged_in_client.get("/profile")
+    assert response.status_code == 200
+    assert (
+        b"Personal Information" in response.data
+    )  # Check for a heading in the partial
+    assert b"Test User" in response.data

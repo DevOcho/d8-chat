@@ -276,7 +276,7 @@ emoji-picker {
     --reaction-bg: #40444b;
     --reaction-border: #2f3136;
     --reaction-text: #dcddde;
-    --user-reaction-bg: #5c3f4a;
+    --user-reaction-bg: #40444b;
     --user-reaction-border: #ec729c;
     --user-reaction-text: #f0d8e1;
 }
@@ -369,4 +369,68 @@ emoji-picker {
 
 .popover.emoji-popover .popover-body {
     padding: 0; /* Remove default padding so the picker fits snugly */
+}
+
+/* --- Custom Accordion Styles --- */
+.accordion-button:focus {
+    /* Replace the blue focus ring with our pink theme color */
+    border-color: #ec729c;
+    box-shadow: 0 0 0 0.25rem rgba(236, 114, 156, 0.25);
+}
+
+.accordion-button:not(.collapsed) {
+    /* Use the subtle light pink from our old reaction style */
+    background-color: #fdf5f8;
+    /* Set a readable dark text color for the light background */
+    color: #495057;
+    /* Use a full border instead of just a bottom box-shadow */
+    border: 1px solid #ec729c;
+    /* Remove the default box-shadow that Bootstrap uses for its borders */
+    box-shadow: none;
+}
+
+/* This is the default (collapsed, downward) arrow. Make it pink. */
+.accordion-button::after {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23ec729c'%3e%3cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3e%3c/svg%3e");
+}
+
+/* This specifically targets the expanded (upward) arrow to override Bootstrap's default blue. */
+.accordion-button:not(.collapsed)::after {
+     background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23ec729c'%3e%3cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3e%3c/svg%3e");
+}
+
+/* --- Dark Mode Overrides for Accordion --- */
+[data-bs-theme="dark"] .accordion-button:not(.collapsed) {
+    /* A subtle, darker pink/purple background for dark mode */
+    background-color: #5c3f4a;
+    /* A light, readable text color for dark mode */
+    color: #f0d8e1;
+    border-color: #ec729c; /* Ensure border color is consistent in dark mode */
+}
+
+
+/* --- Custom Profile Edit Button --- */
+#address-card .btn-warning {
+    /* Set the main colors using Bootstrap's CSS variables */
+    --bs-btn-color: #fff;                 /* White text */
+    --bs-btn-bg: transparent;              /* No background fill */
+    --bs-btn-border-color: #ec729c;       /* Pink border */
+
+    /* Set the colors for the hover/active state */
+    --bs-btn-hover-color: #fff;
+    --bs-btn-hover-bg: #5c3f4a;
+    --bs-btn-hover-border-color: #ec729c;
+    --bs-btn-active-color: #fff;
+    --bs-btn-active-bg: #d8487b;          /* A slightly darker pink for active state */
+    --bs-btn-active-border-color: #d8487b;
+}
+
+/* Specifically target the icon within the button to make it pink */
+#address-card .btn-warning i {
+    color: #ec729c;
+}
+
+/* On hover, make the icon white to match the text */
+#address-card .btn-warning:hover i {
+    color: #fff;
 }

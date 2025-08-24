@@ -7,7 +7,12 @@
         <div class="workspace-logo mb-3">D8</div>
         <!-- user profile and status indicator -->
         <div class="profile-button-container mt-auto">
-            <a href="{{ url_for('main.profile') }}" title="View your profile">
+            <a href="#"
+               title="View your profile"
+               data-bs-toggle="offcanvas"
+               data-bs-target="#right-panel-offcanvas"
+               hx-get="{{ url_for('main.profile') }}"
+               hx-target="#right-panel-body">
                 <div class="profile-avatar">
                     <!-- User's Initial -->
                     <span>{{ (g.user.display_name or g.user.username)[0]|upper }}</span>

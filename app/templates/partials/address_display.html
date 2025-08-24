@@ -1,16 +1,21 @@
-<div class="card-body p-4">
-    <div class="row">
-        <div class="col-md-4">
-            <label class="form-label text-muted">Country</label>
-            <p>{{ user.country or 'Not set' }}</p>
-        </div>
-        <div class="col-md-4">
-            <label class="form-label text-muted">City</label>
-            <p>{{ user.city or 'Not set' }}</p>
-        </div>
-        <div class="col-md-4">
-            <label class="form-label text-muted">Timezone</label>
-            <p>{{ user.timezone or 'Not set' }}</p>
-        </div>
-    </div>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h6 class="mb-0 text-muted">Current Address</h6>
+    <button class="btn btn-warning btn-sm"
+            hx-get="{{ url_for('main.get_address_form') }}"
+            hx-target="#address-content-wrapper"
+            hx-swap="innerHTML">
+        <i class="bi bi-pencil-fill me-1"></i> Edit
+    </button>
+</div>
+<div class="mb-3">
+    <label class="form-label text-muted">Country</label>
+    <p>{{ user.country or 'Not set' }}</p>
+</div>
+<div class="mb-3">
+    <label class="form-label text-muted">City</label>
+    <p>{{ user.city or 'Not set' }}</p>
+</div>
+<div>
+    <label class="form-label text-muted">Timezone</label>
+    <p>{{ user.timezone or 'Not set' }}</p>
 </div>
