@@ -2,10 +2,9 @@
     <!-- Header with Avatar and Name -->
     <div class="d-flex align-items-center p-3 border-bottom">
         <div class="flex-shrink-0 me-3">
-            <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center"
-                 style="width: 60px;
-                        height: 60px;
-                        font-size: 1.5rem">{{ (other_user.display_name or other_user.username)[0]|upper }}</div>
+            {% with user=other_user, size=60 %}
+                {% include 'partials/_avatar_display.html' %}
+            {% endwith %}
         </div>
         <div class="flex-grow-1">
             <h5 class="mb-0">{{ other_user.display_name or other_user.username }}</h5>

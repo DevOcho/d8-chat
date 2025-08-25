@@ -387,7 +387,7 @@ def delete_message(message_id):
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
 
-    # [THE FIX] Check for an attachment *before* deleting the message.
+    # Check for an attachment *before* deleting the message.
     attachment_to_delete = message.attachment
     conv_id_str = message.conversation.conversation_id_str
 
@@ -419,7 +419,7 @@ def delete_message(message_id):
     broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
     chat_manager.broadcast(conv_id_str, broadcast_html)
 
-    return "", 200  # Use 200 OK because we are broadcasting, 204 can be ignored by HTMX
+    return "", 204  # Use 200 OK because we are broadcasting, 204 can be ignored by HTMX
 
 
 @main_bp.route("/chat/input/default")
@@ -520,7 +520,7 @@ def upload_avatar():
             }
             chat_manager.broadcast(
                 None,
-                json.dumps(avatar_update_payload),
+                avatar_update_payload,
                 sender_ws=chat_manager.all_clients.get(g.user.id),
                 is_event=True,
             )
@@ -959,8 +959,13 @@ def chat(ws):
                 attachment_file_id=attachment_file_id,
             )
 
+            # we need reactions for this message even if none exist
+            reactions_map_for_new_message = get_reactions_for_messages([new_message])
+
             new_message_html = render_template(
-                "partials/message.html", message=new_message
+                "partials/message.html",
+                message=new_message,
+                reactions_map=reactions_map_for_new_message,
             )
             message_to_broadcast = (
                 f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
@@ -974,6 +979,7 @@ def chat(ws):
                 message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
             ws.send(message_for_sender)
 
+            """
             current_time = datetime.datetime.now()
             if conv_id_str in chat_manager.active_connections:
                 with db.atomic():
@@ -986,8 +992,29 @@ def chat(ws):
                                 (UserConversationStatus.user == viewer_ws.user)
                                 & (UserConversationStatus.conversation == conversation)
                             )
+
                             .execute()
                         )
+                        # Now, determine if this new message is a mention FOR THIS SPECIFIC VIEWER
+                        is_mention_for_viewer = Mention.select().where(
+                            (Mention.message == new_message) &
+                            (Mention.user == viewer_ws.user)
+                        ).exists()
+
+                        # Prepare the HTML payload for this specific viewer
+                        final_html_for_viewer = render_template(
+                            "partials/_message_realtime_wrapper.html",
+                            message_html=new_message_html,
+                            is_mention=is_mention_for_viewer
+                        )
+
+                        # If the viewer is the original sender and it was a reply, add the input reset
+                        if viewer_ws == ws and parent_id:
+                            input_html = render_template("partials/chat_input_default.html")
+                            final_html_for_viewer += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+
+                        viewer_ws.send(final_html_for_viewer)
+            """
 
             if conversation.type == "channel":
                 channel_id = conversation.conversation_id_str.split("_")[1]
@@ -1095,7 +1122,7 @@ def chat(ws):
                         ),
                         "tag": conv_id_str,
                     }
-                    member_ws.send(json.dumps(notification_payload))
+                    member_ws.send(member.id, notification_payload)
                     status.last_notified_timestamp = now
                     status.save()
                 else:
@@ -1104,7 +1131,7 @@ def chat(ws):
                     ) > datetime.timedelta(seconds=60)
                     if should_notify:
                         sound_payload = {"type": "sound"}
-                        member_ws.send(json.dumps(sound_payload))
+                        member_ws.send(member.id, sound_payload)
                         status.last_notified_timestamp = now
                         status.save()
 

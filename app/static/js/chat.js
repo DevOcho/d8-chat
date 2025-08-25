@@ -1044,7 +1044,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     avatarImages.forEach(img => {
                         img.src = avatar_url;
                     });
-                    return; // Stop processing after handling the event
+                    return;
                 }
                 if (data.type === 'notification') NotificationManager.showNotification(data);
                 else if (data.type === 'sound') NotificationManager.playSound();
@@ -1052,13 +1052,27 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) { /* Fall through to process as HTML */ }
 
-        updateReactionHighlights(document.body);
+        // --- [THE FIX] Start of new logic ---
 
-        const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
+        const mainContent = document.querySelector('main.main-content');
+        const currentUserId = mainContent.dataset.currentUserId;
+        const currentUsername = mainContent.dataset.currentUsername;
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
 
         if (lastMessage) {
             const messageAuthorId = lastMessage.dataset.userId;
+            const messageContentEl = lastMessage.querySelector('.message-content');
+            const messageContent = messageContentEl ? messageContentEl.innerText : '';
+
+            // 1. Handle mention highlighting
+            // Check if the message is NOT from the current user and contains a mention of them.
+            // The \b ensures we match whole words only (e.g., @kenny not @kenny_extra).
+            const mentionRegex = new RegExp(`@(${currentUsername}|here|channel)\\b`, 'i');
+            if (messageAuthorId !== currentUserId && mentionRegex.test(messageContent)) {
+                lastMessage.classList.add('mentioned-message');
+            }
+
+            // 2. Handle scrolling
             if (messageAuthorId === currentUserId) {
                 setTimeout(scrollLastMessageIntoView, 0);
             } else {
@@ -1068,8 +1082,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
                 }
             }
+
+            // 3. Initialize dynamic components on the new message
             initializeReactionPopovers(lastMessage);
             processCodeBlocks(lastMessage);
+
+            // 4. This will handle the fade-out for any message that has the highlight class.
             handleMentionHighlights(lastMessage, null);
         }
     });

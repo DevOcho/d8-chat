@@ -313,6 +313,13 @@ def add_channel_member(channel_id):
     if channel.invites_restricted_to_admins and current_user_membership.role != "admin":
         return "Only admins can invite new members to this channel.", 403
     ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
+    conversation, _ = Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel_id}", defaults={"type": "channel"}
+    )
+
+    UserConversationStatus.get_or_create(
+        user_id=user_id_to_add, conversation=conversation
+    )
     if user_id_to_add in chat_manager.all_clients:
         try:
             recipient_ws = chat_manager.all_clients[user_id_to_add]
