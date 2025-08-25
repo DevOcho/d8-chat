@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
-  db: # <-- NEW SERVICE
-    image: postgres:15 # Use a specific major version for stability
+  db:
+    image: postgres:15
     restart: always
     environment:
       - POSTGRES_USER=${POSTGRES_USER}

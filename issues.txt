@@ -1,6 +1,8 @@
 Current issues with the slack_clone:
 
-avatars aren't showing up in the headers for DMs.
+Avatars aren't showing up in the messages all the time.  If you reload the page they work but on the initial send there are moments where they are just the circle with the initial
+
+Emoji's don't work in replies.
 
 When you start a new DM the cursor should focus in the search window for searching for users.  After you select a user the cursor should jump to the chat input so you can start typing the message.
 
