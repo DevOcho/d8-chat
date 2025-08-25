@@ -29,6 +29,8 @@ i18n
 
 If the server disconnects, it will reconnect for users at different times.  Messages sent while the other user is reconnecting are lost until a page refresh when they will show up for a user.  On the reconnect we probably need to reload the messages or do a full page refresh.
 
+We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
+
 ---
 
 Set a work hours time and change the status icon to indicate if it's within our outside of their work hours.  The work hours can be set in the profile (for example, 8am to 5pm).
