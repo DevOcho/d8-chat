@@ -5,6 +5,7 @@
            class="list-group-item list-group-item-action"
            hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"
            hx-target="#chat-messages-container"
+           hx-on:click="window.focusChatInputAfterModalClose = true"
            data-bs-dismiss="modal">
             {{ user.display_name ~ ' (' ~ user.username ~ ')' if user.display_name else user.username }}
         </a>

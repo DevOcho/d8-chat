@@ -155,6 +155,12 @@ def create_app(config_class=Config):
 
         return Markup(safe_html)
 
+    # --- Register custom template filter for just emojis ---
+    @app.template_filter("emojize")
+    def emojize_filter(content):
+        """Converts emoji shortcodes in a string to their unicode characters."""
+        return emoji.emojize(content, language="alias")
+
     # --- Register custom template filter for highlighting search terms ---
     @app.template_filter("highlight")
     def highlight_filter(text, query):

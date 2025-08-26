@@ -75,49 +75,60 @@
         <ul id="dm-list" class="list-unstyled">
             <!-- Current User (Self DM) -->
             {% set self_conv_id_str = "dm_" ~ g.user.id ~ "_" ~ g.user.id %}
-            <li class="d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    {% set self_status_class = "bg-success" %} {# Default to online #}
-                    {% if g.user.presence_status == 'away' %}
-                        {% set self_status_class = "bg-secondary" %}
-                    {% elif g.user.presence_status == 'busy' %}
-                        {% set self_status_class = "bg-warning" %}
-                    {% endif %}
-                    <span id="status-dot-{{ g.user.id }}"
-                          class="me-2 rounded-circle {{ self_status_class }}"
-                          style="width: 10px;
-                                 height: 10px"></span>
-                    <a href="#"
-                       class="text-decoration-none text-light"
-                       id="link-{{ self_conv_id_str }}"
-                       hx-get="{{ url_for('dms.get_dm_chat', other_user_id=g.user.id) }}"
-                       hx-target="#chat-messages-container">{{ g.user.display_name or g.user.username }} (you)</a>
+            <li class="mt-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                        <!-- [THE FIX] New avatar container for "you" -->
+                        <div class="sidebar-avatar me-2">
+                            {% with user=g.user, size=24 %}
+                                {% include 'partials/_avatar_display.html' %}
+                            {% endwith %}
+                            <!-- Presence Indicator Dot -->
+                            {% set presence_class = "presence-away" %} {# Default offline #}
+                            {% if g.user.id in online_users %}
+                                {% if g.user.presence_status == 'busy' %}
+                                    {% set presence_class = "presence-busy" %}
+                                {% else %}
+                                    {% set presence_class = "presence-online" %}
+                                {% endif %}
+                            {% endif %}
+                            <span id="status-dot-{{ g.user.id }}"
+                                  class="presence-indicator {{ presence_class }}"></span>
+                        </div>
+                        <a href="#"
+                           class="text-decoration-none text-light"
+                           id="link-{{ self_conv_id_str }}"
+                           hx-get="{{ url_for('dms.get_dm_chat', other_user_id=g.user.id) }}"
+                           hx-target="#chat-messages-container">{{ g.user.display_name or g.user.username }} (you)</a>
+                    </div>
+                    <span id="unread-badge-{{ self_conv_id_str }}"></span>
                 </div>
-                <span id="unread-badge-{{ self_conv_id_str }}"></span>
             </li>
             <!-- Other users -->
             {% for user in direct_message_users %}
                 {% set user_ids = [g.user.id, user.id] | sort %}
                 {% set conv_id_str = "dm_" ~ user_ids|join('_') %}
                 {% set info = unread_info.get(conv_id_str, {'mentions': 0, 'has_unread': False}) %}
-                <li>
+                <li class="mt-2">
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center">
-                            {% set status_class = "bg-secondary" %} {# Default to offline (gray) #}
-                            {% if online_users.get(user.id) %}
-                                {% if user.presence_status == 'busy' %}
-                                    {% set status_class = "bg-warning" %} {# Yellow #}
-                                {% elif user.presence_status == 'away' %}
-                                    {% set status_class = "bg-secondary" %} {# Gray #}
-                                {% else %}
-                                    {% set status_class = "bg-success" %} {# Default online is green #}
+                            <!-- [THE FIX] New avatar container -->
+                            <div class="sidebar-avatar me-2">
+                                {% with user=user, size=24 %}
+                                    {% include 'partials/_avatar_display.html' %}
+                                {% endwith %}
+                                <!-- Presence Indicator Dot -->
+                                {% set presence_class = "presence-away" %} {# Default to offline #}
+                                {% if online_users.get(user.id) %}
+                                    {% if user.presence_status == 'busy' %}
+                                        {% set presence_class = "presence-busy" %}
+                                    {% else %}
+                                        {% set presence_class = "presence-online" %}
+                                    {% endif %}
                                 {% endif %}
-                            {% endif %}
-                            <span id="status-dot-{{ user.id }}"
-                                  class="me-2 rounded-circle {{ status_class }}"
-                                  style="width: 10px;
-                                         height: 10px;
-                                         transition: background-color 0.3s ease"></span>
+                                <span id="status-dot-{{ user.id }}"
+                                      class="presence-indicator {{ presence_class }}"></span>
+                            </div>
                             <a href="#"
                                id="link-{{ conv_id_str }}"
                                class="text-decoration-none {{ 'fw-bold text-white' if info.has_unread else 'text-secondary' }}"

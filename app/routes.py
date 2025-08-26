@@ -655,14 +655,23 @@ def update_presence_status():
         user.presence_status = new_status
         user.save()
 
-        # Broadcast the DM list update to EVERYONE. This is a public change.
-        status_class = STATUS_CLASS_MAP.get(new_status, "bg-secondary")
-        dm_list_presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
+        # Use consistent presence classes for all broadcasts
+        presence_class_map = {
+            "online": "presence-online",
+            "away": "presence-away",
+            "busy": "presence-busy",
+        }
+        presence_class = presence_class_map.get(new_status, "presence-away")
+
+        # Broadcast the DM list update
+        dm_list_presence_html = f'<span id="status-dot-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
         chat_manager.broadcast_to_all(dm_list_presence_html)
 
+        # Broadcast the sidebar button update
+        sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
+        chat_manager.broadcast_to_all(sidebar_presence_html)
+
         # Prepare the multi-part HTTP response for the user who made the change.
-        #  - The main response updates the profile header in the slide-out.
-        #  - The OOB swap updates their own sidebar button.
         profile_header_html = render_template(
             "partials/profile_header.html", user=g.user
         )
@@ -906,9 +915,20 @@ def chat(ws):
 
     chat_manager.set_online(user.id, ws)
 
-    status_class = STATUS_CLASS_MAP.get(user.presence_status, "bg-secondary")
-    presence_html = f'<span id="status-dot-{user.id}" class="me-2 rounded-circle {status_class}" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
-    chat_manager.broadcast_to_all(presence_html)
+    presence_class_map = {
+        "online": "presence-online",
+        "away": "presence-away",
+        "busy": "presence-busy",
+    }
+    presence_class = presence_class_map.get(user.presence_status, "presence-away")
+
+    # Update for the DM list
+    dm_list_presence_html = f'<span id="status-dot-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
+    chat_manager.broadcast_to_all(dm_list_presence_html)
+
+    # Update for the main sidebar profile button
+    sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
+    chat_manager.broadcast_to_all(sidebar_presence_html)
 
     try:
         while True:
@@ -1122,7 +1142,7 @@ def chat(ws):
                         ),
                         "tag": conv_id_str,
                     }
-                    member_ws.send(member.id, notification_payload)
+                    chat_manager.send_to_user(member.id, notification_payload)
                     status.last_notified_timestamp = now
                     status.save()
                 else:
@@ -1131,7 +1151,7 @@ def chat(ws):
                     ) > datetime.timedelta(seconds=60)
                     if should_notify:
                         sound_payload = {"type": "sound"}
-                        member_ws.send(member.id, sound_payload)
+                        chat_manager.send_to_user(member.id, sound_payload)
                         status.last_notified_timestamp = now
                         status.save()
 

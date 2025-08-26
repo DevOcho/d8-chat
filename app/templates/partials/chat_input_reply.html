@@ -9,7 +9,7 @@
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
                         <strong class="d-block">Replying to {{ message.user.display_name or message.user.username }}</strong>
-                        <p class="mb-0 text-muted">{{ message.content | truncate(150, True) }}</p>
+                        <p class="mb-0 text-muted">{{ message.content | emojize | truncate(150, True) }}</p>
                     </div>
                     <!-- This button cancels the reply and loads the default input -->
                     <button type="button"

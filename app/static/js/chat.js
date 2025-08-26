@@ -1111,7 +1111,25 @@ document.addEventListener('DOMContentLoaded', () => {
     if (htmxModalEl) {
         const htmxModal = new bootstrap.Modal(htmxModalEl);
         document.body.addEventListener('close-modal', () => htmxModal.hide());
+
+        htmxModalEl.addEventListener('shown.bs.modal', () => {
+            const autofocusEl = htmxModalEl.querySelector('[autofocus]');
+            if (autofocusEl) {
+                autofocusEl.focus();
+            }
+        });
+
         htmxModalEl.addEventListener('hidden.bs.modal', () => {
+            // Check our flag after the modal is fully hidden
+            if (window.focusChatInputAfterModalClose) {
+                if (Editor && typeof Editor.focusActiveInput === 'function') {
+                    Editor.focusActiveInput();
+                }
+                // Reset the flag so it doesn't fire every time
+                window.focusChatInputAfterModalClose = false;
+            }
+
+            // Perform the cleanup to reset the modal
             const modalContent = document.getElementById('htmx-modal-content');
             if (modalContent) modalContent.innerHTML = `<div class="modal-body text-center"><div class="spinner-border" role="status"></div></div>`;
         });

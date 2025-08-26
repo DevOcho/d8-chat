@@ -14,6 +14,7 @@
                name="q"
                placeholder="Search for people to message"
                autocomplete="off"
+               autofocus
                hx-get="{{ url_for('dms.search_users_for_dm') }}"
                hx-trigger="keyup changed delay:300ms, search"
                hx-target="#dm-user-results"

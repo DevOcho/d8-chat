@@ -17,7 +17,7 @@
             <div class="quoted-reply p-2 mb-2">
                 <strong>{{ message.parent_message.user.display_name or message.parent_message.user.username }}</strong>
                 {# Truncate the original message to avoid long quotes #}
-                <p class="mb-0 text-muted">{{ message.parent_message.content | truncate(100) }}</p>
+                <p class="mb-0 text-muted">{{ message.parent_message.content | emojize | truncate(100) }}</p>
             </div>
         {% endif %}
         <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
