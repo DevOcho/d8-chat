@@ -1,7 +1,15 @@
-{# Add the 'mentioned-message' class if this message ID is in our set #}
+{% set all_attachments = attachments_map.get(message.id, []) %}
+{# Create a list containing only the image attachments #}
+{% set image_attachments = [] %}
+{% for att in all_attachments %}
+    {% if att.mime_type.startswith('image/') %}
+        {% set _ = image_attachments.append(att) %}
+    {% endif %}
+{% endfor %}
 <div class="d-flex mb-1 message-container {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
      id="message-{{ message.id }}"
-     data-user-id="{{ message.user.id }}">
+     data-user-id="{{ message.user.id }}"
+     data-attachments='[ {%- for att in image_attachments -%} { "url": "{{ att.url }}", "filename": "{{ att.original_filename | e }}" } {{- ", " if not loop.last else "" -}} {%- endfor -%} ]'>
     <div class="flex-shrink-0">
         {% with user=message.user, size=40 %}
             {% include 'partials/_avatar_display.html' %}
@@ -16,29 +24,31 @@
         {% if message.parent_message %}
             <div class="quoted-reply p-2 mb-2">
                 <strong>{{ message.parent_message.user.display_name or message.parent_message.user.username }}</strong>
-                {# Truncate the original message to avoid long quotes #}
                 <p class="mb-0 text-muted">{{ message.parent_message.content | emojize | truncate(100) }}</p>
             </div>
         {% endif %}
         <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
-        {% if message.attachment and message.attachment.mime_type.startswith('image/') %}
-            <div class="mt-2">
-                <a href="{{ message.attachment_url }}"
-                   target="_blank"
-                   title="View full image">
-                    <img src="{{ message.attachment_url }}"
-                         alt="User attachment: {{ message.attachment.original_filename }}"
-                         style="max-width: 300px;
-                                max-height: 200px;
-                                border-radius: 8px">
-                </a>
+        {% set image_count = image_attachments | length %}
+        {% if image_count > 0 %}
+            {% set grid_count = '4+' if image_count >= 4 else image_count|string %}
+            <div class="attachment-grid mt-2" data-count="{{ grid_count }}">
+                {% for attachment in image_attachments[:4] %}
+                    <div class="attachment-grid-item">
+                        <a href="#"
+                           data-bs-toggle="modal"
+                           data-bs-target="#image-carousel-modal"
+                           data-message-id="{{ message.id }}"
+                           data-start-index="{{ loop.index0 }}">
+                            <img src="{{ attachment.url }}" alt="{{ attachment.original_filename }}">
+                            {% if loop.index == 4 and image_count > 4 %}<div class="attachment-overlay">+{{ image_count - 4 }}</div>{% endif %}
+                        </a>
+                    </div>
+                {% endfor %}
             </div>
         {% endif %}
         <div id="reactions-container-{{ message.id }}"
              class="mt-1 d-flex flex-wrap gap-1">
-            {# Check if there are reactions for this message in the map from the server #}
             {% if reactions_map and message.id in reactions_map %}
-                {# If so, render them using the same partial the websocket uses #}
                 {% set grouped_reactions = reactions_map[message.id] %}
                 {% include 'partials/reactions.html' %}
             {% endif %}

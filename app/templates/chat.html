@@ -222,6 +222,25 @@
                     flex-direction: column">
             <!-- HTMX will populate this container with the search_results.html partial -->
         </div>
+        <!-- Modal for the View Image Carousel -->
+        <div class="modal fade"
+             id="image-carousel-modal"
+             tabindex="-1"
+             aria-hidden="true">
+            <div class="modal-dialog modal-fullscreen">
+                <div class="modal-content bg-transparent border-0">
+                    <div class="modal-header border-0">
+                        <button type="button"
+                                class="btn-close btn-close-white"
+                                data-bs-dismiss="modal"
+                                aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body d-flex align-items-center justify-content-center">
+                        <!-- Carousel will be injected here by JavaScript -->
+                    </div>
+                </div>
+            </div>
+        </div>
     </main>
     <!-- Slide-Out Panel -->
     <div class="offcanvas offcanvas-end"

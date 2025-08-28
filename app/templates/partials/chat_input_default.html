@@ -1,9 +1,15 @@
 <div id="chat-input-container" class="chat-input-form">
     <div id="typing-indicator" class="text-muted small"></div>
     <form ws-send id="message-form" autocomplete="off">
-        <input type="file" id="file-attachment-input" class="d-none">
-        <input type="hidden" name="attachment_file_id" id="attachment-file-id">
+        <input type="file" id="file-attachment-input" class="d-none" multiple>
+        <input type="hidden" name="attachment_file_ids" id="attachment-file-ids">
         <div class="wysiwyg-editor-container">
+            <div id="attachment-previews"
+                 class="p-2 d-flex flex-wrap gap-2"
+                 style="border-bottom: 1px solid #dee2e6;
+                        display: none">
+                <!-- Image previews will be injected here by JavaScript -->
+            </div>
             <!-- Top Toolbar is now hidden by default -->
             <div class="wysiwyg-toolbar toolbar-hidden">
                 <button type="button" data-command="bold" title="Bold (Ctrl+B)">

@@ -13,6 +13,7 @@ from app.models import (
     UploadedFile,
     UserConversationStatus,
     Mention,
+    MessageAttachment,
     Reaction,
 )
 from config import Config
@@ -29,6 +30,7 @@ ALL_MODELS = [
     Conversation,
     UserConversationStatus,
     Mention,
+    MessageAttachment,
     Reaction,
     UploadedFile,
 ]

@@ -1,9 +1,5 @@
 Current issues with the slack_clone:
 
-Avatars aren't showing up in the messages all the time.  If you reload the page they work but on the initial send there are moments where they are just the circle with the initial
-
-When you start a new DM the cursor should focus in the search window for searching for users.  After you select a user the cursor should jump to the chat input so you can start typing the message.
-
 Natalie: pasting doesn't work
 
 Sagrario: She doesn't like that Hash tags are being formatted as headers in markdown

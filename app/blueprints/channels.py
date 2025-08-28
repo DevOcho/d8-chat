@@ -21,7 +21,12 @@ from app.models import (
     Mention,
     Reaction,
 )
-from app.routes import login_required, PAGE_SIZE, get_reactions_for_messages
+from app.routes import (
+    login_required,
+    PAGE_SIZE,
+    get_reactions_for_messages,
+    get_attachments_for_messages,
+)
 from app.chat_manager import chat_manager
 import json
 from peewee import IntegrityError, JOIN
@@ -76,6 +81,7 @@ def get_channel_chat(channel_id):
     )
     messages.reverse()
     reactions_map = get_reactions_for_messages(messages)
+    attachments_map = get_attachments_for_messages(messages)
     members_count = (
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
@@ -106,6 +112,7 @@ def get_channel_chat(channel_id):
         mention_message_ids=mention_message_ids,
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
+        attachments_map=attachments_map,
         conversation_id=conversation.id,
     )
 

@@ -57,6 +57,7 @@ const NotificationManager = {
     }
 };
 
+
 const AttachmentManager = {
     state: {},
 
@@ -65,8 +66,9 @@ const AttachmentManager = {
             editorState: editorState,
             fileInput: document.getElementById('file-attachment-input'),
             attachmentBtn: document.getElementById('file-attachment-btn'),
-            hiddenAttachmentId: document.getElementById('attachment-file-id'),
-            uploadInProgress: false
+            hiddenAttachmentIds: document.getElementById('attachment-file-ids'),
+            previewContainer: document.getElementById('attachment-previews'),
+            uploads: new Map() // Use a Map to track uploads by a unique key
         };
         this.bindEvents();
     },
@@ -75,68 +77,128 @@ const AttachmentManager = {
         if (!this.state.fileInput || !this.state.attachmentBtn) return;
 
         this.state.attachmentBtn.addEventListener('click', () => {
-            this.state.fileInput.click(); // Trigger the hidden file input
+            this.state.fileInput.click();
         });
 
         this.state.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+
+        // Use event delegation for remove buttons
+        this.state.previewContainer.addEventListener('click', (e) => {
+            if (e.target.classList.contains('remove-attachment-btn')) {
+                const thumbnail = e.target.closest('.attachment-thumbnail');
+                const uploadKey = thumbnail.dataset.uploadKey;
+                this.removeAttachment(uploadKey);
+            }
+        });
     },
 
     handleFileSelect: function(e) {
-        const file = e.target.files[0];
-        if (!file || this.state.uploadInProgress) return;
+        const files = e.target.files;
+        if (!files.length) return;
 
-        this.state.uploadInProgress = true;
-        console.log("Uploading file:", file.name);
+        // Limit to 30 files
+        if ((this.state.uploads.size + files.length) > 30) {
+            ToastManager.show('Upload Limit', 'You can only attach up to 30 files per message.', 'warning');
+            return;
+        }
 
+
+        for (const file of files) {
+            const uploadKey = `upload-${Date.now()}-${Math.random()}`;
+            this.state.uploads.set(uploadKey, { file: file, fileId: null, status: 'pending' });
+            this.createPreviewAndUpload(file, uploadKey);
+        }
+
+        // Reset the file input so the user can select the same file again
+        this.state.fileInput.value = '';
+    },
+
+    createPreviewAndUpload: function(file, uploadKey) {
+        const { previewContainer } = this.state;
+        previewContainer.classList.add('has-attachments');
+
+        // 1. Create the thumbnail structure
+        const thumbnailDiv = document.createElement('div');
+        thumbnailDiv.className = 'attachment-thumbnail';
+        thumbnailDiv.dataset.uploadKey = uploadKey;
+        thumbnailDiv.innerHTML = `
+            <img src="" alt="Uploading..." />
+            <div class="spinner-border spinner-border-sm text-light position-absolute top-50 start-50"></div>
+            <button type="button" class="remove-attachment-btn">&times;</button>
+        `;
+        previewContainer.appendChild(thumbnailDiv);
+
+        // 2. Use FileReader to show a local preview immediately
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            thumbnailDiv.querySelector('img').src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+
+        // 3. Start the actual upload
         const formData = new FormData();
         formData.append('file', file);
 
-        // Use the browser's native `fetch` API for file upload.
         fetch('/files/upload', {
             method: 'POST',
             body: formData,
         })
         .then(response => {
-            if (!response.ok) {
-                // If the server returns an error (like 400 or 500), throw an error
-                // to be caught by the .catch() block.
-                return response.json().then(err => { throw err; });
-            }
-            return response.json(); // If the response is OK, parse the JSON
+            thumbnailDiv.querySelector('.spinner-border').remove(); // Upload finished, remove spinner
+            if (!response.ok) return response.json().then(err => { throw err; });
+            return response.json();
         })
         .then(data => {
             if (data && data.file_id) {
-                console.log("Upload successful. File ID:", data.file_id);
-                this.state.hiddenAttachmentId.value = data.file_id;
-
-                // [THE FIX] Manually construct the JSON payload for ws-send
-                const messageForm = this.state.editorState.messageForm;
-                const payload = {
-                    // Include the text content from the hidden input
-                    chat_message: this.state.editorState.hiddenInput.value,
-                    // And add our new attachment ID
-                    attachment_file_id: data.file_id
-                };
-
-                // Set the attribute that the htmx-ws extension will read from
-                messageForm.setAttribute('ws-send', JSON.stringify(payload));
-
-                // Now, trigger the form submission. htmx-ws will use our new attribute.
-                messageForm.requestSubmit();
+                const upload = this.state.uploads.get(uploadKey);
+                upload.fileId = data.file_id;
+                upload.status = 'success';
+                this.updateHiddenInput();
             }
         })
         .catch(error => {
-            const errorMessage = error.error || "An unknown upload error occurred.";
-            console.error("Upload failed:", errorMessage);
-            ToastManager.show('Upload Failed', errorMessage, 'danger');
-        })
-        .finally(() => {
-            this.state.uploadInProgress = false;
-            // Reset the file input so the user can select the same file again
-            this.state.fileInput.value = '';
+            const errorMessage = error.error || "Upload failed";
+            console.error("Upload failed for key", uploadKey, ":", errorMessage);
+            const upload = this.state.uploads.get(uploadKey);
+            if (upload) upload.status = 'error';
+            // Visually mark the failed upload
+            thumbnailDiv.style.opacity = '0.5';
+            thumbnailDiv.title = errorMessage;
         });
+    },
+
+    removeAttachment: function(uploadKey) {
+        // Remove from UI
+        const thumbnail = this.state.previewContainer.querySelector(`[data-upload-key="${uploadKey}"]`);
+        if (thumbnail) thumbnail.remove();
+
+        // Remove from tracking
+        this.state.uploads.delete(uploadKey);
+
+        this.updateHiddenInput();
+        if (this.state.uploads.size === 0) {
+            this.state.previewContainer.classList.remove('has-attachments');
+        }
+    },
+
+    updateHiddenInput: function() {
+        const successfulIds = [];
+        for (const upload of this.state.uploads.values()) {
+            if (upload.status === 'success' && upload.fileId) {
+                successfulIds.push(upload.fileId);
+            }
+        }
+        this.state.hiddenAttachmentIds.value = successfulIds.join(',');
+    },
+
+    reset: function() {
+        this.state.previewContainer.innerHTML = '';
+        this.state.previewContainer.classList.remove('has-attachments');
+        this.state.uploads.clear();
+        this.updateHiddenInput();
     }
 };
+
 
 const MentionManager = {
     state: {},
@@ -614,7 +676,7 @@ const Editor = {
 
             // A message is valid if it has text OR an attachment
             const hasText = this.state.hiddenInput.value.trim() !== '';
-            const hasAttachment = document.getElementById('attachment-file-id').value !== '';
+            const hasAttachment = document.getElementById('attachment-file-ids').value !== '';
 
             if (!hasText && !hasAttachment) {
                 e.preventDefault();
@@ -638,8 +700,10 @@ const Editor = {
                 editor.innerHTML = '';
                 markdownView.value = '';
                 hiddenInput.value = '';
-                // reset the upload for the next one
-                document.getElementById('attachment-file-id').value = '';
+                // [THE FIX] Reset the attachment manager
+                if (AttachmentManager && typeof AttachmentManager.reset === 'function') {
+                    AttachmentManager.reset();
+                }
                 this.state.messageForm.setAttribute('ws-send', '');
                 this.resizeActiveInput();
                 this.focusActiveInput();
@@ -705,8 +769,96 @@ const Editor = {
     }
 };
 
+// --- Image Carousel Manager ---
+const ImageCarouselManager = {
+    modalEl: null,
+    bootstrapModal: null,
+
+    initialize: function() {
+        this.modalEl = document.getElementById('image-carousel-modal');
+        if (!this.modalEl) return;
+
+        this.bootstrapModal = new bootstrap.Modal(this.modalEl);
+
+        // Listen for clicks on the main message container
+        document.body.addEventListener('click', this.handleImageClick.bind(this));
+
+        // Listen for when the modal is finished opening and set focus
+        this.modalEl.addEventListener('shown.bs.modal', () => {
+            const carousel = this.modalEl.querySelector('#messageImageCarousel');
+            if (carousel) {
+                carousel.focus();
+            }
+        });
+
+        // Clear the carousel when the modal closes to prevent stale content
+        this.modalEl.addEventListener('hidden.bs.modal', this.clearCarousel.bind(this));
+    },
+
+    handleImageClick: function(e) {
+        const link = e.target.closest('a[data-bs-toggle="modal"][data-bs-target="#image-carousel-modal"]');
+        if (!link) return;
+
+        e.preventDefault(); // Prevent default link behavior
+
+        const messageId = link.dataset.messageId;
+        const startIndex = parseInt(link.dataset.startIndex, 10);
+        const messageContainer = document.getElementById(`message-${messageId}`);
+        if (!messageContainer) return;
+
+        // Parse the attachment data from the data attribute
+        try {
+            const attachmentsData = JSON.parse(messageContainer.dataset.attachments);
+            if (attachmentsData && attachmentsData.length > 0) {
+                this.buildAndShowCarousel(attachmentsData, startIndex);
+            }
+        } catch (err) {
+            console.error("Could not parse attachment data:", err);
+        }
+    },
+
+    buildAndShowCarousel: function(attachments, startIndex) {
+        const carouselInner = document.createElement('div');
+        carouselInner.className = 'carousel-inner';
+
+        attachments.forEach((attachment, index) => {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = index === startIndex ? 'carousel-item active' : 'carousel-item';
+
+            const img = document.createElement('img');
+            img.src = attachment.url;
+            img.alt = attachment.filename;
+
+            itemDiv.appendChild(img);
+            carouselInner.appendChild(itemDiv);
+        });
+
+        const carouselHTML = `
+            <div id="messageImageCarousel" class="carousel slide h-100 w-100" data-bs-ride="carousel" tabindex="-1">
+                ${carouselInner.outerHTML}
+                <button class="carousel-control-prev" type="button" data-bs-target="#messageImageCarousel" data-bs-slide="prev">
+                    <span class="carousel-control-prev-icon" aria-hidden="true"></span>
+                    <span class="visually-hidden">Previous</span>
+                </button>
+                <button class="carousel-control-next" type="button" data-bs-target="#messageImageCarousel" data-bs-slide="next">
+                    <span class="carousel-control-next-icon" aria-hidden="true"></span>
+                    <span class="visually-hidden">Next</span>
+                </button>
+            </div>
+        `;
+
+        this.modalEl.querySelector('.modal-body').innerHTML = carouselHTML;
+        this.bootstrapModal.show();
+    },
+
+    clearCarousel: function() {
+        this.modalEl.querySelector('.modal-body').innerHTML = '<div class="spinner-border text-light"></div>';
+    }
+};
+
 // --- 2. GENERAL PAGE-LEVEL LOGIC ---
 document.addEventListener('DOMContentLoaded', () => {
+    ImageCarouselManager.initialize();
     NotificationManager.initialize();
 
     const ToastManager = {
@@ -805,7 +957,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
         const targetId = evt.detail.content.id || 'unknown';
-        if (targetId.startsWith('status-dot-')) {
+        if (targetId.startsWith('status-dot-') || targetId.startsWith('sidebar-presence-indicator-')) {
             console.log(`Ignoring harmless presence update for target: #${targetId}`);
             return;
         }

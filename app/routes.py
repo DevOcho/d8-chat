@@ -148,6 +148,54 @@ def get_reactions_for_messages(messages):
     return reactions_map
 
 
+def get_attachments_for_messages(messages):
+    """
+    Efficiently fetches and groups attachment data for a given list of messages.
+
+    Args:
+        messages: A list of Peewee Message model instances.
+
+    Returns:
+        A dictionary mapping message IDs to a list of their attachments.
+        Example: { 123: [ {'url': '...', 'filename': '...'}, ... ] }
+    """
+    attachments_map = {}
+    if not messages:
+        return attachments_map
+
+    # We need these models for the query
+    from .models import MessageAttachment, UploadedFile
+
+    message_ids = [m.id for m in messages]
+
+    # [THE FIX] Query the MessageAttachment table directly and join the file data to it.
+    # This is a more direct and reliable way to get the data.
+    all_links = (
+        MessageAttachment.select(MessageAttachment, UploadedFile)
+        .join(UploadedFile)
+        .where(MessageAttachment.message_id.in_(message_ids))
+    )
+
+    for link in all_links:
+        # `link.message_id` is the ID of the message this attachment belongs to.
+        mid = link.message_id
+        # `link.attachment` is the full UploadedFile object.
+        att = link.attachment
+
+        if mid not in attachments_map:
+            attachments_map[mid] = []
+
+        attachments_map[mid].append(
+            {
+                "url": att.url,
+                "filename": att.original_filename,
+                "mime_type": att.mime_type,
+            }
+        )
+
+    return attachments_map
+
+
 # --- Routes ---
 @main_bp.route("/")
 def index():
@@ -830,6 +878,7 @@ def jump_to_message(message_id):
     )
     messages = messages_before + [target_message] + messages_after
     reactions_map = get_reactions_for_messages(messages)
+    attachments_map = get_attachments_for_messages(messages)
     status, created = UserConversationStatus.get_or_create(
         user=g.user, conversation=conversation
     )
@@ -853,6 +902,7 @@ def jump_to_message(message_id):
             mention_message_ids=set(),
             PAGE_SIZE=PAGE_SIZE,
             reactions_map=reactions_map,
+            attachments_map=attachments_map,
         )
         clear_badge_html = render_template(
             "partials/clear_badge.html",
@@ -874,6 +924,7 @@ def jump_to_message(message_id):
             last_read_timestamp=status.last_read_timestamp,
             PAGE_SIZE=PAGE_SIZE,
             reactions_map=reactions_map,
+            attachments_map=attachments_map,
         )
 
         if not created and other_user.id != g.user.id:
@@ -950,10 +1001,10 @@ def chat(ws):
             # --- New Message Handling ---
             chat_text = data.get("chat_message")
             parent_id = data.get("parent_message_id")
-            attachment_file_id = data.get("attachment_file_id")
+            attachment_file_ids = data.get("attachment_file_ids")
 
             # Confirm we have either a message or an attachment for this message
-            if not chat_text and not attachment_file_id:
+            if not chat_text and not attachment_file_ids:
                 continue
 
             conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
@@ -976,16 +1027,20 @@ def chat(ws):
                 conversation=conversation,
                 chat_text=chat_text,
                 parent_id=parent_id,
-                attachment_file_id=attachment_file_id,
+                attachment_file_ids=attachment_file_ids,
             )
 
             # we need reactions for this message even if none exist
             reactions_map_for_new_message = get_reactions_for_messages([new_message])
+            attachments_map_for_new_message = get_attachments_for_messages(
+                [new_message]
+            )
 
             new_message_html = render_template(
                 "partials/message.html",
                 message=new_message,
                 reactions_map=reactions_map_for_new_message,
+                attachments_map=attachments_map_for_new_message,
             )
             message_to_broadcast = (
                 f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
@@ -1155,14 +1210,17 @@ def chat(ws):
                         status.last_notified_timestamp = now
                         status.save()
 
-    except Exception as e:
-        print(
-            f"ERROR: An exception occurred for user '{getattr(ws, 'user', 'unknown')}': {e}"
-        )
     finally:
         if hasattr(ws, "user") and ws.user:
-            chat_manager.set_offline(ws.user.id)
-            presence_html = f'<span id="status-dot-{ws.user.id}" class="me-2 rounded-circle bg-secondary" style="width: 10px; height: 10px;" hx-swap-oob="true"></span>'
-            chat_manager.broadcast_to_all(presence_html)
+            user_id = ws.user.id
+            chat_manager.set_offline(user_id)
+
+            # Broadcast consistent updates for BOTH indicators on disconnect
+            dm_list_presence_html = f'<span id="status-dot-{user_id}" class="presence-indicator presence-away" hx-swap-oob="true"></span>'
+            chat_manager.broadcast_to_all(dm_list_presence_html)
+
+            sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user_id}" class="presence-indicator presence-away" hx-swap-oob="true"></span>'
+            chat_manager.broadcast_to_all(sidebar_presence_html)
+
             chat_manager.unsubscribe(ws)
             print(f"INFO: Client connection closed for '{ws.user.username}'.")

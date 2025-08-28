@@ -312,6 +312,48 @@ emoji-picker {
     border-color: #f0a2bd;
 }
 
+/* --- Attachment Preview Styles --- */
+#attachment-previews.has-attachments {
+    display: flex !important; /* Override the inline style to show the container */
+}
+
+.attachment-thumbnail {
+    position: relative;
+    width: 70px;
+    height: 70px;
+}
+
+.attachment-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+}
+
+.attachment-thumbnail .remove-attachment-btn {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: rgba(0, 0, 0, 0.6);
+    color: white;
+    border: none;
+    font-size: 12px;
+    line-height: 20px;
+    text-align: center;
+    padding: 0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+[data-bs-theme="dark"] #attachment-previews {
+    border-bottom-color: #2f3136 !important;
+}
+
 /* --- Search Bar & Results --- */
 #global-search-container {
     background-color: #f8f9fa;
@@ -341,6 +383,79 @@ emoji-picker {
 
 [data-bs-theme="dark"] #search-results-overlay {
     background-color: #2f3136; /* Match dark main content */
+}
+
+/* --- Attachment Image Grid Styles --- */
+.attachment-grid {
+    display: grid;
+    gap: 4px;
+    max-width: 450px; /* Limit the max width of the grid */
+    border-radius: 12px;
+    overflow: hidden; /* This is key to making the corner radius apply to child images */
+}
+
+.attachment-grid-item {
+    position: relative;
+    background-color: #f0f0f0; /* Fallback color while images load */
+}
+
+.attachment-grid-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* Ensures images fill their grid area without distortion */
+    display: block;
+}
+
+/* Layout for a single image */
+.attachment-grid[data-count="1"] {
+    grid-template-columns: 1fr;
+    max-height: 300px;
+}
+
+/* Layout for two images */
+.attachment-grid[data-count="2"] {
+    grid-template-columns: 1fr 1fr;
+    aspect-ratio: 16 / 9;
+}
+
+/* Layout for three images */
+.attachment-grid[data-count="3"] {
+    grid-template-columns: 1fr 1fr;
+    aspect-ratio: 16 / 9;
+}
+
+.attachment-grid[data-count="3"] .attachment-grid-item:first-child {
+    grid-row: span 2;
+}
+
+/* Layout for four or more images */
+.attachment-grid[data-count="4+"] {
+    grid-template-columns: 1fr 1fr;
+}
+
+/* Force items in the 4+ grid to be square */
+.attachment-grid[data-count="4+"] .attachment-grid-item {
+    aspect-ratio: 1 / 1;
+}
+
+/* The "+N" overlay for when there are more than 4 images */
+.attachment-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: white;
+    font-size: 2rem;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+[data-bs-theme="dark"] .attachment-grid-item {
+    background-color: #2f3136;
 }
 
 /* --- Search Bar & Results --- */
@@ -456,4 +571,55 @@ emoji-picker {
 /* On hover, make the icon white to match the text */
 #address-card .btn-warning:hover i {
     color: #fff;
+}
+
+/* --- Image Carousel Modal Styles --- */
+#image-carousel-modal .modal-content {
+    background-color: rgba(0, 0, 0, 0.85);
+}
+
+#image-carousel-modal .carousel-item {
+    height: calc(100vh - 56px); /* Full viewport height minus header */
+    text-align: center;
+}
+
+#image-carousel-modal .carousel-inner,
+#image-carousel-modal .carousel-item img {
+    max-height: 100%;
+    max-width: 100%;
+    object-fit: contain; /* This prevents images from being stretched or cropped */
+    margin: auto; /* Center the image vertically and horizontally */
+}
+
+#image-carousel-modal .carousel-control-prev,
+#image-carousel-modal .carousel-control-next {
+    position: fixed; /* Position relative to the viewport */
+    top: 50%;
+    transform: translateY(-50%); /* Vertically center the buttons */
+    width: 50px;
+    height: 50px;
+    background-color: rgba(0, 0, 0, 0.4);
+    border-radius: 50%;
+    opacity: 0.8;
+    transition: opacity 0.2s ease-in-out;
+}
+
+#image-carousel-modal .carousel-control-prev {
+    left: 20px; /* Position from the left edge */
+}
+
+#image-carousel-modal .carousel-control-next {
+    right: 20px; /* Position from the right edge */
+}
+
+#image-carousel-modal .carousel-control-prev:hover,
+#image-carousel-modal .carousel-control-next:hover {
+    opacity: 1;
+}
+
+/* Ensure the icon inside is also styled, removing Bootstrap's default size */
+#image-carousel-modal .carousel-control-prev-icon,
+#image-carousel-modal .carousel-control-next-icon {
+    width: 100%;
+    height: 100%;
 }

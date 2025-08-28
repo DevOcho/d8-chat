@@ -130,16 +130,15 @@ class Message(BaseModel):
     content = TextField()
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField("self", backref="replies", null=True)
-    attachment = DeferredForeignKey(
-        "UploadedFile", backref="message_attachment", null=True
-    )
 
     @property
-    def attachment_url(self):
-        """Returns a presigned URL for the message's attachment, or None."""
-        if self.attachment:
-            return minio_service.get_presigned_url(self.attachment.stored_filename)
-        return None
+    def attachments(self):
+        """Returns a query for all UploadedFile objects attached to this message."""
+        return (
+            UploadedFile.select()
+            .join(MessageAttachment)
+            .where(MessageAttachment.message == self)
+        )
 
 
 class Reaction(BaseModel):
@@ -188,3 +187,18 @@ class UploadedFile(BaseModel):
     mime_type = CharField()
     file_size_bytes = BigIntegerField()
     scan_status = CharField(default="pending")  # pending, clean, infected
+
+    @property
+    def url(self):
+        """Returns a presigned URL for the file."""
+        return minio_service.get_presigned_url(self.stored_filename)
+
+
+class MessageAttachment(BaseModel):
+    """A through model to link Messages and UploadedFiles (many-to-many)."""
+
+    message = ForeignKeyField(Message, backref="message_links")
+    attachment = ForeignKeyField(UploadedFile, backref="file_links")
+
+    class Meta:
+        primary_key = CompositeKey("message", "attachment")

@@ -1,6 +1,15 @@
 # app/services/chat_service.py
 
-from app.models import db, Message, Mention, User, Channel, ChannelMember, Conversation
+from app.models import (
+    db,
+    Message,
+    Mention,
+    User,
+    Channel,
+    ChannelMember,
+    Conversation,
+    MessageAttachment,
+)
 from app.chat_manager import chat_manager
 import re
 
@@ -10,7 +19,7 @@ def handle_new_message(
     conversation: Conversation,
     chat_text: str,
     parent_id: int = None,
-    attachment_file_id: int = None,
+    attachment_file_ids: str = None,
 ):
     """
     Handles the business logic for creating a new message and its associated mentions.
@@ -20,19 +29,29 @@ def handle_new_message(
         conversation: The Conversation object where the message was sent.
         chat_text: The raw content of the message.
         parent_id: The ID of the parent message, if it's a reply.
+        attachment_file_ids: A comma-separated string of UploadedFile IDs.
 
     Returns:
         The newly created Message object.
     """
     with db.atomic():
+        # Step 1: Create the core message object
         new_message = Message.create(
             user=sender,
             conversation=conversation,
             content=chat_text,
             parent_message=parent_id if parent_id else None,
-            attachment=attachment_file_id if attachment_file_id else None,
         )
 
+        # Step 2: Link any attachments if IDs are provided
+        if attachment_file_ids:
+            file_ids = [
+                int(id) for id in attachment_file_ids.split(",") if id.isdigit()
+            ]
+            for file_id in file_ids:
+                MessageAttachment.create(message=new_message, attachment=file_id)
+
+        # --- Mention handling logic remains the same ---
         # 1. Handle regular @username mentions
         mentioned_usernames = set(re.findall(r"@(\w+)", chat_text))
         mentioned_usernames.discard("here")

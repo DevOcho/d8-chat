@@ -14,7 +14,12 @@ from app.models import (
     Conversation,
     UserConversationStatus,
 )
-from app.routes import login_required, PAGE_SIZE, get_reactions_for_messages
+from app.routes import (
+    login_required,
+    PAGE_SIZE,
+    get_reactions_for_messages,
+    get_attachments_for_messages,
+)
 from app.chat_manager import chat_manager
 import datetime
 
@@ -159,6 +164,7 @@ def get_dm_chat(other_user_id):
     )
     messages.reverse()
     reactions_map = get_reactions_for_messages(messages)
+    attachments_map = get_attachments_for_messages(messages)
 
     header_html_content = render_template(
         "partials/dm_header.html", other_user=other_user
@@ -173,6 +179,7 @@ def get_dm_chat(other_user_id):
         last_read_timestamp=last_read_timestamp,
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
+        attachments_map=attachments_map,
     )
 
     # If the DM already existed for this user, send command to clear the badge.
