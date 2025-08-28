@@ -834,7 +834,7 @@ const ImageCarouselManager = {
         });
 
         const carouselHTML = `
-            <div id="messageImageCarousel" class="carousel slide h-100 w-100" data-bs-ride="carousel" tabindex="-1">
+            <div id="messageImageCarousel" class="carousel slide h-100 w-100" data-bs-ride="carousel" data-bs-keyboard="true" tabindex="-1">
                 ${carouselInner.outerHTML}
                 <button class="carousel-control-prev" type="button" data-bs-target="#messageImageCarousel" data-bs-slide="prev">
                     <span class="carousel-control-prev-icon" aria-hidden="true"></span>
@@ -848,6 +848,12 @@ const ImageCarouselManager = {
         `;
 
         this.modalEl.querySelector('.modal-body').innerHTML = carouselHTML;
+
+        // Find the newly added carousel element
+        const carouselEl = this.modalEl.querySelector('#messageImageCarousel');
+        // Manually create a new Bootstrap Carousel instance to activate its event listeners
+        new bootstrap.Carousel(carouselEl);
+
         this.bootstrapModal.show();
     },
 
