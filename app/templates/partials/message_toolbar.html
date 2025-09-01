@@ -21,7 +21,7 @@
                     data-bs-toggle="offcanvas"
                     data-bs-target="#right-panel-offcanvas"
                     hx-get="{{ url_for('main.view_thread', parent_message_id=message.id) }}"
-                    hx-target="#right-panel-body"
+                    hx-target="#right-panel-offcanvas"
                     data-action="view-thread"
                     title="Reply in Thread">
                 {# Using a different icon to distinguish from quote reply #}

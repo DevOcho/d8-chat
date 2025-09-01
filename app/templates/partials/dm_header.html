@@ -1,6 +1,6 @@
 <div id="chat-header-container" hx-swap-oob="true">
     {# Wrap the header content in a div that triggers the offcanvas #}
-    <div {% if other_user.id != g.user.id %} style="cursor: pointer" data-bs-toggle="offcanvas" data-bs-target="#right-panel-offcanvas" hx-get="{{ url_for('dms.get_dm_details', other_user_id=other_user.id) }}" hx-target="#right-panel-body" title="View user details" {% endif %}
+    <div {% if other_user.id != g.user.id %} style="cursor: pointer" data-bs-toggle="offcanvas" data-bs-target="#right-panel-offcanvas" hx-get="{{ url_for('dms.get_dm_details', other_user_id=other_user.id) }}" hx-target="#right-panel-offcanvas" title="View user details" {% endif %}
          class="d-flex align-items-center p-3">
         <!-- Placeholder for profile picture -->
         <div class="me-2">

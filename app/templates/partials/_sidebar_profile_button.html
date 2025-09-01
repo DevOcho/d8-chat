@@ -1,11 +1,11 @@
 {# This partial renders only the user's profile button for the far-left sidebar. #}
 <a href="#"
-    id="sidebar-profile-button" {# <-- Give the link a stable ID for targeting #}
-    title="View your profile"
-    data-bs-toggle="offcanvas"
-    data-bs-target="#right-panel-offcanvas"
-    hx-get="{{ url_for('main.profile') }}"
-    hx-target="#right-panel-body">
+   id="sidebar-profile-button"
+   title="View your profile"
+   data-bs-toggle="offcanvas"
+   data-bs-target="#right-panel-offcanvas"
+   hx-get="{{ url_for('main.profile') }}"
+   hx-target="#right-panel-offcanvas">
     <div class="profile-avatar">
         {% with user=g.user, size=36 %}
             {% include 'partials/_avatar_display.html' %}

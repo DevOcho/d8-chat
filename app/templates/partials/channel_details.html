@@ -1,62 +1,71 @@
-<div id="channel-details-content">
-    <!-- Header -->
-    <div class="p-3 border-bottom">
-        <h5 class="mb-0">#{{ channel.name }}</h5>
-    </div>
-    <!-- Tab Navigation -->
-    <ul class="nav nav-tabs nav-fill px-3" role="tablist">
-        <li class="nav-item" role="presentation">
-            <button class="nav-link active"
-                    data-bs-toggle="tab"
-                    data-bs-target="#about-tab-pane"
-                    type="button"
-                    role="tab">About</button>
-        </li>
-        <li class="nav-item" role="presentation">
-            <button class="nav-link"
-                    data-bs-toggle="tab"
-                    data-bs-target="#members-tab-pane"
-                    type="button"
-                    role="tab"
-                    hx-get="{{ url_for('channels.get_channel_details_members_tab', channel_id=channel.id) }}"
-                    hx-target="#members-tab-pane"
-                    hx-trigger="click once">
-                Members <span id="channel-members-count-{{ channel.id }}"
-       class="badge bg-secondary rounded-pill">{{ members_count }}</span>
-            </button>
-        </li>
-        {% if current_user_membership.role == 'admin' %}
+<div class="offcanvas-header">
+    <h5 class="offcanvas-title">Channel Details</h5>
+    <button type="button"
+            class="btn-close"
+            data-bs-dismiss="offcanvas"
+            aria-label="Close"></button>
+</div>
+<div class="offcanvas-body">
+    <div id="channel-details-content">
+        <!-- Header -->
+        <div class="p-3 border-bottom">
+            <h5 class="mb-0">#{{ channel.name }}</h5>
+        </div>
+        <!-- Tab Navigation -->
+        <ul class="nav nav-tabs nav-fill px-3" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active"
+                        data-bs-toggle="tab"
+                        data-bs-target="#about-tab-pane"
+                        type="button"
+                        role="tab">About</button>
+            </li>
             <li class="nav-item" role="presentation">
                 <button class="nav-link"
                         data-bs-toggle="tab"
-                        data-bs-target="#settings-tab-pane"
+                        data-bs-target="#members-tab-pane"
                         type="button"
                         role="tab"
-                        hx-get="{{ url_for('channels.get_channel_details_settings_tab', channel_id=channel.id) }}"
-                        hx-target="#settings-tab-pane"
-                        hx-trigger="click once">Settings</button>
+                        hx-get="{{ url_for('channels.get_channel_details_members_tab', channel_id=channel.id) }}"
+                        hx-target="#members-tab-pane"
+                        hx-trigger="click once">
+                    Members <span id="channel-members-count-{{ channel.id }}"
+       class="badge bg-secondary rounded-pill">{{ members_count }}</span>
+                </button>
             </li>
-        {% endif %}
-    </ul>
-    <!-- Tab Content -->
-    <div class="tab-content" id="myTabContent">
-        <div class="tab-pane fade show active" id="about-tab-pane" role="tabpanel">
-            <!-- The 'About' content is loaded by default with the shell -->
-            {% include 'partials/channel_details_tab_about.html' %}
-        </div>
-        <div class="tab-pane fade" id="members-tab-pane" role="tabpanel">
-            <!-- Content will be loaded by HTMX -->
-            <div class="text-center p-5">
-                <div class="spinner-border spinner-border-sm"></div>
+            {% if current_user_membership.role == 'admin' %}
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link"
+                            data-bs-toggle="tab"
+                            data-bs-target="#settings-tab-pane"
+                            type="button"
+                            role="tab"
+                            hx-get="{{ url_for('channels.get_channel_details_settings_tab', channel_id=channel.id) }}"
+                            hx-target="#settings-tab-pane"
+                            hx-trigger="click once">Settings</button>
+                </li>
+            {% endif %}
+        </ul>
+        <!-- Tab Content -->
+        <div class="tab-content" id="myTabContent">
+            <div class="tab-pane fade show active" id="about-tab-pane" role="tabpanel">
+                <!-- The 'About' content is loaded by default with the shell -->
+                {% include 'partials/channel_details_tab_about.html' %}
             </div>
-        </div>
-        {% if current_user_membership.role == 'admin' %}
-            <div class="tab-pane fade" id="settings-tab-pane" role="tabpanel">
+            <div class="tab-pane fade" id="members-tab-pane" role="tabpanel">
                 <!-- Content will be loaded by HTMX -->
                 <div class="text-center p-5">
                     <div class="spinner-border spinner-border-sm"></div>
                 </div>
             </div>
-        {% endif %}
+            {% if current_user_membership.role == 'admin' %}
+                <div class="tab-pane fade" id="settings-tab-pane" role="tabpanel">
+                    <!-- Content will be loaded by HTMX -->
+                    <div class="text-center p-5">
+                        <div class="spinner-border spinner-border-sm"></div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
     </div>
 </div>
