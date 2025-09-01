@@ -1,5 +1,9 @@
 Current issues with the slack_clone:
 
+Style bug when you start a new chat with a user (the avatars are squished together)
+
+Avatar doesn't update in the (you) chat or the sidebar without a page refresh.
+
 Natalie: pasting doesn't work
 
 Sagrario: She doesn't like that Hash tags are being formatted as headers in markdown
@@ -9,8 +13,6 @@ We need to be able to upload files.
 We need a way to search and add gifs
 
 I also think we are going to need to implement threads but I only want them in channels.
-
-Group DMs (talk with more than one person) and also the ability to promote a group conversation to a channel.
 
 We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
 
@@ -26,6 +28,8 @@ If the server disconnects, it will reconnect for users at different times.  Mess
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
 ---
+
+Group DMs (talk with more than one person) and also the ability to promote a group conversation to a channel.
 
 Set a work hours time and change the status icon to indicate if it's within our outside of their work hours.  The work hours can be set in the profile (for example, 8am to 5pm).
 

@@ -15,7 +15,7 @@ repos:
       - id: check-executables-have-shebangs
       - id: check-symlinks
       - id: requirements-txt-fixer
-  # djlint
+   # djlint
 -  repo: https://github.com/djlint/djLint
    rev: v1.36.4
    hooks:
