@@ -180,6 +180,7 @@ def get_dm_chat(other_user_id):
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
         attachments_map=attachments_map,
+        Message=Message,
     )
 
     # If the DM already existed for this user, send command to clear the badge.

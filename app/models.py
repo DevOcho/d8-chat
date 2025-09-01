@@ -4,6 +4,7 @@ import datetime
 import os
 
 from peewee import (
+    fn,
     Model,
     Proxy,
     TextField,
@@ -130,6 +131,7 @@ class Message(BaseModel):
     content = TextField()
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField("self", backref="replies", null=True)
+    reply_type = CharField(null=True)  # Can be 'quote' or 'thread'
 
     @property
     def attachments(self):
@@ -138,6 +140,21 @@ class Message(BaseModel):
             UploadedFile.select()
             .join(MessageAttachment)
             .where(MessageAttachment.message == self)
+        )
+
+    @property
+    def thread_participants(self):
+        """
+        Returns a query for the 3 most recent, unique users who replied
+        to this message in a thread.
+        """
+        return (
+            User.select()
+            .join(Message, on=(User.id == Message.user))
+            .where((Message.parent_message == self) & (Message.reply_type == "thread"))
+            .group_by(User.id)
+            .order_by(fn.MAX(Message.created_at).desc())
+            .limit(3)
         )
 
 

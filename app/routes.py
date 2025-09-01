@@ -496,6 +496,58 @@ def get_reply_chat_input(message_id):
     )
 
 
+@main_bp.route("/chat/thread/<int:parent_message_id>")
+@login_required
+def view_thread(parent_message_id):
+    """Renders the thread view partial for the side panel."""
+    try:
+        parent_message = Message.get_by_id(parent_message_id)
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+    channel = None
+    if parent_message.conversation.type == "channel":
+        channel_id = int(parent_message.conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(channel_id)
+
+    thread_replies = (
+        Message.select()
+        .where(
+            (Message.parent_message == parent_message)
+            & (Message.reply_type == "thread")
+        )
+        .order_by(Message.created_at.asc())
+    )
+
+    all_thread_messages = [parent_message] + list(thread_replies)
+    reactions_map = get_reactions_for_messages(all_thread_messages)
+    attachments_map = get_attachments_for_messages(all_thread_messages)
+
+    return render_template(
+        "partials/thread_view.html",
+        parent_message=parent_message,
+        thread_replies=thread_replies,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        channel=channel,
+        Message=Message,
+        is_in_thread_view=True,  # This flag tells the templates they are in the side panel
+    )
+
+
+@main_bp.route("/chat/input/thread/<int:parent_message_id>")
+@login_required
+def get_thread_chat_input(parent_message_id):
+    """Serves the dedicated chat input form for a thread view."""
+    try:
+        parent_message = Message.get_by_id(parent_message_id)
+        return render_template(
+            "partials/chat_input_thread.html", parent_message=parent_message
+        )
+    except Message.DoesNotExist:
+        return "", 404
+
+
 # --- PROFILE EDITING ROUTES ---
 @main_bp.route("/profile/address/view", methods=["GET"])
 @login_required
@@ -903,6 +955,7 @@ def jump_to_message(message_id):
             PAGE_SIZE=PAGE_SIZE,
             reactions_map=reactions_map,
             attachments_map=attachments_map,
+            Message=Message,
         )
         clear_badge_html = render_template(
             "partials/clear_badge.html",
@@ -925,6 +978,7 @@ def jump_to_message(message_id):
             PAGE_SIZE=PAGE_SIZE,
             reactions_map=reactions_map,
             attachments_map=attachments_map,
+            Message=Message,
         )
 
         if not created and other_user.id != g.user.id:
@@ -1001,9 +1055,9 @@ def chat(ws):
             # --- New Message Handling ---
             chat_text = data.get("chat_message")
             parent_id = data.get("parent_message_id")
+            reply_type = data.get("reply_type")
             attachment_file_ids = data.get("attachment_file_ids")
 
-            # Confirm we have either a message or an attachment for this message
             if not chat_text and not attachment_file_ids:
                 continue
 
@@ -1027,70 +1081,72 @@ def chat(ws):
                 conversation=conversation,
                 chat_text=chat_text,
                 parent_id=parent_id,
+                reply_type=reply_type,
                 attachment_file_ids=attachment_file_ids,
             )
 
-            # we need reactions for this message even if none exist
-            reactions_map_for_new_message = get_reactions_for_messages([new_message])
-            attachments_map_for_new_message = get_attachments_for_messages(
-                [new_message]
-            )
+            # --- NEW BROADCAST LOGIC ---
+            if new_message.reply_type == "thread":
+                # This is a threaded reply. We need to send two updates.
 
-            new_message_html = render_template(
-                "partials/message.html",
-                message=new_message,
-                reactions_map=reactions_map_for_new_message,
-                attachments_map=attachments_map_for_new_message,
-            )
-            message_to_broadcast = (
-                f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-            )
+                # 1. The new message itself to append to the thread panel.
+                #    We need reactions and attachments for this new message.
+                reactions_map_for_reply = get_reactions_for_messages([new_message])
+                attachments_map_for_reply = get_attachments_for_messages([new_message])
+                new_reply_html = render_template(
+                    "partials/message.html",
+                    message=new_message,
+                    reactions_map=reactions_map_for_reply,
+                    attachments_map=attachments_map_for_reply,
+                    Message=Message,
+                )
+                broadcast_html = f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
 
-            chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
+                # 2. The updated parent message to show the new reply count in the main channel.
+                parent_message = Message.get_by_id(parent_id)
+                # We also need reactions and attachments for the parent message to render it correctly.
+                reactions_map_for_parent = get_reactions_for_messages([parent_message])
+                attachments_map_for_parent = get_attachments_for_messages(
+                    [parent_message]
+                )
+                updated_parent_html = render_template(
+                    "partials/message.html",
+                    message=parent_message,
+                    reactions_map=reactions_map_for_parent,
+                    attachments_map=attachments_map_for_parent,
+                    Message=Message,
+                )
+                broadcast_html += f'<div id="message-{parent_id}" hx-swap-oob="outerHTML">{updated_parent_html}</div>'
 
-            message_for_sender = message_to_broadcast
-            if parent_id:
-                input_html = render_template("partials/chat_input_default.html")
-                message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
-            ws.send(message_for_sender)
+                # Broadcast both OOB swaps to everyone in the conversation.
+                chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
+                # Send it back to the sender as well.
+                ws.send(broadcast_html)
 
-            """
-            current_time = datetime.datetime.now()
-            if conv_id_str in chat_manager.active_connections:
-                with db.atomic():
-                    for viewer_ws in chat_manager.active_connections[conv_id_str]:
-                        (
-                            UserConversationStatus.update(
-                                last_read_timestamp=current_time
-                            )
-                            .where(
-                                (UserConversationStatus.user == viewer_ws.user)
-                                & (UserConversationStatus.conversation == conversation)
-                            )
+            else:
+                # This is a regular message or a quoted reply, which appears in the main feed.
+                reactions_map = get_reactions_for_messages([new_message])
+                attachments_map = get_attachments_for_messages([new_message])
+                new_message_html = render_template(
+                    "partials/message.html",
+                    message=new_message,
+                    reactions_map=reactions_map,
+                    attachments_map=attachments_map,
+                )
+                message_to_broadcast = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
 
-                            .execute()
-                        )
-                        # Now, determine if this new message is a mention FOR THIS SPECIFIC VIEWER
-                        is_mention_for_viewer = Mention.select().where(
-                            (Mention.message == new_message) &
-                            (Mention.user == viewer_ws.user)
-                        ).exists()
+                # Broadcast to others
+                chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
 
-                        # Prepare the HTML payload for this specific viewer
-                        final_html_for_viewer = render_template(
-                            "partials/_message_realtime_wrapper.html",
-                            message_html=new_message_html,
-                            is_mention=is_mention_for_viewer
-                        )
+                # Send back to the sender, potentially with an input reset for quoted replies.
+                message_for_sender = message_to_broadcast
+                if new_message.reply_type == "quote":
+                    input_html = render_template("partials/chat_input_default.html")
+                    message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+                ws.send(message_for_sender)
 
-                        # If the viewer is the original sender and it was a reply, add the input reset
-                        if viewer_ws == ws and parent_id:
-                            input_html = render_template("partials/chat_input_default.html")
-                            final_html_for_viewer += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
-
-                        viewer_ws.send(final_html_for_viewer)
-            """
-
+            # --- Notification logic for users NOT viewing the channel remains the same ---
+            # (The existing notification logic from line 976 onwards is fine)
             if conversation.type == "channel":
                 channel_id = conversation.conversation_id_str.split("_")[1]
                 channel = Channel.get_by_id(channel_id)

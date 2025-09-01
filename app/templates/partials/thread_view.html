@@ -1,0 +1,40 @@
+{# app/templates/partials/thread_view.html #}
+<div id="thread-content-{{ parent_message.id }}">
+    <!-- Header -->
+    <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
+        <div>
+            <h5 class="mb-0">Thread</h5>
+            {# The 'channel' variable is now passed directly from the Python route #}
+            {% if channel %}<small class="text-muted">In #{{ channel.name }}</small>{% endif %}
+        </div>
+        <button type="button"
+                class="btn-close"
+                data-bs-dismiss="offcanvas"
+                aria-label="Close"></button>
+    </div>
+    <!-- Parent Message -->
+    <div class="p-3">
+        {% with message=parent_message, is_in_thread_view=True %}
+            {% include 'partials/message.html' %}
+        {% endwith %}
+    </div>
+    <hr class="my-0">
+    <!-- Replies -->
+    <div class="p-3" id="thread-replies-list-{{ parent_message.id }}">
+        {% for reply in thread_replies %}
+            {% with message=reply, is_in_thread_view=True %}
+                {% include 'partials/message.html' %}
+            {% endwith %}
+        {% else %}
+            <p class="text-muted text-center small">No replies yet.</p>
+        {% endfor %}
+    </div>
+    <!-- Reply Input (we will create chat_input_thread.html in the next phase) -->
+    <div hx-get="{{ url_for('main.get_thread_chat_input', parent_message_id=parent_message.id) }}"
+         hx-trigger="load"
+         hx-swap="outerHTML">
+        <div class="p-3 text-center">
+            <div class="spinner-border spinner-border-sm"></div>
+        </div>
+    </div>
+</div>

@@ -1,5 +1,7 @@
 Current issues with the slack_clone:
 
+I also think we are going to need to implement threads but I only want them in channels.
+
 Natalie: pasting doesn't work
 
 Sagrario: She doesn't like that Hash tags are being formatted as headers in markdown
@@ -7,8 +9,6 @@ Sagrario: She doesn't like that Hash tags are being formatted as headers in mark
 We need to be able to upload files.
 
 We need a way to search and add gifs
-
-I also think we are going to need to implement threads but I only want them in channels.
 
 Group DMs (talk with more than one person) and also the ability to promote a group conversation to a channel.
 

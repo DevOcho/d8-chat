@@ -1,0 +1,20 @@
+{# app/templates/partials/chat_input_thread.html #}
+<div id="thread-input-container-{{ parent_message.id }}"
+     class="p-3 border-top bg-body-tertiary">
+    <form ws-send autocomplete="off" hx-on::htmx:wsAfterSend="this.reset()">
+        <input type="hidden"
+               name="parent_message_id"
+               value="{{ parent_message.id }}">
+        {# This hidden input tells the backend this is a threaded reply #}
+        <input type="hidden" name="reply_type" value="thread">
+        <textarea name="chat_message"
+                  class="form-control"
+                  rows="2"
+                  placeholder="Reply..."
+                  autofocus
+                  onfocus="this.setSelectionRange(this.value.length,this.value.length);"></textarea>
+        <div class="d-flex justify-content-end mt-2">
+            <button type="submit" class="btn btn-primary btn-sm">Send</button>
+        </div>
+    </form>
+</div>

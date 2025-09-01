@@ -315,6 +315,7 @@ emoji-picker {
 /* --- Attachment Preview Styles --- */
 #attachment-previews.has-attachments {
     display: flex !important; /* Override the inline style to show the container */
+    border-bottom: 1px solid #dee2e6;
 }
 
 .attachment-thumbnail {
@@ -348,6 +349,10 @@ emoji-picker {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+[data-bs-theme="dark"] #attachment-previews.has-attachments {
+    border-bottom-color: #2f3136 !important;
 }
 
 [data-bs-theme="dark"] #attachment-previews {
@@ -622,4 +627,19 @@ emoji-picker {
 #image-carousel-modal .carousel-control-next-icon {
     width: 100%;
     height: 100%;
+}
+
+/* --- Thread Indicator Styles --- */
+.thread-participant-avatars {
+    display: flex;
+}
+
+.thread-participant-avatar {
+    border-radius: 50%;
+    border: 2px solid var(--bs-body-bg); /* Use CSS variable to adapt to light/dark mode */
+    background-color: var(--bs-body-bg);
+}
+
+.thread-participant-avatar:not(:first-child) {
+    margin-left: -10px; /* This creates the overlap effect */
 }

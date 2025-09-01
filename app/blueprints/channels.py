@@ -114,6 +114,7 @@ def get_channel_chat(channel_id):
         reactions_map=reactions_map,
         attachments_map=attachments_map,
         conversation_id=conversation.id,
+        Message=Message,
     )
 
     clear_badge_html = render_template(

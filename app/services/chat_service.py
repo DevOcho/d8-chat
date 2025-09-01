@@ -19,6 +19,7 @@ def handle_new_message(
     conversation: Conversation,
     chat_text: str,
     parent_id: int = None,
+    reply_type: str = None,
     attachment_file_ids: str = None,
 ):
     """
@@ -41,6 +42,7 @@ def handle_new_message(
             conversation=conversation,
             content=chat_text,
             parent_message=parent_id if parent_id else None,
+            reply_type=reply_type if parent_id else None,
         )
 
         # Step 2: Link any attachments if IDs are provided

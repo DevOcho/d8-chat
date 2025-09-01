@@ -20,12 +20,14 @@
         {% set ns = namespace(first_unread_found=false) %}
         {% for message in messages %}
             {# Check if this is the first unread message #}
-            {% if not ns.first_unread_found and message.created_at > last_read_timestamp and message.user_id != g.user.id %}
-                {% include 'partials/new_message_separator.html' %}
-                {# This change will now persist across the loop #}
-                {% set ns.first_unread_found = true %}
+            {% if message.reply_type != 'thread' %}
+                {% if not ns.first_unread_found and message.created_at > last_read_timestamp and message.user_id != g.user.id %}
+                    {% include 'partials/new_message_separator.html' %}
+                    {# This change will now persist across the loop #}
+                    {% set ns.first_unread_found = true %}
+                {% endif %}
+                {% include 'partials/message.html' %}
             {% endif %}
-            {% include 'partials/message.html' with context %}
         {% else %}
             <div class="text-center text-muted">
                 <h5>Welcome to #{{ channel.name }}</h5>

@@ -241,45 +241,45 @@
                 </div>
             </div>
         </div>
-    </main>
-    <!-- Slide-Out Panel -->
-    <div class="offcanvas offcanvas-end"
-         tabindex="-1"
-         id="right-panel-offcanvas"
-         aria-labelledby="right-panel-label">
-        <div class="offcanvas-header">
-            <h5 id="right-panel-label">Details</h5>
-            <button type="button"
-                    class="btn-close"
-                    data-bs-dismiss="offcanvas"
-                    aria-label="Close"></button>
-        </div>
-        <div class="offcanvas-body" id="right-panel-body">
-            <!-- Content will be loaded here by HTMX -->
-            <div class="text-center">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
+        <!-- Slide-Out Panel -->
+        <div class="offcanvas offcanvas-end"
+             tabindex="-1"
+             id="right-panel-offcanvas"
+             aria-labelledby="right-panel-label">
+            <div class="offcanvas-header">
+                <h5 id="right-panel-label">Details</h5>
+                <button type="button"
+                        class="btn-close"
+                        data-bs-dismiss="offcanvas"
+                        aria-label="Close"></button>
             </div>
-        </div>
-    </div>
-    <!-- Generic HTMX Modal -->
-    <div class="modal fade"
-         id="htmx-modal"
-         tabindex="-1"
-         aria-labelledby="htmxModalLabel"
-         aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content" id="htmx-modal-content">
+            <div class="offcanvas-body" id="right-panel-body">
                 <!-- Content will be loaded here by HTMX -->
-                <div class="modal-body text-center">
+                <div class="text-center">
                     <div class="spinner-border" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+        <!-- Generic HTMX Modal -->
+        <div class="modal fade"
+             id="htmx-modal"
+             tabindex="-1"
+             aria-labelledby="htmxModalLabel"
+             aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content" id="htmx-modal-content">
+                    <!-- Content will be loaded here by HTMX -->
+                    <div class="modal-body text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
 {% endblock %}
 {% block scripts %}
     <script type="module"

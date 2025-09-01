@@ -3,11 +3,11 @@
         <input type="file" id="file-attachment-input" class="d-none" multiple>
         <input type="hidden" name="attachment_file_id" id="attachment-file-ids">
         <input type="hidden" name="parent_message_id" value="{{ message.id }}">
+        <input type="hidden" name="reply_type" value="quote">
         <div class="wysiwyg-editor-container">
             <div id="attachment-previews"
                  class="p-2 d-flex flex-wrap gap-2"
-                 style="border-bottom: 1px solid #dee2e6;
-                        display: none">
+                 style="display: none">
                 <!-- Image previews will be injected here by JavaScript -->
             </div>
             <!-- Quoted Message UI -->
