@@ -383,7 +383,15 @@ def get_message_view(message_id):
         return "", 404
 
     # This is used by the "Cancel" button on the edit form.
-    return render_template("partials/message.html", message=message)
+    reactions_map = get_reactions_for_messages([message])
+    attachments_map = get_attachments_for_messages([message])
+    return render_template(
+        "partials/message.html",
+        message=message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
 
 
 @main_bp.route("/chat/message/<int:message_id>/edit", methods=["GET"])
@@ -416,7 +424,15 @@ def update_message(message_id):
         conv_id_str = message.conversation.conversation_id_str
 
         # Render the updated message partial
-        updated_message_html = render_template("partials/message.html", message=message)
+        reactions_map = get_reactions_for_messages([message])
+        attachments_map = get_attachments_for_messages([message])
+        updated_message_html = render_template(
+            "partials/message.html",
+            message=message,
+            reactions_map=reactions_map,
+            attachments_map=attachments_map,
+            Message=Message,
+        )
 
         # Construct the OOB swap HTML for the broadcast. This tells all
         # clients to replace the message's outer HTML with the updated version.
@@ -426,7 +442,13 @@ def update_message(message_id):
         chat_manager.broadcast(conv_id_str, broadcast_html)
 
     # The original hx-put request also needs a response. Return the updated partial.
-    return render_template("partials/message.html", message=message)
+    return render_template(
+        "partials/message.html",
+        message=message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
 
 
 @main_bp.route("/chat/message/<int:message_id>", methods=["DELETE"])
@@ -439,26 +461,24 @@ def delete_message(message_id):
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
 
-    # Check for an attachment *before* deleting the message.
-    attachment_to_delete = message.attachment
+    # Use the correct 'attachments' property and prepare to loop
+    attachments_to_delete = list(message.attachments)
     conv_id_str = message.conversation.conversation_id_str
 
     try:
-        # Use a database transaction to ensure both deletes succeed or fail together.
+        # Use a database transaction to ensure all deletes succeed or fail together.
         with db.atomic():
             # Delete the message from the database
-            message.delete_instance()
+            message.delete_instance(
+                recursive=True
+            )  # recursive will delete related MessageAttachment links
 
-            # If there was an attachment, delete it from our records and from Minio.
-            if attachment_to_delete:
+            # If there were attachments, delete them from Minio and our records.
+            for attachment in attachments_to_delete:
                 try:
-                    # Delete from Minio storage first
-                    minio_service.delete_file(attachment_to_delete.stored_filename)
-                    # Then delete the record from our database
-                    attachment_to_delete.delete_instance()
+                    minio_service.delete_file(attachment.stored_filename)
+                    attachment.delete_instance()
                 except Exception as e:
-                    # If the file cleanup fails, log it but don't fail the whole request.
-                    # The user's primary goal was to delete the message.
                     print(
                         f"Error during attachment cleanup for message {message_id}: {e}"
                     )
@@ -471,7 +491,7 @@ def delete_message(message_id):
     broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
     chat_manager.broadcast(conv_id_str, broadcast_html)
 
-    return "", 204  # Use 200 OK because we are broadcasting, 204 can be ignored by HTMX
+    return "", 204
 
 
 @main_bp.route("/chat/input/default")
@@ -887,11 +907,16 @@ def get_older_messages(conversation_id):
     messages = list(reversed(query))
 
     # The new partial handles rendering the messages and the next trigger
+    reactions_map = get_reactions_for_messages(messages)
+    attachments_map = get_attachments_for_messages(messages)
     return render_template(
         "partials/message_batch.html",
         messages=messages,
         conversation_id=conversation_id,
         PAGE_SIZE=PAGE_SIZE,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
     )
 
 

@@ -18,6 +18,8 @@ from app.models import (
     UserConversationStatus,
     Mention,
     Reaction,
+    UploadedFile,
+    MessageAttachment,
 )
 
 
@@ -60,6 +62,8 @@ def test_db(app):
             UserConversationStatus,
             Mention,
             Reaction,
+            UploadedFile,
+            MessageAttachment,
         ]
 
         db.create_tables(tables)
@@ -80,7 +84,9 @@ def test_db(app):
             conversation_id_str=f"channel_{general_channel.id}",
             defaults={"type": "channel"},
         )
-        announcements_channel, _ = Channel.get_or_create(workspace=workspace, name="announcements")
+        announcements_channel, _ = Channel.get_or_create(
+            workspace=workspace, name="announcements"
+        )
         Conversation.get_or_create(
             conversation_id_str=f"channel_{announcements_channel.id}",
             defaults={"type": "channel"},
@@ -89,6 +95,7 @@ def test_db(app):
         yield  # The test runs at this point
 
         # Teardown: drop all tables to ensure isolation
+        db.close()
         db.drop_tables(tables)
 
 
