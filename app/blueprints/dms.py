@@ -229,7 +229,11 @@ def get_dm_details(other_user_id):
     if not other_user:
         return "User not found", 404
 
-    return render_template("partials/dm_details.html", other_user=other_user)
+    response = make_response(
+        render_template("partials/dm_details.html", other_user=other_user)
+    )
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
 
 
 @dms_bp.route("/chat/dm/<int:other_user_id>/leave", methods=["DELETE"])

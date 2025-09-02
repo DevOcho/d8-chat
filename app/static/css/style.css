@@ -52,7 +52,17 @@ body, html {
   position: relative;
   padding: 0.5rem;
   border-radius: 0.25rem;
+  transition: background-color 0.15s ease-in-out;
 }
+
+.message-container:hover {
+  background-color: #f8f9fa; /* A subtle light gray for light mode */
+}
+
+[data-bs-theme="dark"] .message-container:hover {
+    background-color: #313a4a; /* row highlight */
+}
+
 .message-content {
     word-wrap: break-word;
 }

@@ -18,8 +18,6 @@
         {# This is the "Reply in Thread" button. It ONLY appears in channels. #}
         {% if message.conversation.type == 'channel' %}
             <button class="btn btn-sm btn-light"
-                    data-bs-toggle="offcanvas"
-                    data-bs-target="#right-panel-offcanvas"
                     hx-get="{{ url_for('main.view_thread', parent_message_id=message.id) }}"
                     hx-target="#right-panel-offcanvas"
                     data-action="view-thread"

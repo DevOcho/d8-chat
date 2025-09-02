@@ -175,13 +175,17 @@ def get_channel_details(channel_id):
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
 
-    return render_template(
-        "partials/channel_details.html",
-        channel=channel,
-        admins=admins,
-        members_count=members_count,
-        current_user_membership=current_user_membership,
+    response = make_response(
+        render_template(
+            "partials/channel_details.html",
+            channel=channel,
+            admins=admins,
+            members_count=members_count,
+            current_user_membership=current_user_membership,
+        )
     )
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
 
 
 @channels_bp.route("/chat/channel/<int:channel_id>/details/about", methods=["GET"])
@@ -644,20 +648,29 @@ def leave_channel(channel_id):
     conversation_self, _ = Conversation.get_or_create(
         conversation_id_str=conv_id_str_self, defaults={"type": "dm"}
     )
-    messages_self = (
+    messages_query = (
         Message.select()
         .where(Message.conversation == conversation_self)
         .order_by(Message.created_at.desc())
         .limit(PAGE_SIZE)
     )
 
+    # We need to fetch reactions and attachments for the messages we are about to render.
+    messages_self = list(reversed(messages_query))
+    reactions_map = get_reactions_for_messages(messages_self)
+    attachments_map = get_attachments_for_messages(messages_self)
+
     dm_header_html = render_template("partials/dm_header.html", other_user=user_self)
+    # Pass the new maps to the template context.
     dm_messages_html = render_template(
         "partials/dm_messages.html",
-        messages=list(reversed(messages_self)),
+        messages=messages_self,
         other_user=user_self,
         last_read_timestamp=datetime.datetime.now(),
         PAGE_SIZE=PAGE_SIZE,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
     )
     messages_swap_html = f'<div id="chat-messages-container" hx-swap-oob="innerHTML">{dm_messages_html}</div>'
 

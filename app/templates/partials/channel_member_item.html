@@ -3,8 +3,8 @@
     <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2"
          style="width: 24px;
                 height: 24px;
-                font-size: 0.8rem">{{ member.user.username[0]|upper }}</div>
-    <span>{{ member.user.username }}</span>
+                font-size: 0.8rem">{{ (member.user.display_name or member.user.username)[0]|upper }}</div>
+    <span>{{ member.user.display_name or member.user.username }}</span>
     <div class="ms-auto">
         {% if current_user_membership.role == 'admin' and member.user.id != g.user.id %}
             <div class="dropdown">
@@ -40,7 +40,7 @@
                                 hx-delete="{{ url_for('channels.remove_channel_member', channel_id=channel.id, user_id_to_remove=member.user.id) }}"
                                 hx-target="#members-tab-pane"
                                 hx-swap="innerHTML"
-                                hx-confirm="Are you sure you want to remove {{ member.user.username }} from the channel?">
+                                hx-confirm="Are you sure you want to remove {{ member.user.display_name or member.user.username }} from the channel?">
                             Remove from channel
                         </button>
                     </li>

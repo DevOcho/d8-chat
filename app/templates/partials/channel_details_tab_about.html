@@ -8,7 +8,7 @@
         <strong class="text-muted d-block mb-1">Managed by</strong>
         <p>
             {% for admin in admins %}
-                {{ admin.user.username }}
+                {{ admin.user.display_name or admin.user.username }}
                 {% if not loop.last %},{% endif %}
             {% endfor %}
         </p>
@@ -17,7 +17,9 @@
     <div class="mb-3">
         <strong class="text-muted d-block mb-1">Created by</strong>
         {% if channel.created_by %}
-            <p>{{ channel.created_by.username }} on {{ channel.created_at.strftime("%B %d, %Y") }}</p>
+            <p>
+                {{ channel.created_by.display_name or channel.created_by.username }} on {{ channel.created_at.strftime("%B %d, %Y") }}
+            </p>
         {% else %}
             <p>Creator information not available.</p>
         {% endif %}

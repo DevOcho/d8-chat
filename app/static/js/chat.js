@@ -963,7 +963,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
         const targetId = evt.detail.content.id || 'unknown';
-        if (targetId.startsWith('status-dot-') || targetId.startsWith('sidebar-presence-indicator-')) {
+        if (targetId.startsWith('status-dot-') ||
+            targetId.startsWith('sidebar-presence-indicator-') ||
+            targetId.startsWith('thread-replies-list-') ||
+            targetId.startsWith('reactions-container-')) {
             console.log(`Ignoring harmless presence update for target: #${targetId}`);
             return;
         }
@@ -1293,11 +1296,31 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Right Panel offcanvas with listeners
     const rightPanelOffcanvasEl = document.getElementById('right-panel-offcanvas');
     if (rightPanelOffcanvasEl) {
         const rightPanelOffcanvas = new bootstrap.Offcanvas(rightPanelOffcanvasEl);
         document.body.addEventListener('close-offcanvas', () => rightPanelOffcanvas.hide());
+        document.body.addEventListener('open-offcanvas', () => rightPanelOffcanvas.show());
+
+        // Add an event listener that fires AFTER the panel is hidden
+        rightPanelOffcanvasEl.addEventListener('hidden.bs.offcanvas', event => {
+            // Find the body of the panel
+            const panelBody = rightPanelOffcanvasEl.querySelector('#right-panel-body');
+            if (panelBody) {
+                // Reset it to its original loading state to prevent stale content
+                panelBody.innerHTML = `
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                `;
+            }
+        });
     }
+
+
 
     // This listener handles closing the top-most active UI element when the Escape key is pressed.
     document.body.addEventListener('keydown', (e) => {

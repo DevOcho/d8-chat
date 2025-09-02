@@ -242,9 +242,13 @@ def logout():
 @login_required
 def profile():
     """Renders the profile details partial for the offcanvas panel."""
-    return render_template(
+
+    html = render_template(
         "partials/profile_details.html", user=g.user, theme=g.user.theme
     )
+    response = make_response(html)
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
 
 
 # --- CHAT INTERFACE ROUTES ---
@@ -523,16 +527,20 @@ def view_thread(parent_message_id):
     reactions_map = get_reactions_for_messages(all_thread_messages)
     attachments_map = get_attachments_for_messages(all_thread_messages)
 
-    return render_template(
-        "partials/thread_view.html",
-        parent_message=parent_message,
-        thread_replies=thread_replies,
-        reactions_map=reactions_map,
-        attachments_map=attachments_map,
-        channel=channel,
-        Message=Message,
-        is_in_thread_view=True,  # This flag tells the templates they are in the side panel
+    response = make_response(
+        render_template(
+            "partials/thread_view.html",
+            parent_message=parent_message,
+            thread_replies=thread_replies,
+            reactions_map=reactions_map,
+            attachments_map=attachments_map,
+            channel=channel,
+            Message=Message,
+            is_in_thread_view=True,  # This flag tells the templates they are in the side panel
+        )
     )
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
 
 
 @main_bp.route("/chat/input/thread/<int:parent_message_id>")
@@ -1132,6 +1140,7 @@ def chat(ws):
                     message=new_message,
                     reactions_map=reactions_map,
                     attachments_map=attachments_map,
+                    Message=Message,
                 )
                 message_to_broadcast = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
 

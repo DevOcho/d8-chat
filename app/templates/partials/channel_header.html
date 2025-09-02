@@ -6,8 +6,6 @@
       - hx-get/target: Tells HTMX to load content into the offcanvas body.
     -->
     <div style="cursor: pointer"
-         data-bs-toggle="offcanvas"
-         data-bs-target="#right-panel-offcanvas"
          hx-get="{{ url_for('channels.get_channel_details', channel_id=channel.id) }}"
          hx-target="#right-panel-offcanvas"
          title="View channel details">
