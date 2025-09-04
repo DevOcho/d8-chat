@@ -585,6 +585,14 @@ const createEditor = function(idSuffix = '') {
         if (!emojiButton || !emojiPicker || !emojiPickerContainer) return;
         emojiButton.addEventListener('click', (e) => {
             e.stopPropagation();
+
+            // Close any other open emoji pickers on the page first.
+            document.querySelectorAll('[id^="emoji-picker-container"]').forEach(picker => {
+                if (picker !== emojiPickerContainer) {
+                    picker.style.display = 'none';
+                }
+            });
+
             const isHidden = emojiPickerContainer.style.display === 'none';
             emojiPickerContainer.style.display = isHidden ? 'block' : 'none';
         });
@@ -769,19 +777,26 @@ const createEditor = function(idSuffix = '') {
     };
 };
 
-// --- [REFACTORED] Event Listeners to initialize editors ---
+// --- Event Listeners to initialize editors ---
+// This promise resolves when the emoji-picker custom element is ready.
+const emojiPickerReady = customElements.whenDefined('emoji-picker');
+
 document.body.addEventListener('chatInputLoaded', () => {
-    window.mainEditor = createEditor('');
-    window.mainEditor.initialize();
+    emojiPickerReady.then(() => {
+        window.mainEditor = createEditor('');
+        window.mainEditor.initialize();
+    });
 });
 
 document.body.addEventListener('threadInputLoaded', (event) => {
-    const {
-        parentMessageId
-    } = event.detail;
-    const threadEditor = createEditor(`-thread-${parentMessageId}`);
-    threadEditor.initialize();
-    threadEditor.focusActiveInput();
+    emojiPickerReady.then(() => {
+        const {
+            parentMessageId
+        } = event.detail;
+        const threadEditor = createEditor(`-thread-${parentMessageId}`);
+        threadEditor.initialize();
+        threadEditor.focusActiveInput();
+    });
 });
 
 // --- Image Carousel Manager ---
@@ -1106,14 +1121,25 @@ document.addEventListener('DOMContentLoaded', () => {
             window.mainEditor.focusActiveInput();
         }
     });
-    document.addEventListener('click', (e) => {
-        const pickerContainer = document.getElementById('emoji-picker-container');
-        if (pickerContainer && pickerContainer.style.display === 'block') {
-            if (!pickerContainer.contains(e.target) && !e.target.closest('#emoji-btn')) {
-                pickerContainer.style.display = 'none';
-            }
+
+document.addEventListener('click', (e) => {
+        // If the click is on any emoji button, do nothing, as the button's own handler will manage it.
+        if (e.target.closest('[id^="emoji-btn"]')) {
+            return;
         }
+
+        // If the click is inside any open emoji picker, do nothing.
+        const openPicker = document.querySelector('[id^="emoji-picker-container"][style*="block"]');
+        if (openPicker && openPicker.contains(e.target)) {
+            return;
+        }
+
+        // Otherwise, the click was outside all pickers and buttons, so close all pickers.
+        document.querySelectorAll('[id^="emoji-picker-container"]').forEach(picker => {
+            picker.style.display = 'none';
+        });
     });
+
     document.body.addEventListener('htmx:beforeSwap', (evt) => {
         if (evt.detail.target.id === 'chat-messages-container' && evt.detail.requestConfig.verb === 'get') {
             const typingIndicator = document.getElementById('typing-indicator');
@@ -1281,10 +1307,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (modalInstance) modalInstance.hide();
                 return;
             }
-            const emojiPickerContainer = document.getElementById('emoji-picker-container');
-            if (emojiPickerContainer && emojiPickerContainer.style.display !== 'none') {
+            const openPicker = document.querySelector('[id^="emoji-picker-container"][style*="block"]');
+            if (openPicker) {
                 e.preventDefault();
-                emojiPickerContainer.style.display = 'none';
+                openPicker.style.display = 'none';
                 return;
             }
         }
