@@ -45,7 +45,8 @@ body, html {
   padding: 1rem;
   background-color: #f8f9fa;
 }
-#message-form {
+/* Change this selector */
+form[id^="message-form"] {
   position: relative;
 }
 .message-container {
@@ -309,7 +310,7 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
 }
 
 /* --- Emoji Picker Styles --- */
-#emoji-picker-container {
+[id^="emoji-picker-container"] {
     position: absolute;
     bottom: 100%; /* Position it right above the input container */
     right: 0;
