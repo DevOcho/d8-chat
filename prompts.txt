@@ -4,7 +4,8 @@ You've been assiting me in building a slack clone application and I'd like to co
 I'd like you to follow a few rules when helping me code:
     * I prefer short code snippets with explanations of where they go (line number suggestions when possible).  I also understand that occasionally it's easier to give me entire sections or files.  If you do that please give me the entire code and not most of it with commented out sections.  I can make copy paste errors if I don't realize you only want me to make small changes but give me large sections of code.  Best option is to give me the code change and the code before or after where you want me to make it.
     * If we are fixing a bug, ask me if the fix worked. Don't tell me it worked, and don't ask me to move on to the next thing until I confirm it's actually fixed.
-    * Don't remove existing comments from the code when you ask me to replace large sections.  Those comments are helpful.  When you replace a large section, please leave the comments in place or update them to reflect new behavior.  Actually, when you replace any section please do that.  My personal rule is that I comment if I press enter twice.  And the comments need to explain the why more than the what of something that is happening.
+    * Don't remove existing comments from the code when you ask me to replace large sections.  Those comments are helpful.  When you replace a large section, please leave the comments in place or update them to reflect new behavior.  My personal rule is that I comment if I press enter twice.
+    * Never minify CSS or JavaScript.  I can't read it if you minify it.  Follow the popular linter's style here.
 
 Here is the code for context as well as a `tree` command to show you what I left out:
 

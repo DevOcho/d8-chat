@@ -155,13 +155,53 @@ html.login-page, body.login-page { overflow: auto; }
 .wysiwyg-content { min-height: 38px; max-height: 30vh; overflow-y: auto; padding: 0.5rem 0.75rem; word-wrap: break-word; }
 #chat-message-input, .toolbar-hidden { display: none; }
 #markdown-toggle-view { height: 38px; min-height: 38px; resize: none; padding: 0.5rem 0.75rem; line-height: 1.5; max-height: 30vh; overflow-y: auto; }
-.wysiwyg-editor-container > #markdown-toggle-view.form-control { border: 0; border-radius: 0; }
+.wysiwyg-editor-container > textarea.form-control { border: 0; border-radius: 0; }
 kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; background-color: #f7f7f7; color: #333; font-size: 0.8em; font-family: monospace; }
-#send-button.send-btn-dynamic { background-color: #fdf5f8; color: #495057; border: 1px solid #ec729c; padding: 0.375rem 0.75rem; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out; }
-#send-button.send-btn-dynamic i { color: #ec729c; }
-#send-button.send-btn-dynamic .send-shortcut { border-left: 1px solid rgba(236, 114, 156, 0.4); padding-left: 0.6rem; display: flex; align-items: center; gap: 0.2rem; }
-#send-button.send-btn-dynamic:hover { background-color: #f8f9fa; border-color: #e35a8b; }
+
+/* send button */
+.send-btn-dynamic {
+    background-color: #fdf5f8;
+    color: #495057;
+    border: 1px solid #ec729c;
+    padding: 0.375rem 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.send-btn-dynamic i {
+    color: #ec729c;
+}
+
+.send-btn-dynamic .send-shortcut {
+    border-left: 1px solid rgba(236, 114, 156, 0.4);
+    padding-left: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.send-btn-dynamic:hover {
+    background-color: #f8f9fa;
+    border-color: #e35a8b;
+}
+
 .wysiwyg-content:focus, #markdown-toggle-view:focus { outline: 0 !important; box-shadow: none !important; }
+
+.wysiwyg-content[data-placeholder]:not(:focus):empty::before {
+    content: attr(data-placeholder);
+    color: #6c757d; /* Standard Bootstrap placeholder color */
+    pointer-events: none;
+    display: block; /* For top/bottom padding */
+}
+
+[data-bs-theme="dark"] .wysiwyg-content,
+[data-bs-theme="dark"] .wysiwyg-editor-container textarea {
+    background-color: #40444b;
+    color: #dcddde;
+}
+[data-bs-theme="dark"] .wysiwyg-content:focus, textarea:focus { outline: 0 !important; box-shadow: none !important; }
 
 /* --- Rendered Message Content Styles --- */
 .message-content > * + * { margin-top: 0.6em; }
@@ -222,8 +262,19 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     .wysiwyg-toolbar button:hover { background-color: #4e5258; }
 
     /* Send Button */
-    #send-button.send-btn-dynamic { background-color: #40444b; color: #dcddde; }
-    #send-button.send-btn-dynamic:hover { background-color: #4e5258; }
+    .send-btn-dynamic {
+        color: #dcddde;
+        background-color: #40444b;
+        border-color: #ec729c;
+    }
+    .send-btn-dynamic:hover {
+        color: #dcddde;
+        background-color: #4e5258;
+        border-color: #e35a8b;
+    }
+    .send-btn-dynamic i {
+        color: #ec729c;
+    }
 
     /* Blockquotes */
     .message-content blockquote, .wysiwyg-content blockquote { border-left-color: cornflowerblue; color: #b9bbbe; }
@@ -404,7 +455,7 @@ emoji-picker {
 .attachment-grid {
     display: grid;
     gap: 4px;
-    max-width: 450px; /* Limit the max width of the grid */
+    max-width: 380px; /* Limit the max width of the grid */
     border-radius: 12px;
     overflow: hidden; /* This is key to making the corner radius apply to child images */
 }
@@ -436,7 +487,7 @@ emoji-picker {
 /* Layout for three images */
 .attachment-grid[data-count="3"] {
     grid-template-columns: 1fr 1fr;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: 1 / 1;
 }
 
 .attachment-grid[data-count="3"] .attachment-grid-item:first-child {
