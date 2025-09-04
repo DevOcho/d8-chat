@@ -1,0 +1,90 @@
+{# app/templates/partials/chat_input_thread_edit.html #}
+<div id="thread-input-container-{{ message.parent_message.id }}"
+     class="chat-input-form">
+    <form hx-put="/chat/message/{{ message.id }}"
+          hx-target="#message-{{ message.id }}"
+          hx-swap="outerHTML"
+          hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/thread/{{ message.parent_message.id }}', {target: '#thread-input-container-{{ message.parent_message.id }}', swap: 'outerHTML'})"
+          id="message-form-thread-{{ message.id }}"
+          autocomplete="off">
+        <input type="file"
+               id="file-attachment-input-thread-{{ message.id }}"
+               class="d-none"
+               multiple>
+        <input type="hidden"
+               name="attachment_file_ids"
+               id="attachment-file-ids-thread-{{ message.id }}">
+        <div class="wysiwyg-editor-container">
+            <!-- Editing Block UI -->
+            <div class="editing-block p-2 rounded">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <strong class="d-block">Editing Message</strong>
+                        <p class="mb-0 text-muted">{{ message.content | emojize | truncate(150, True) }}</p>
+                    </div>
+                    <button type="button"
+                            class="btn-close"
+                            aria-label="Cancel Edit"
+                            title="Cancel Edit"
+                            hx-get="/chat/input/thread/{{ message.parent_message.id }}"
+                            hx-target="#thread-input-container-{{ message.parent_message.id }}"
+                            hx-swap="outerHTML"></button>
+                </div>
+            </div>
+            <div class="wysiwyg-toolbar toolbar-hidden">
+                <!-- Toolbar buttons -->
+            </div>
+            <div id="wysiwyg-editor-thread-{{ message.id }}"
+                 class="wysiwyg-content"
+                 contenteditable="true"
+                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"></div>
+            <textarea id="markdown-toggle-view-thread-{{ message.id }}"
+                      class="form-control"
+                      rows="1"
+                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}">{{ message.content }}</textarea>
+            <textarea id="chat-message-input-thread-{{ message.id }}"
+                      name="content"
+                      style="display: none">{{ message.content }}</textarea>
+            <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
+                <button type="button"
+                        id="format-toggle-btn-thread-{{ message.id }}"
+                        title="Toggle Rich Formatting">
+                    <i class="bi bi-type"></i>
+                </button>
+                <button type="button"
+                        id="file-attachment-btn-thread-{{ message.id }}"
+                        title="Attach a file">
+                    <i class="bi bi-paperclip"></i>
+                </button>
+                <button type="button"
+                        id="mention-btn-thread-{{ message.id }}"
+                        title="Mention User">
+                    <i class="bi bi-at"></i>
+                </button>
+                <button type="button"
+                        id="emoji-btn-thread-{{ message.id }}"
+                        title="Add Emoji">
+                    <i class="bi bi-emoji-smile"></i>
+                </button>
+                <div class="ms-auto d-flex align-items-center">
+                    <button id="send-button-thread-{{ message.id }}"
+                            type="submit"
+                            class="btn btn-primary send-btn-dynamic">Save Changes</button>
+                </div>
+            </div>
+        </div>
+        <div id="emoji-picker-container-thread-{{ message.id }}"
+             style="display: none">
+            <emoji-picker class="light"></emoji-picker>
+        </div>
+    </form>
+    <div id="typing-sender"
+         ws-send
+         hx-trigger="typing-event"
+         style="display: none"></div>
+</div>
+<script>
+    document.body.dispatchEvent(new CustomEvent('threadInputLoaded', {
+        detail: { parentMessageId: '{{ message.id }}' }
+    }));
+</script>

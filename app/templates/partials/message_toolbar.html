@@ -28,14 +28,27 @@
         {% endif %}
     {% endif %}
     {% if g.user.id == message.user.id %}
-        <button class="btn btn-sm btn-light"
-                hx-get="/chat/message/{{ message.id }}/load_for_edit"
-                hx-target="#chat-input-container"
-                hx-swap="outerHTML"
-                data-action="edit"
-                title="Edit">
-            <i class="bi bi-pencil-square"></i>
-        </button>
+        {% if is_in_thread_view %}
+            {# When in a thread, target the thread's input container #}
+            <button class="btn btn-sm btn-light"
+                    hx-get="/chat/message/{{ message.id }}/load_for_thread_edit"
+                    hx-target="#thread-input-container-{{ message.parent_message.id }}"
+                    hx-swap="outerHTML"
+                    data-action="edit"
+                    title="Edit">
+                <i class="bi bi-pencil-square"></i>
+            </button>
+        {% else %}
+            {# When in the main view, target the main chat input container #}
+            <button class="btn btn-sm btn-light"
+                    hx-get="/chat/message/{{ message.id }}/load_for_edit"
+                    hx-target="#chat-input-container"
+                    hx-swap="outerHTML"
+                    data-action="edit"
+                    title="Edit">
+                <i class="bi bi-pencil-square"></i>
+            </button>
+        {% endif %}
         <button class="btn btn-sm btn-light"
                 hx-delete="/chat/message/{{ message.id }}"
                 hx-target="#message-{{ message.id }}"

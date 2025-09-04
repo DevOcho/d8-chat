@@ -1067,19 +1067,30 @@ document.addEventListener('DOMContentLoaded', () => {
             pill.classList.toggle('user-reacted', hasReacted);
         });
     };
+
     const initializeReactionPopovers = (container) => {
         const popoverTriggerList = container.querySelectorAll('[data-bs-toggle="popover"]');
         popoverTriggerList.forEach(popoverTriggerEl => {
             if (popoverTriggerEl.dataset.popoverInitialized) return;
             const messageId = popoverTriggerEl.dataset.messageId;
             if (!messageId) return;
-            const popover = new bootstrap.Popover(popoverTriggerEl, {
+
+            const popoverOptions = {
                 html: true,
                 sanitize: false,
                 content: `<emoji-picker class="light"></emoji-picker>`,
-                placement: 'left',
+                placement: 'top', // Changed to 'top' for better visibility in the panel
                 customClass: 'emoji-popover'
-            });
+            };
+
+            // If the trigger element is inside our slide-out panel, constrain the popover to that panel.
+            // This prevents it from being hidden behind the offcanvas backdrop.
+            if (popoverTriggerEl.closest('#right-panel-offcanvas')) {
+                popoverOptions.container = '#right-panel-offcanvas';
+            }
+
+            const popover = new bootstrap.Popover(popoverTriggerEl, popoverOptions);
+
             popoverTriggerEl.addEventListener('shown.bs.popover', () => {
                 const picker = document.querySelector(`.popover[role="tooltip"] emoji-picker`);
                 if (picker) {
@@ -1101,6 +1112,7 @@ document.addEventListener('DOMContentLoaded', () => {
             popoverTriggerEl.dataset.popoverInitialized = 'true';
         });
     };
+
     const processCodeBlocks = (container) => {
         const MAX_HEIGHT = 300;
         const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');

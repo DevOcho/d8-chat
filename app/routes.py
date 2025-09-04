@@ -872,6 +872,33 @@ def load_message_for_edit(message_id):
     return render_template("partials/chat_input_edit.html", message=message)
 
 
+@main_bp.route("/chat/message/<int:message_id>/load_for_thread_edit")
+@login_required
+def load_message_for_thread_edit(message_id):
+    """
+    Loads the thread chat input component configured for editing a specific message.
+    """
+    try:
+        message = Message.get_by_id(message_id)
+        if message.user_id != g.user.id:
+            return "Unauthorized", 403
+
+        # We need the parent message context to correctly ID the container
+        if not message.parent_message:
+            return "Cannot edit a parent message from this view.", 400
+
+        # Convert markdown to HTML for the WYSIWYG view
+        message_content_html = to_html(message.content)
+
+        return render_template(
+            "partials/chat_input_thread_edit.html",
+            message=message,
+            message_content_html=message_content_html,
+        )
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+
 @main_bp.route("/chat/messages/older/<string:conversation_id>")
 @login_required
 def get_older_messages(conversation_id):
