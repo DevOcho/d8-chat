@@ -1196,6 +1196,30 @@ document.addEventListener('click', (e) => {
             }
         }
     });
+
+    document.body.addEventListener('htmx:oobAfterSwap', function(evt) {
+        // This event fires after an Out-Of-Band swap, which is how our WebSocket delivers thread messages.
+        // evt.detail.target is the element that received the swapped content (e.g., #thread-replies-list-60)
+        const targetList = evt.detail.target;
+
+        if (targetList && targetList.id.startsWith('thread-replies-list-')) {
+            const scrollableContainer = targetList.closest('.flex-grow-1[style*="overflow-y: auto"]');
+            if (scrollableContainer) {
+                // Check if the user is already near the bottom before the new message was added.
+                // We give a little buffer (150px) so they don't have to be perfectly at the bottom.
+                const isNearBottom = scrollableContainer.scrollHeight - scrollableContainer.clientHeight - scrollableContainer.scrollTop < 150;
+
+                // Only auto-scroll if the user isn't actively reading older messages.
+                if (isNearBottom) {
+                    scrollableContainer.scrollTo({
+                        top: scrollableContainer.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }
+            }
+        }
+    });
+
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
         try {
             const data = JSON.parse(event.detail.message);
@@ -1281,6 +1305,20 @@ document.addEventListener('click', (e) => {
         const rightPanelOffcanvas = new bootstrap.Offcanvas(rightPanelOffcanvasEl);
         document.body.addEventListener('close-offcanvas', () => rightPanelOffcanvas.hide());
         document.body.addEventListener('open-offcanvas', () => rightPanelOffcanvas.show());
+
+        rightPanelOffcanvasEl.addEventListener('shown.bs.offcanvas', event => {
+            // When the panel is fully visible, check if it contains a thread view
+            const threadRepliesList = rightPanelOffcanvasEl.querySelector('[id^="thread-replies-list-"]');
+            if (threadRepliesList) {
+                // Find the actual scrollable container within the offcanvas body
+                const scrollableContainer = threadRepliesList.closest('.flex-grow-1[style*="overflow-y: auto"]');
+                if (scrollableContainer) {
+                    // Scroll to the very bottom to show the latest message or the input box
+                    scrollableContainer.scrollTop = scrollableContainer.scrollHeight;
+                }
+            }
+        });
+
         rightPanelOffcanvasEl.addEventListener('hidden.bs.offcanvas', event => {
             const panelBody = rightPanelOffcanvasEl.querySelector('#right-panel-body');
             if (panelBody) {

@@ -1301,10 +1301,10 @@ def chat(ws):
 
             # --- NEW BROADCAST LOGIC ---
             if new_message.reply_type == "thread":
-                # This is a threaded reply. We need to send two updates.
+                # This is a threaded reply. We need to send multiple updates.
+                broadcast_html = ""
 
                 # 1. The new message itself to append to the thread panel.
-                #    We need reactions and attachments for this new message.
                 reactions_map_for_reply = get_reactions_for_messages([new_message])
                 attachments_map_for_reply = get_attachments_for_messages([new_message])
                 new_reply_html = render_template(
@@ -1315,25 +1315,39 @@ def chat(ws):
                     Message=Message,
                     is_in_thread_view=True,
                 )
-                broadcast_html = f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
+                broadcast_html += f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
 
-                # 2. The updated parent message to show the new reply count in the main channel.
+                # 2. The updated parent message, rendered for BOTH contexts.
                 parent_message = Message.get_by_id(parent_id)
-                # We also need reactions and attachments for the parent message to render it correctly.
                 reactions_map_for_parent = get_reactions_for_messages([parent_message])
                 attachments_map_for_parent = get_attachments_for_messages(
                     [parent_message]
                 )
-                updated_parent_html = render_template(
+
+                # Version for the main channel view (shows the reply counter)
+                parent_in_channel_html = render_template(
                     "partials/message.html",
                     message=parent_message,
                     reactions_map=reactions_map_for_parent,
                     attachments_map=attachments_map_for_parent,
                     Message=Message,
+                    is_in_thread_view=False,
                 )
-                broadcast_html += f'<div id="message-{parent_id}" hx-swap-oob="outerHTML">{updated_parent_html}</div>'
+                broadcast_html += f'<div id="message-{parent_id}" hx-swap-oob="outerHTML">{parent_in_channel_html}</div>'
 
-                # Broadcast both OOB swaps to everyone in the conversation.
+                # Version for inside the thread view (does NOT show the reply counter)
+                parent_in_thread_html = render_template(
+                    "partials/message.html",
+                    message=parent_message,
+                    reactions_map=reactions_map_for_parent,
+                    attachments_map=attachments_map_for_parent,
+                    Message=Message,
+                    is_in_thread_view=True,
+                )
+                # We target the new container we created in thread_view.html
+                broadcast_html += f'<div id="thread-parent-message-container-{parent_id}" hx-swap-oob="innerHTML"><div class="p-3">{parent_in_thread_html}</div></div>'
+
+                # Broadcast all OOB swaps to everyone in the conversation.
                 chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
                 # Send it back to the sender as well.
                 ws.send(broadcast_html)

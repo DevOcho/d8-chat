@@ -13,10 +13,12 @@
     <!-- Scrollable content area -->
     <div class="flex-grow-1" style="overflow-y: auto;">
         <!-- Parent Message -->
-        <div class="p-3">
-            {% with message=parent_message, is_in_thread_view=True %}
-                {% include 'partials/message.html' %}
-            {% endwith %}
+        <div id="thread-parent-message-container-{{ parent_message.id }}">
+            <div class="p-3">
+                {% with message=parent_message, is_in_thread_view=True %}
+                    {% include 'partials/message.html' %}
+                {% endwith %}
+            </div>
         </div>
         <hr class="my-0">
         <!-- Replies -->
