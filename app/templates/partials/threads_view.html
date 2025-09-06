@@ -1,0 +1,15 @@
+{# app/templates/partials/threads_view.html #}
+<div id="chat-messages-container" class="chat-messages position-relative">
+    <div id="thread-list-container" class="h-100" style="overflow-y: auto;">
+        {% for thread in threads %}
+            {% with message=thread %}
+                {% include 'partials/thread_list_item.html' %}
+            {% endwith %}
+        {% else %}
+            <div class="text-center text-muted p-5">
+                <h5>You're all caught up!</h5>
+                <p>You'll find all your threaded conversations here.</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>

@@ -214,8 +214,18 @@ def get_dm_chat(other_user_id):
             except Exception as e:
                 print(f"Could not send real-time DM add to user {other_user.id}: {e}")
 
+    # Also render the default chat input to ensure it's present.
+    chat_input_html = render_template("partials/chat_input_default.html")
+    chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
+
     # Send everything we have
-    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
+    full_response = (
+        messages_html
+        + header_html
+        + clear_badge_html
+        + add_to_sidebar_html
+        + chat_input_oob_html
+    )
     response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
     return response

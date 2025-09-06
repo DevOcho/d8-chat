@@ -124,7 +124,18 @@ def get_channel_chat(channel_id):
         link_text=f"# {channel.name}",
     )
 
-    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
+    # Also render the default chat input to ensure it's present.
+    chat_input_html = render_template("partials/chat_input_default.html")
+    # Wrap it in a container with the correct ID for the OOB swap.
+    chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
+
+    full_response = (
+        messages_html
+        + header_html
+        + clear_badge_html
+        + add_to_sidebar_html
+        + chat_input_oob_html
+    )
     response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
     return response

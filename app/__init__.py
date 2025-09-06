@@ -193,6 +193,7 @@ def create_app(config_class=Config):
     from .blueprints.channels import channels_bp
     from .blueprints.dms import dms_bp
     from .blueprints.files import files_bp
+    from .blueprints.activity import activity_bp
 
     # Register blueprints
     app.register_blueprint(main_bp)
@@ -201,5 +202,6 @@ def create_app(config_class=Config):
     app.register_blueprint(channels_bp)
     app.register_blueprint(dms_bp)
     app.register_blueprint(files_bp)
+    app.register_blueprint(activity_bp)
 
     return app

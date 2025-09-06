@@ -14,7 +14,7 @@
                 hx-target="#thread-input-container-{{ message.parent_message.id }}"
                 hx-swap="outerHTML"
                 title="Quote Reply">
-            <i class="bi bi-reply-fill"></i>
+            <i class="bi bi-reply"></i>
         </button>
     {% else %}
         {# In the main channel, target the main input container #}
@@ -24,7 +24,7 @@
                 hx-swap="outerHTML"
                 data-action="reply"
                 title="Quote Reply">
-            <i class="bi bi-reply-fill"></i>
+            <i class="bi bi-reply"></i>
         </button>
         {# "Reply in Thread" button ONLY appears in main channel view #}
         {% if message.conversation.type == 'channel' %}
@@ -33,7 +33,7 @@
                     hx-target="#right-panel-offcanvas"
                     data-action="view-thread"
                     title="Reply in Thread">
-                <i class="bi bi-chat-square-text-fill"></i>
+                <i class="bi bi-chat-square-text"></i>
             </button>
         {% endif %}
     {% endif %}

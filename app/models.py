@@ -78,6 +78,7 @@ class User(BaseModel, UserMixin):
     presence_status = CharField(default="online")  # 'online', 'away', or 'busy'
     theme = CharField(default="system")  # 'light', 'dark', or 'system'
     wysiwyg_enabled = BooleanField(default=False, null=False)
+    last_threads_view_at = DateTimeField(null=True)
     avatar = DeferredForeignKey("UploadedFile", backref="user_avatar", null=True)
 
     def set_password(self, password):
@@ -148,6 +149,7 @@ class Message(BaseModel):
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField("self", backref="replies", null=True)
     reply_type = CharField(null=True)  # Can be 'quote' or 'thread'
+    last_reply_at = DateTimeField(null=True)
     quoted_message = DeferredForeignKey("Message", backref="quotes", null=True)
 
     @property

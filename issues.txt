@@ -1,6 +1,8 @@
 Current issues with the slack_clone:
 
-So many issues with threads.  Mentions don't work.  Emojis don't work.  It's sad.
+I want to add "Unreads", "Direct Messages", and "Mentions & Reactions" to the options on the quick view.
+
+The message toolbar needs a darkmode version where the colors are flipped.
 
 Small extra box on the top of the chat inputs that exist solely for image uploads.  These shouldn't be visible until someone actually uploads an image.
 

@@ -48,6 +48,13 @@ def handle_new_message(
             quoted_message=quoted_message_id if quoted_message_id else None,
         )
 
+        # If this is a thread reply, update the parent's last_reply_at timestamp
+        if reply_type == "thread" and parent_id:
+            parent_message = Message.get_or_none(id=parent_id)
+            if parent_message:
+                parent_message.last_reply_at = new_message.created_at
+                parent_message.save()
+
         # Step 2: Link any attachments if IDs are provided
         if attachment_file_ids:
             file_ids = [

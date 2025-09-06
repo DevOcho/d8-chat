@@ -405,6 +405,31 @@ def chat_interface():
                 "has_unread": has_unread,
             }
 
+    # 6. Check for unread threads to determine if the sidebar link should be bold.
+    last_view_time = g.user.last_threads_view_at or datetime.datetime.min
+
+    # Find all parent message IDs the user is involved in (started or replied to)
+    user_thread_replies = Message.select().where(
+        (Message.user == g.user) & (Message.reply_type == "thread")
+    )
+    involved_parent_ids = {reply.parent_message_id for reply in user_thread_replies}
+    started_thread_parents = Message.select(Message.id).where(
+        (Message.user == g.user) & (Message.last_reply_at.is_null(False))
+    )
+    for parent in started_thread_parents:
+        involved_parent_ids.add(parent.id)
+
+    has_unread_threads = False
+    if involved_parent_ids:
+        has_unread_threads = (
+            Message.select(fn.COUNT(Message.id))
+            .where(
+                (Message.id.in_(list(involved_parent_ids)))
+                & (Message.last_reply_at > last_view_time)
+            )
+            .exists()
+        )
+
     return render_template(
         "chat.html",
         channels=user_channels,
@@ -858,7 +883,12 @@ def create_user():
     try:
         with db.atomic():
             # Create the User
-            new_user = User(username=username, email=email, display_name=display_name)
+            new_user = User(
+                username=username,
+                email=email,
+                display_name=display_name,
+                last_threads_view_at=datetime.datetime.now(),
+            )
             new_user.set_password(password)
             new_user.save()
 
@@ -1301,10 +1331,10 @@ def chat(ws):
 
             # --- NEW BROADCAST LOGIC ---
             if new_message.reply_type == "thread":
-                # This is a threaded reply. We need to send multiple updates.
+                # This is a threaded reply.
                 broadcast_html = ""
 
-                # 1. The new message itself to append to the thread panel.
+                # 1. The new message to append to the thread panel for those viewing it.
                 reactions_map_for_reply = get_reactions_for_messages([new_message])
                 attachments_map_for_reply = get_attachments_for_messages([new_message])
                 new_reply_html = render_template(
@@ -1317,14 +1347,12 @@ def chat(ws):
                 )
                 broadcast_html += f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
 
-                # 2. The updated parent message, rendered for BOTH contexts.
+                # 2. The updated parent message for the main channel view (shows the new reply count).
                 parent_message = Message.get_by_id(parent_id)
                 reactions_map_for_parent = get_reactions_for_messages([parent_message])
                 attachments_map_for_parent = get_attachments_for_messages(
                     [parent_message]
                 )
-
-                # Version for the main channel view (shows the reply counter)
                 parent_in_channel_html = render_template(
                     "partials/message.html",
                     message=parent_message,
@@ -1335,21 +1363,21 @@ def chat(ws):
                 )
                 broadcast_html += f'<div id="message-{parent_id}" hx-swap-oob="outerHTML">{parent_in_channel_html}</div>'
 
-                # Version for inside the thread view (does NOT show the reply counter)
-                parent_in_thread_html = render_template(
-                    "partials/message.html",
-                    message=parent_message,
-                    reactions_map=reactions_map_for_parent,
-                    attachments_map=attachments_map_for_parent,
-                    Message=Message,
-                    is_in_thread_view=True,
+                # 3. The "unread" indicator for the sidebar "Threads" link.
+                all_participant_ids = {parent_message.user_id}
+                replies = Message.select(Message.user_id).where(
+                    Message.parent_message == parent_message
                 )
-                # We target the new container we created in thread_view.html
-                broadcast_html += f'<div id="thread-parent-message-container-{parent_id}" hx-swap-oob="innerHTML"><div class="p-3">{parent_in_thread_html}</div></div>'
+                for reply in replies:
+                    all_participant_ids.add(reply.user_id)
 
-                # Broadcast all OOB swaps to everyone in the conversation.
+                unread_link_html = render_template("partials/threads_link_unread.html")
+                for user_id in all_participant_ids:
+                    if user_id != ws.user.id and user_id in chat_manager.all_clients:
+                        chat_manager.send_to_user(user_id, unread_link_html)
+
+                # Broadcast to all clients in the conversation and send back to the sender.
                 chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
-                # Send it back to the sender as well.
                 ws.send(broadcast_html)
 
             else:

@@ -1,5 +1,6 @@
 # init_db.py
 
+import datetime
 import secrets
 
 from app import create_app
@@ -120,6 +121,7 @@ def seed_initial_data():
             "email": "admin@d8chat.com",
             "is_active": True,
             "display_name": "Admin User",
+            "last_threads_view_at": datetime.datetime.now(),
         },
     )
 
