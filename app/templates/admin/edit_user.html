@@ -1,8 +1,10 @@
 {% extends "base.html" %}
 {% block body_class %}admin-page{% endblock %}
 {% block content %}
-    <h1>Create a New User</h1>
-    <!-- Add this block to display flash messages -->
+    <h1>
+        Edit User:
+        <small class="text-muted">{{ user.username }}</small>
+    </h1>
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}
@@ -10,50 +12,50 @@
             {% endfor %}
         {% endif %}
     {% endwith %}
-    <form action="{{ url_for('admin.create_user') }}"
+    <form action="{{ url_for('admin.edit_user', user_id=user.id) }}"
           method="POST"
           class="mt-4">
-        <!-- Username -->
         <div class="mb-3">
             <label for="username" class="form-label">Username</label>
             <input type="text"
                    class="form-control"
                    id="username"
                    name="username"
+                   value="{{ user.username }}"
                    required>
         </div>
-        <!-- Email -->
-        <div class="mb-3">
-            <label for="email" class="form-label">Email address</label>
-            <input type="email" class="form-control" id="email" name="email" required>
-        </div>
-        <!-- Display Name -->
         <div class="mb-3">
             <label for="display_name" class="form-label">Display Name</label>
             <input type="text"
                    class="form-control"
                    id="display_name"
-                   name="display_name">
-            <div class="form-text">The user's full name, which will be displayed in the chat. Optional.</div>
+                   name="display_name"
+                   value="{{ user.display_name or '' }}">
         </div>
-        <!-- Password Field -->
         <div class="mb-3">
-            <label for="password" class="form-label">Password</label>
-            <input type="password"
+            <label for="email" class="form-label">Email address</label>
+            <input type="email"
                    class="form-control"
-                   id="password"
-                   name="password"
+                   id="email"
+                   name="email"
+                   value="{{ user.email }}"
                    required>
         </div>
-        <!-- Add Role Selector -->
+        <div class="mb-3">
+            <label for="password" class="form-label">New Password</label>
+            <input type="password" class="form-control" id="password" name="password">
+            <div class="form-text">Leave this field blank to keep the user's current password.</div>
+        </div>
         <div class="mb-3">
             <label for="role" class="form-label">Role</label>
             <select class="form-select" id="role" name="role">
-                <option value="member" selected>Member</option>
-                <option value="admin">Admin</option>
+                <option value="member"
+                        {% if workspace_member.role == 'member' %}selected{% endif %}>Member</option>
+                <option value="admin"
+                        {% if workspace_member.role == 'admin' %}selected{% endif %}>Admin</option>
             </select>
         </div>
-        <button type="submit" class="btn btn-primary">Create User</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
         <a href="{{ url_for('admin.list_users') }}" class="btn btn-secondary">Cancel</a>
     </form>
 {% endblock %}

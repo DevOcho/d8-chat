@@ -16,19 +16,24 @@ from faker import Faker
 # Initialize Faker
 fake = Faker()
 
+
 def _seed_users_and_members(workspace):
     """Generates 200 fake users and adds them to the workspace and default channels."""
     print("\nSeeding 200 new users...")
 
     # First, get the default channels that every user should be a part of.
-    general_channel = Channel.get(Channel.name == "general", Channel.workspace == workspace)
-    announcements_channel = Channel.get(Channel.name == "announcements", Channel.workspace == workspace)
+    general_channel = Channel.get(
+        Channel.name == "general", Channel.workspace == workspace
+    )
+    announcements_channel = Channel.get(
+        Channel.name == "announcements", Channel.workspace == workspace
+    )
 
     users_created_count = 0
     for i in range(200):
         first_name = fake.unique.first_name()
         last_name = fake.unique.last_name()
-        
+
         #
         # Create a unique username and email from the fake name.
         #
@@ -42,19 +47,15 @@ def _seed_users_and_members(workspace):
                 username=username,
                 email=email,
                 display_name=display_name,
-                is_active=True
+                is_active=True,
             )
 
             #
             # The first user created (i=0) will be our admin.
             # Everyone else will be a regular member.
             #
-            role = "admin" if i == 0 else "member"
-            WorkspaceMember.create(
-                user=user,
-                workspace=workspace,
-                role=role
-            )
+            role = "member"
+            WorkspaceMember.create(user=user, workspace=workspace, role=role)
 
             #
             # Add every new user to the two default channels.
@@ -76,10 +77,11 @@ def _seed_users_and_members(workspace):
     #
     admin_user = User.select().order_by(User.id).first()
     if admin_user:
-        print(f"-> Assigning '{admin_user.username}' as creator for all public channels.")
+        print(
+            f"-> Assigning '{admin_user.username}' as creator for all public channels."
+        )
         Channel.update(created_by=admin_user).where(
-            (Channel.workspace == workspace) &
-            (Channel.created_by.is_null())
+            (Channel.workspace == workspace) & (Channel.created_by.is_null())
         ).execute()
 
 
@@ -88,42 +90,68 @@ def _seed_channels(workspace):
     print("\nSeeding additional channels...")
     channel_names = [
         # Project Channels
-        "project-phoenix", "project-pegasus", "q3-marketing-campaign",
-        "website-redesign-2025", "mobile-app-v3", "api-deprecation-taskforce",
-        "tiger-team", "d8-chat-meta",
-
+        "project-phoenix",
+        "project-pegasus",
+        "q3-marketing-campaign",
+        "website-redesign-2025",
+        "mobile-app-v3",
+        "api-deprecation-taskforce",
+        "tiger-team",
+        "d8-chat-meta",
         # Department & Team Channels
-        "engineering-all", "design-ux-ui", "product-management", "sales-team",
-        "customer-support", "human-resources", "finance-dept", "it-support",
-
+        "engineering-all",
+        "design-ux-ui",
+        "product-management",
+        "sales-team",
+        "customer-support",
+        "human-resources",
+        "finance-dept",
+        "it-support",
         # Location-based Channels
-        "office-london", "office-san-francisco", "remote-first",
-
+        "office-london",
+        "office-san-francisco",
+        "remote-first",
         # Guild & Help Channels
-        "frontend-guild", "backend-guild", "testing-qa", "documentation",
-        "help-python", "help-javascript", "help-css", "cloud-aws",
-
+        "frontend-guild",
+        "backend-guild",
+        "testing-qa",
+        "documentation",
+        "help-python",
+        "help-javascript",
+        "help-css",
+        "cloud-aws",
         # General & Feedback Channels
-        "product-feedback", "feature-requests", "bug-reports", "competitive-intel",
+        "product-feedback",
+        "feature-requests",
+        "bug-reports",
+        "competitive-intel",
         "wins-and-shoutouts",
-
         # Social & Fun Channels
-        "random", "water-cooler", "starwars", "marvel-vs-dc", "gaming-lounge",
-        "music-lovers", "pets-of-devocho", "book-club", "cooking-and-recipes",
-        "sports", "memes",
-
+        "random",
+        "water-cooler",
+        "starwars",
+        "marvel-vs-dc",
+        "gaming-lounge",
+        "music-lovers",
+        "pets-of-devocho",
+        "book-club",
+        "cooking-and-recipes",
+        "sports",
+        "memes",
         # Company & HR Channels
-        "hiring-and-recruitment", "social-committee", "company-culture",
-        "new-hires", "learning-and-development", "security-updates",
+        "hiring-and-recruitment",
+        "social-committee",
+        "company-culture",
+        "new-hires",
+        "learning-and-development",
+        "security-updates",
     ]
 
     channels_created_count = 0
     for name in channel_names:
         # Create the channel
         channel, created = Channel.get_or_create(
-            workspace=workspace,
-            name=name,
-            defaults={"is_private": False}
+            workspace=workspace, name=name, defaults={"is_private": False}
         )
         if created:
             # Also create the corresponding conversation record for the channel

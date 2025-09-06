@@ -99,6 +99,7 @@ form[id^="message-form"] {
 
 /* --- [RESTORED] Login Page Styles --- */
 html.login-page, body.login-page { overflow: auto; }
+html.admin-page, body.admin-page { overflow: auto; }
 .login-page-container { display: flex; min-height: 100vh; width: 100%; background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 .feature-panel { flex-basis: 45%; background-color: #1a1d21; color: #ffffff; padding: 3rem 4rem; display: flex; flex-direction: column; justify-content: center; }
 .login-logo { max-width: 250px; height: auto; }

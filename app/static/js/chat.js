@@ -367,6 +367,7 @@ const createEditor = function(idSuffix = '') {
             editor: document.getElementById(`wysiwyg-editor${idSuffix}`),
             markdownView: document.getElementById(`markdown-toggle-view${idSuffix}`),
             hiddenInput: document.getElementById(`chat-message-input${idSuffix}`),
+            hiddenAttachmentIds: document.getElementById(`attachment-file-ids${idSuffix}`),
             topToolbar: messageForm.querySelector('.wysiwyg-toolbar:not(.wysiwyg-toolbar-bottom)'),
             formatToggleButton: document.getElementById(`format-toggle-btn${idSuffix}`),
             sendButton: document.getElementById(`send-button${idSuffix}`),
@@ -687,7 +688,7 @@ const createEditor = function(idSuffix = '') {
                 updateStateAndButtons();
             }
             const hasText = state.hiddenInput.value.trim() !== '';
-            const hasAttachment = attachmentManager ? state.hiddenAttachmentIds.value !== '' : false;
+            const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
             if (!hasText && !hasAttachment) {
                 e.preventDefault();
                 return;
@@ -696,27 +697,36 @@ const createEditor = function(idSuffix = '') {
             sendTypingStatus(false);
         });
         state.messageForm.addEventListener('htmx:wsAfterSend', () => {
-            const isQuoteReply = state.messageForm.querySelector('input[name="reply_type"]') && state.messageForm.querySelector('input[name="reply_type"]').value === 'quote';
-            if (isQuoteReply) {
-                htmx.ajax('GET', '/chat/input/default', {
-                    target: '#chat-input-container',
+            const isThread = idSuffix.startsWith('-thread-');
+
+            if (isThread) {
+                // If we're in a thread, a successful send should always revert to the default thread input.
+                // This handles both simple replies and quote replies within the thread.
+                const parentMessageId = idSuffix.split('-').pop();
+                htmx.ajax('GET', `/chat/input/thread/${parentMessageId}`, {
+                    target: `#thread-input-container-${parentMessageId}`,
                     swap: 'outerHTML'
                 });
             } else {
-                const {
-                    editor,
-                    markdownView,
-                    hiddenInput
-                } = state;
-                editor.innerHTML = '';
-                markdownView.value = '';
-                hiddenInput.value = '';
-                if (attachmentManager && typeof attachmentManager.reset === 'function') {
-                    attachmentManager.reset();
+                // We need to hand the same logic for the main chat input
+                const isQuoteReply = state.messageForm.querySelector('input[name="reply_type"]') && state.messageForm.querySelector('input[name="reply_type"]').value === 'quote';
+                if (isQuoteReply) {
+                    htmx.ajax('GET', '/chat/input/default', {
+                        target: '#chat-input-container',
+                        swap: 'outerHTML'
+                    });
+                } else {
+                    const { editor, markdownView, hiddenInput } = state;
+                    editor.innerHTML = '';
+                    markdownView.value = '';
+                    hiddenInput.value = '';
+                    if (attachmentManager && typeof attachmentManager.reset === 'function') {
+                        attachmentManager.reset();
+                    }
+                    state.messageForm.setAttribute('ws-send', '');
+                    resizeActiveInput();
+                    focusActiveInput();
                 }
-                state.messageForm.setAttribute('ws-send', '');
-                resizeActiveInput();
-                focusActiveInput();
             }
         });
     };

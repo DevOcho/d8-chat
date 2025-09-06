@@ -1,9 +1,11 @@
 Authlib
+bcrypt
 bleach
 boto3
 emoji
 Faker
 Flask
+flask-login
 flask-sock
 Markdown
 minio

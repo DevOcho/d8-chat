@@ -19,7 +19,9 @@ from flask import (
     g,
     make_response,
     current_app,
+    flash,
 )
+from flask_login import login_user, logout_user, current_user
 from peewee import fn
 from werkzeug.utils import secure_filename
 
@@ -75,6 +77,25 @@ def login_required(view):
     def wrapped_view(**kwargs):
         if g.user is None:
             return redirect(url_for("main.login_page"))
+        return view(**kwargs)
+
+    return wrapped_view
+
+
+def admin_required(view):
+    """Decorator to ensure the user is logged in and is an admin."""
+
+    @functools.wraps(view)
+    def wrapped_view(**kwargs):
+        if g.user is None:
+            return redirect(url_for("main.login_page"))
+
+        # Check for admin role in the workspace
+        workspace_member = WorkspaceMember.get_or_none(user=g.user)
+        if not workspace_member or workspace_member.role != "admin":
+            flash("You do not have permission to access this page.", "danger")
+            return redirect(url_for("main.chat_interface"))
+
         return view(**kwargs)
 
     return wrapped_view
@@ -207,6 +228,27 @@ def login_page():
     return render_template("login.html")
 
 
+@main_bp.route("/login", methods=["POST"])
+def login():
+    """Handles username/password login form submission."""
+    username = request.form.get("username")
+    password = request.form.get("password")
+
+    # Find the user by username or email
+    user = User.get_or_none((User.username == username) | (User.email == username))
+
+    # Check if user exists and password is correct
+    if user and user.check_password(password):
+        # Use flask-login to manage the session
+        login_user(user)
+        # We still set this for compatibility with our existing g.user loader
+        session["user_id"] = user.id
+        return redirect(url_for("main.chat_interface"))
+
+    # If login fails, redirect back to the main page with an error
+    return redirect(url_for("main.index", error="Invalid username or password."))
+
+
 @main_bp.route("/sso-login")
 def sso_login():
     """Redirects to the SSO provider for login."""
@@ -233,6 +275,7 @@ def authorize():
 @main_bp.route("/logout")
 def logout():
     """Logs the user out by clearing the session."""
+    logout_user()
     session.clear()
     return redirect(url_for("main.index"))
 
@@ -524,6 +567,31 @@ def get_reply_chat_input(message_id):
     )
 
 
+@main_bp.route("/chat/message/<int:message_id>/load_for_thread_reply")
+@login_required
+def load_for_thread_reply(message_id):
+    """
+    Loads the thread chat input component configured for quoting another message
+    within the thread.
+    """
+    try:
+        message_to_reply_to = Message.get_by_id(message_id)
+
+        # A reply within a thread must itself be a child of a parent message.
+        if not message_to_reply_to.parent_message:
+            return "Cannot reply to this message in a thread context.", 400
+
+        parent_message = message_to_reply_to.parent_message
+
+        return render_template(
+            "partials/chat_input_thread_reply.html",
+            message=message_to_reply_to,
+            parent_message=parent_message,
+        )
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+
 @main_bp.route("/chat/thread/<int:parent_message_id>")
 @login_required
 def view_thread(parent_message_id):
@@ -754,27 +822,107 @@ def toggle_reaction(message_id):
 
 
 # --- Admin Routes ---
-
-
 @admin_bp.route("/users")
+@admin_required
 def list_users():
-    users = User.select()
-    return render_template("admin/user_list.html", users=users)
+    """Lists all users with their workspace role."""
+    # Query to join User and WorkspaceMember to get the role
+    users_with_roles = (
+        User.select(User, WorkspaceMember.role)
+        .join(WorkspaceMember, on=(User.id == WorkspaceMember.user))
+        .order_by(User.id)
+    )
+    return render_template("admin/user_list.html", users=users_with_roles)
 
 
 @admin_bp.route("/users/create", methods=["GET"])
+@admin_required
 def create_user_form():
     return render_template("admin/create_user.html")
 
 
 @admin_bp.route("/users/create", methods=["POST"])
+@admin_required
 def create_user():
+    """Creates a new local user with a password and role."""
     username = request.form.get("username")
     email = request.form.get("email")
-    if username and email:
-        User.create(username=username, email=email)
+    password = request.form.get("password")
+    role = request.form.get("role", "member")  # Default to 'member'
+    display_name = request.form.get("display_name")
+
+    if not all([username, email, password]):
+        flash("Username, email, and password are required.", "danger")
+        return redirect(url_for("admin.create_user_form"))
+
+    try:
+        with db.atomic():
+            # Create the User
+            new_user = User(username=username, email=email, display_name=display_name)
+            new_user.set_password(password)
+            new_user.save()
+
+            # Add them to the primary workspace
+            workspace = Workspace.get(id=1)
+            WorkspaceMember.create(user=new_user, workspace=workspace, role=role)
+
+            # Add them to the 'general' and 'announcements' channels
+            general = Channel.get(Channel.name == "general")
+            announcements = Channel.get(Channel.name == "announcements")
+            ChannelMember.create(user=new_user, channel=general)
+            ChannelMember.create(user=new_user, channel=announcements)
+
+            flash(f"User '{username}' created successfully.", "success")
+    except IntegrityError:
+        flash(f"Username or email '{username}' already exists.", "danger")
+        return redirect(url_for("admin.create_user_form"))
+
+    return redirect(url_for("admin.list_users"))
+
+
+# file: app/routes.py
+
+# ... after the create_user function ...
+@admin_bp.route("/users/edit/<int:user_id>", methods=["GET", "POST"])
+@admin_required
+def edit_user(user_id):
+    """Handles both displaying and processing the user edit form."""
+    user = User.get_or_none(id=user_id)
+    if not user:
+        flash("User not found.", "danger")
         return redirect(url_for("admin.list_users"))
-    return redirect(url_for("admin.create_user_form"))
+
+    workspace_member = WorkspaceMember.get(user=user)
+
+    if request.method == "POST":
+        # Process the form submission
+        user.username = request.form.get("username")
+        user.display_name = request.form.get("display_name")
+        user.email = request.form.get("email")
+        workspace_member.role = request.form.get("role")
+
+        new_password = request.form.get("password")
+        if new_password:
+            user.set_password(new_password)
+
+        try:
+            with db.atomic():
+                user.save()
+                workspace_member.save()
+            flash(f"User '{user.username}' updated successfully.", "success")
+        except IntegrityError:
+            flash(f"Username or email already exists.", "danger")
+            # Don't redirect, so the admin can fix the error
+            return render_template(
+                "admin/edit_user.html", user=user, workspace_member=workspace_member
+            )
+
+        return redirect(url_for("admin.list_users"))
+
+    # For a GET request, just show the form
+    return render_template(
+        "admin/edit_user.html", user=user, workspace_member=workspace_member
+    )
 
 
 @main_bp.route("/profile/status", methods=["PUT"])
@@ -1121,6 +1269,7 @@ def chat(ws):
             parent_id = data.get("parent_message_id")
             reply_type = data.get("reply_type")
             attachment_file_ids = data.get("attachment_file_ids")
+            quoted_message_id = data.get("quoted_message_id")
 
             if not chat_text and not attachment_file_ids:
                 continue
@@ -1147,6 +1296,7 @@ def chat(ws):
                 parent_id=parent_id,
                 reply_type=reply_type,
                 attachment_file_ids=attachment_file_ids,
+                quoted_message_id=quoted_message_id,
             )
 
             # --- NEW BROADCAST LOGIC ---

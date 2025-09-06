@@ -3,6 +3,8 @@
 import datetime
 import os
 
+import bcrypt
+from flask_login import UserMixin
 from peewee import (
     fn,
     Model,
@@ -60,7 +62,7 @@ class Workspace(BaseModel):
     name = CharField(unique=True)
 
 
-class User(BaseModel):
+class User(BaseModel, UserMixin):
     id = PrimaryKeyField()
     username = CharField(unique=True)
     email = CharField(unique=True)
@@ -77,6 +79,20 @@ class User(BaseModel):
     theme = CharField(default="system")  # 'light', 'dark', or 'system'
     wysiwyg_enabled = BooleanField(default=False, null=False)
     avatar = DeferredForeignKey("UploadedFile", backref="user_avatar", null=True)
+
+    def set_password(self, password):
+        """Hashes the password and stores it."""
+        self.password_hash = bcrypt.hashpw(
+            password.encode("utf-8"), bcrypt.gensalt()
+        ).decode("utf-8")
+
+    def check_password(self, password):
+        """Checks if the provided password matches the stored hash."""
+        if self.password_hash:
+            return bcrypt.checkpw(
+                password.encode("utf-8"), self.password_hash.encode("utf-8")
+            )
+        return False
 
     @property
     def avatar_url(self):
@@ -132,6 +148,7 @@ class Message(BaseModel):
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField("self", backref="replies", null=True)
     reply_type = CharField(null=True)  # Can be 'quote' or 'thread'
+    quoted_message = DeferredForeignKey("Message", backref="quotes", null=True)
 
     @property
     def attachments(self):
