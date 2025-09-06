@@ -413,6 +413,9 @@ def update_message(message_id):
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
 
+    # Check if the edit is happening within the thread view context
+    is_in_thread_view = request.form.get("is_in_thread_view") == "true"
+
     new_content = request.form.get("content")
     if new_content:
         # Update the message in the database
@@ -432,10 +435,10 @@ def update_message(message_id):
             reactions_map=reactions_map,
             attachments_map=attachments_map,
             Message=Message,
+            is_in_thread_view=is_in_thread_view,
         )
 
-        # Construct the OOB swap HTML for the broadcast. This tells all
-        # clients to replace the message's outer HTML with the updated version.
+        # Construct the OOB swap HTML for the broadcast.
         broadcast_html = f'<div id="message-{message.id}" hx-swap-oob="outerHTML">{updated_message_html}</div>'
 
         # Broadcast the HTML fragment to all subscribers of the conversation
@@ -448,6 +451,7 @@ def update_message(message_id):
         reactions_map=reactions_map,
         attachments_map=attachments_map,
         Message=Message,
+        is_in_thread_view=is_in_thread_view,
     )
 
 
@@ -1159,6 +1163,7 @@ def chat(ws):
                     reactions_map=reactions_map_for_reply,
                     attachments_map=attachments_map_for_reply,
                     Message=Message,
+                    is_in_thread_view=True,
                 )
                 broadcast_html = f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
 

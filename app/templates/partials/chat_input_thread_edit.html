@@ -4,16 +4,17 @@
     <form hx-put="/chat/message/{{ message.id }}"
           hx-target="#message-{{ message.id }}"
           hx-swap="outerHTML"
+          hx-vals='{"is_in_thread_view": "true"}'
           hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/thread/{{ message.parent_message.id }}', {target: '#thread-input-container-{{ message.parent_message.id }}', swap: 'outerHTML'})"
-          id="message-form-thread-{{ message.id }}"
+          id="message-form-thread-{{ message.parent_message.id }}"
           autocomplete="off">
         <input type="file"
-               id="file-attachment-input-thread-{{ message.id }}"
+               id="file-attachment-input-thread-{{ message.parent_message.id }}"
                class="d-none"
                multiple>
         <input type="hidden"
                name="attachment_file_ids"
-               id="attachment-file-ids-thread-{{ message.id }}">
+               id="attachment-file-ids-thread-{{ message.parent_message.id }}">
         <div class="wysiwyg-editor-container">
             <!-- Editing Block UI -->
             <div class="editing-block p-2 rounded">
@@ -32,48 +33,78 @@
                 </div>
             </div>
             <div class="wysiwyg-toolbar toolbar-hidden">
-                <!-- Toolbar buttons -->
+                <button type="button" data-command="bold" title="Bold (Ctrl+B)">
+                    <i class="bi bi-type-bold"></i>
+                </button>
+                <button type="button" data-command="italic" title="Italic (Ctrl+I)">
+                    <i class="bi bi-type-italic"></i>
+                </button>
+                <button type="button" data-command="strikethrough" title="Strikethrough">
+                    <i class="bi bi-type-strikethrough"></i>
+                </button>
+                <button type="button"
+                        data-command="insertUnorderedList"
+                        title="Bulleted List">
+                    <i class="bi bi-list-ul"></i>
+                </button>
+                <button type="button" data-command="insertOrderedList" title="Numbered List">
+                    <i class="bi bi-list-ol"></i>
+                </button>
+                <button type="button"
+                        data-command="formatBlock"
+                        data-value="blockquote"
+                        title="Quote">
+                    <i class="bi bi-quote"></i>
+                </button>
+                <button type="button"
+                        data-command="formatBlock"
+                        data-value="pre"
+                        title="Code Block">
+                    <i class="bi bi-code-slash"></i>
+                </button>
             </div>
-            <div id="wysiwyg-editor-thread-{{ message.id }}"
+            <div id="wysiwyg-editor-thread-{{ message.parent_message.id }}"
                  class="wysiwyg-content"
                  contenteditable="true"
-                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"></div>
-            <textarea id="markdown-toggle-view-thread-{{ message.id }}"
+                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}">
+                {{ message_content_html | safe }}
+            </div>
+            <textarea id="markdown-toggle-view-thread-{{ message.parent_message.id }}"
                       class="form-control"
                       rows="1"
                       style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}">{{ message.content }}</textarea>
-            <textarea id="chat-message-input-thread-{{ message.id }}"
+            <textarea id="chat-message-input-thread-{{ message.parent_message.id }}"
                       name="content"
                       style="display: none">{{ message.content }}</textarea>
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <button type="button"
-                        id="format-toggle-btn-thread-{{ message.id }}"
+                        id="format-toggle-btn-thread-{{ message.parent_message.id }}"
                         title="Toggle Rich Formatting">
                     <i class="bi bi-type"></i>
                 </button>
                 <button type="button"
-                        id="file-attachment-btn-thread-{{ message.id }}"
+                        id="file-attachment-btn-thread-{{ message.parent_message.id }}"
                         title="Attach a file">
                     <i class="bi bi-paperclip"></i>
                 </button>
                 <button type="button"
-                        id="mention-btn-thread-{{ message.id }}"
+                        id="mention-btn-thread-{{ message.parent_message.id }}"
                         title="Mention User">
                     <i class="bi bi-at"></i>
                 </button>
                 <button type="button"
-                        id="emoji-btn-thread-{{ message.id }}"
+                        id="emoji-btn-thread-{{ message.parent_message.id }}"
                         title="Add Emoji">
                     <i class="bi bi-emoji-smile"></i>
                 </button>
                 <div class="ms-auto d-flex align-items-center">
-                    <button id="send-button-thread-{{ message.id }}"
+                    <button id="send-button-thread-{{ message.parent_message.id }}"
                             type="submit"
                             class="btn btn-primary send-btn-dynamic">Save Changes</button>
                 </div>
             </div>
         </div>
-        <div id="emoji-picker-container-thread-{{ message.id }}"
+        <div id="emoji-picker-container-thread-{{ message.parent_message.id }}"
              style="display: none">
             <emoji-picker class="light"></emoji-picker>
         </div>
@@ -84,7 +115,7 @@
          style="display: none"></div>
 </div>
 <script>
-    document.body.dispatchEvent(new CustomEvent('threadInputLoaded', {
-        detail: { parentMessageId: '{{ message.id }}' }
+    document.body.dispatchEvent(new CustomEvent('initializeEditor', {
+        detail: { idSuffix: '-thread-{{ message.parent_message.id }}' }
     }));
 </script>

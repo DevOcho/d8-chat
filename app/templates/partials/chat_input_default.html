@@ -89,4 +89,4 @@
          style="display: none"></div>
 </div>
 {# This script will run as soon as the partial is loaded into the DOM #}
-<script>document.body.dispatchEvent(new Event('chatInputLoaded'));</script>
+<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>

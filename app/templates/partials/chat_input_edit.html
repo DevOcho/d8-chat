@@ -111,4 +111,4 @@
          style="display: none"></div>
 </div>
 {# This script triggers our main Editor object in chat.js to initialize these new elements #}
-<script>document.body.dispatchEvent(new Event('chatInputLoaded'));</script>
+<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>

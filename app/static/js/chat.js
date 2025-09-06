@@ -359,12 +359,8 @@ const createEditor = function(idSuffix = '') {
     let mentionManager = null;
 
     const initialize = function() {
-        console.log(`[DEBUG] 1. Initializing editor with suffix: "${idSuffix}"`);
         const messageForm = document.getElementById(`message-form${idSuffix}`);
-        if (!messageForm) {
-            console.error(`[DEBUG] CRITICAL FAIL for suffix "${idSuffix}": Could not find message-form. Aborting initialization.`);
-            return;
-        }
+        if (!messageForm) return;
 
         const elements = {
             messageForm,
@@ -381,15 +377,10 @@ const createEditor = function(idSuffix = '') {
             emojiPicker: messageForm.querySelector('emoji-picker')
         };
 
-        // Log the results of our element search
-        console.log(`[DEBUG] 2. Elements found for suffix "${idSuffix}":`, elements);
-
         if (Object.values(elements).some(el => !el)) {
-            console.error(`[DEBUG] 3. Editor init FAILED for suffix "${idSuffix}". One or more required elements were not found. See object above for details.`);
+            console.error(`Editor init failed for suffix "${idSuffix}"`);
             return;
         }
-        console.log(`[DEBUG] 3. All elements found for suffix "${idSuffix}". Proceeding with setup.`);
-
 
         const isMarkdownMode = !!(elements.markdownView && elements.markdownView.style.display !== 'none');
         const turndownService = new TurndownService({
@@ -438,9 +429,7 @@ const createEditor = function(idSuffix = '') {
         updateView();
     };
 
-    // All helper functions are defined here, with their full, readable bodies.
     const preprocessMarkdown = function(text) {
-        // ... (this function's content remains the same)
         const lines = text.split('\n');
         const processedLines = [];
         for (let i = 0; i < lines.length; i++) {
@@ -453,7 +442,6 @@ const createEditor = function(idSuffix = '') {
         return processedLines.join('\n');
     };
     const insertText = function(text) {
-        // ... (this function's content remains the same)
         const {
             editor,
             markdownView,
@@ -477,7 +465,6 @@ const createEditor = function(idSuffix = '') {
         }));
     };
     const focusActiveInput = function() {
-        // ... (this function's content remains the same)
         const {
             editor,
             markdownView,
@@ -489,7 +476,6 @@ const createEditor = function(idSuffix = '') {
         }
     };
     const updateView = function() {
-        // ... (this function's content remains the same)
         const {
             editor,
             markdownView,
@@ -511,7 +497,6 @@ const createEditor = function(idSuffix = '') {
         updateSendButton();
     };
     const updateSendButton = function() {
-        // ... (this function's content remains the same)
         const {
             sendButton,
             isMarkdownMode,
@@ -529,7 +514,6 @@ const createEditor = function(idSuffix = '') {
         }
     };
     const resizeActiveInput = function() {
-        // ... (this function's content remains the same)
         const {
             editor,
             markdownView,
@@ -544,7 +528,6 @@ const createEditor = function(idSuffix = '') {
         }, 0);
     };
     const updateStateAndButtons = function() {
-        // ... (this function's content remains the same)
         const {
             editor,
             hiddenInput,
@@ -568,7 +551,6 @@ const createEditor = function(idSuffix = '') {
         }
     };
     const isSelectionInBlockquote = function() {
-        // ... (this function's content remains the same)
         const selection = window.getSelection();
         if (!selection.rangeCount) return false;
         let node = selection.getRangeAt(0).startContainer;
@@ -580,7 +562,6 @@ const createEditor = function(idSuffix = '') {
         return false;
     };
     const sendTypingStatus = function(isTyping) {
-        // ... (this function's content remains the same)
         const {
             typingSender
         } = state;
@@ -595,7 +576,6 @@ const createEditor = function(idSuffix = '') {
         }
     };
     const setupEmojiPickerListeners = function() {
-        console.log(`[DEBUG] 4. Setting up emoji listeners for suffix "${idSuffix}"`);
         const {
             emojiButton,
             emojiPicker,
@@ -603,16 +583,12 @@ const createEditor = function(idSuffix = '') {
         } = state;
         if (!emojiButton || !emojiPicker || !emojiPickerContainer) return;
         emojiButton.addEventListener('click', (e) => {
-            console.log(`[DEBUG] 5. Emoji button CLICKED for suffix "${idSuffix}"`);
             e.stopPropagation();
-
-            // Close any other open emoji pickers on the page first.
             document.querySelectorAll('[id^="emoji-picker-container"]').forEach(picker => {
                 if (picker !== emojiPickerContainer) {
                     picker.style.display = 'none';
                 }
             });
-
             const isHidden = emojiPickerContainer.style.display === 'none';
             emojiPickerContainer.style.display = isHidden ? 'block' : 'none';
         });
@@ -622,7 +598,6 @@ const createEditor = function(idSuffix = '') {
         });
     };
     const setupToolbarListener = function() {
-        // ... (this function's content remains the same)
         if (!state.topToolbar) return;
         state.topToolbar.addEventListener('mousedown', e => {
             e.preventDefault();
@@ -643,7 +618,6 @@ const createEditor = function(idSuffix = '') {
         });
     };
     const setupInputListeners = function() {
-        // ... (this function's content remains the same)
         state.editor.addEventListener('input', () => {
             updateStateAndButtons();
             resizeActiveInput();
@@ -664,7 +638,6 @@ const createEditor = function(idSuffix = '') {
         });
     };
     const setupKeydownListeners = function() {
-        // ... (this function's content remains the same)
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const keydownHandler = (e) => {
             if (mentionManager && mentionManager.state.active) {
@@ -706,7 +679,6 @@ const createEditor = function(idSuffix = '') {
         state.markdownView.addEventListener('keydown', keydownHandler);
     };
     const setupFormListeners = function() {
-        // ... (this function's content remains the same)
         state.messageForm.addEventListener('submit', (e) => {
             if (state.isMarkdownMode) {
                 const rawMarkdown = state.markdownView.value;
@@ -749,7 +721,6 @@ const createEditor = function(idSuffix = '') {
         });
     };
     const setupToggleButtonListener = function() {
-        // ... (this function's content remains the same)
         state.formatToggleButton.addEventListener('click', () => {
             const {
                 editor,
@@ -803,28 +774,19 @@ const createEditor = function(idSuffix = '') {
 };
 
 // --- Event Listeners to initialize editors ---
-// This promise resolves when the emoji-picker custom element is ready.
 const emojiPickerReady = customElements.whenDefined('emoji-picker');
 
-document.body.addEventListener('chatInputLoaded', () => {
-    console.log('[DEBUG] "chatInputLoaded" event fired.');
+document.body.addEventListener('initializeEditor', (event) => {
     emojiPickerReady.then(() => {
-        console.log('[DEBUG] Emoji picker is ready, proceeding with MAIN editor initialization.');
-        window.mainEditor = createEditor('');
-        window.mainEditor.initialize();
-    });
-});
+        const { idSuffix } = event.detail;
 
-document.body.addEventListener('threadInputLoaded', (event) => {
-    console.log('[DEBUG] "threadInputLoaded" event fired.', event.detail);
-    emojiPickerReady.then(() => {
-        console.log('[DEBUG] Emoji picker is ready, proceeding with THREAD editor initialization.');
-        const {
-            parentMessageId
-        } = event.detail;
-        const threadEditor = createEditor(`-thread-${parentMessageId}`);
-        threadEditor.initialize();
-        threadEditor.focusActiveInput();
+        const editorInstance = createEditor(idSuffix);
+        editorInstance.initialize();
+
+        // Only auto-focus if it's a thread input.
+        if (idSuffix && idSuffix.startsWith('-thread-')) {
+            editorInstance.focusActiveInput();
+        }
     });
 });
 

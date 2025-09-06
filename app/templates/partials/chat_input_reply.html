@@ -112,4 +112,4 @@
          style="display: none"></div>
 </div>
 {# This script will trigger the main Editor object to initialize on these new elements #}
-<script>document.body.dispatchEvent(new Event('chatInputLoaded'));</script>
+<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
