@@ -80,6 +80,7 @@ class User(BaseModel, UserMixin):
     wysiwyg_enabled = BooleanField(default=False, null=False)
     last_threads_view_at = DateTimeField(null=True)
     avatar = DeferredForeignKey("UploadedFile", backref="user_avatar", null=True)
+    notification_sound = CharField(default="d8-notification.mp3")
 
     def set_password(self, password):
         """Hashes the password and stores it."""

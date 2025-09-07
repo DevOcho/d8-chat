@@ -82,7 +82,42 @@
                     </div>
                 </div>
             </div>
+            <!-- Accordion Item 4: Notifications -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#collapseFour"
+                            aria-expanded="false"
+                            aria-controls="collapseFour">Notifications</button>
+                </h2>
+                <div id="collapseFour"
+                     class="accordion-collapse collapse"
+                     data-bs-parent="#profileAccordion">
+                    <div class="accordion-body">
+                        <p class="small text-muted">Choose your notification sound.</p>
+                        <select class="form-select"
+                                id="notification-sound-select"
+                                name="sound"
+                                onchange="previewNotificationSound(this.value)"
+                                hx-put="{{ url_for('main.update_notification_sound') }}"
+                                hx-trigger="change"
+                                hx-swap="none">
+                            <option value="d8-notification.mp3"
+                                    {% if user.notification_sound == 'd8-notification.mp3' %}selected{% endif %}>
+                                Default (D8)
+                            </option>
+                            <option value="slack-notification.mp3"
+                                    {% if user.notification_sound == 'slack-notification.mp3' %}selected{% endif %}>
+                                Classic (Slack)
+                            </option>
+                        </select>
+                    </div>
+                </div>
+            </div>
         </div>
+        <!-- End Accordion -->
         <!-- The Logout Button remains outside and always visible at the bottom -->
         <div class="mt-4">
             <a href="{{ url_for('main.logout') }}" class="btn btn-danger w-100">

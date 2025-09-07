@@ -172,6 +172,48 @@ def get_reactions_for_messages(messages):
 def get_attachments_for_messages(messages):
     """
     Efficiently fetches and groups attachment data for a given list of messages.
+    Args:
+        messages: A list of Peewee Message model instances.
+
+    Returns:
+        A dictionary mapping message IDs to a list of their attachments.
+        Example: { 123: [ {'url': '...', 'original_filename': '...'}, ... ] }
+    """
+    attachments_map = {}
+    if not messages:
+        return attachments_map
+
+    from .models import MessageAttachment, UploadedFile
+
+    message_ids = [m.id for m in messages]
+
+    all_links = (
+        MessageAttachment.select(MessageAttachment, UploadedFile)
+        .join(UploadedFile)
+        .where(MessageAttachment.message_id.in_(message_ids))
+    )
+
+    for link in all_links:
+        mid = link.message_id
+        att = link.attachment
+
+        if mid not in attachments_map:
+            attachments_map[mid] = []
+
+        attachments_map[mid].append(
+            {
+                "url": att.url,
+                "original_filename": att.original_filename,
+                "mime_type": att.mime_type,
+            }
+        )
+
+    return attachments_map
+
+
+def get_attachments_for_messages(messages):
+    """
+    Efficiently fetches and groups attachment data for a given list of messages.
 
     Args:
         messages: A list of Peewee Message model instances.
@@ -1009,6 +1051,30 @@ def update_theme():
     return "Invalid theme", 400
 
 
+@main_bp.route("/profile/notification_sound", methods=["PUT"])
+@login_required
+def update_notification_sound():
+    """Updates the user's notification sound preference."""
+    new_sound = request.form.get("sound")
+    # A list of the sounds we know are available.
+    allowed_sounds = ["d8-notification.mp3", "slack-notification.mp3"]
+
+    if new_sound and new_sound in allowed_sounds:
+        user = g.user
+        user.notification_sound = new_sound
+        user.save()
+
+        # We'll trigger a custom event that our JavaScript can listen for
+        # to update the sound without a page reload.
+        response = make_response("")
+        response.headers["HX-Trigger"] = json.dumps(
+            {"update-sound-preference": new_sound}
+        )
+        return response
+
+    return "Invalid sound choice", 400
+
+
 @main_bp.route("/chat/user/preference/wysiwyg", methods=["PUT"])
 @login_required
 def set_wysiwyg_preference():
@@ -1376,6 +1442,47 @@ def chat(ws):
                     if user_id != ws.user.id and user_id in chat_manager.all_clients:
                         chat_manager.send_to_user(user_id, unread_link_html)
 
+                all_participant_ids = {parent_message.user_id}
+                replies = Message.select(Message.user_id).where(
+                    Message.parent_message == parent_message
+                )
+                for reply in replies:
+                    all_participant_ids.add(reply.user_id)
+
+                unread_link_html = render_template("partials/threads_link_unread.html")
+                now = datetime.datetime.now()
+
+                for user_id in all_participant_ids:
+                    # Don't notify the sender or users who are not online
+                    if user_id == ws.user.id or user_id not in chat_manager.all_clients:
+                        continue
+
+                    # Send the "unread" indicator to the sidebar
+                    chat_manager.send_to_user(user_id, unread_link_html)
+
+                    # Now, check if we should also send a sound notification
+                    try:
+                        # We need the user's status for the PARENT conversation
+                        # to check their notification cooldown.
+                        status, _ = UserConversationStatus.get_or_create(
+                            user_id=user_id, conversation=parent_message.conversation
+                        )
+
+                        should_notify = status.last_notified_timestamp is None or (
+                            now - status.last_notified_timestamp
+                        ) > datetime.timedelta(seconds=10)
+
+                        if should_notify:
+                            sound_payload = {"type": "sound"}
+                            chat_manager.send_to_user(user_id, sound_payload)
+                            status.last_notified_timestamp = now
+                            status.save()
+
+                    except Exception as e:
+                        print(
+                            f"Error sending thread notification to user {user_id}: {e}"
+                        )
+
                 # Broadcast to all clients in the conversation and send back to the sender.
                 chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
                 ws.send(broadcast_html)
@@ -1502,6 +1609,11 @@ def chat(ws):
                 )
 
                 if is_a_mention:
+                    # Play a sound
+                    sound_payload = {"type": "sound"}
+                    chat_manager.send_to_user(member.id, sound_payload)
+
+                    # Browser notification
                     notification_payload = {
                         "type": "notification",
                         "title": f"New mention from {new_message.user.display_name or new_message.user.username}",
@@ -1517,7 +1629,7 @@ def chat(ws):
                 else:
                     should_notify = status.last_notified_timestamp is None or (
                         now - status.last_notified_timestamp
-                    ) > datetime.timedelta(seconds=60)
+                    ) > datetime.timedelta(seconds=10)
                     if should_notify:
                         sound_payload = {"type": "sound"}
                         chat_manager.send_to_user(member.id, sound_payload)

@@ -6,10 +6,27 @@
  * 2. General page-level logic for the chat interface (scrolling, code blocks, modals).
  */
 
+// Plays a sound file for preview purposes.
+function previewNotificationSound(soundFile) {
+    if (soundFile) {
+        const audio = new Audio(`/audio/${soundFile}`);
+        audio.play().catch(error => {
+            console.error("Sound preview failed:", error);
+        });
+    }
+}
+
+
 // Object to manage all notification-related logic
 const NotificationManager = {
-    audio: new Audio('/audio/notification.mp3'),
+    soundFile: 'd8-notification.mp3', // A default value
+    audio: null, // This will be created on-demand
     initialize: function() {
+        const mainContent = document.querySelector('main.main-content');
+        if (mainContent && mainContent.dataset.notificationSound) {
+            this.soundFile = mainContent.dataset.notificationSound;
+        }
+
         if (!("Notification" in window)) {
             console.log("This browser does not support desktop notification");
             return;
@@ -18,23 +35,31 @@ const NotificationManager = {
         if (!button) return;
         if (Notification.permission === "default") {
             button.style.display = 'block';
-            button.addEventListener('click', this.requestPermission);
+            // Use .bind(this) to ensure 'this' refers to NotificationManager
+            button.addEventListener('click', this.requestPermission.bind(this));
         }
     },
     requestPermission: function() {
         Notification.requestPermission().then(permission => {
             const button = document.getElementById('enable-notifications-btn');
             if (button) button.style.display = 'none';
+            // If permission is granted, play a confirmation sound.
+            if (permission === "granted") {
+                this.playSound('d8-notification.mp3');
+            }
         });
     },
-    playSound: function() {
+    playSound: function(soundFile) {
+        // If a specific soundFile is passed, use it. Otherwise, use the user's preference.
+        const fileToPlay = soundFile || this.soundFile;
+        this.audio = new Audio(`/audio/${fileToPlay}`);
         this.audio.play().catch(error => {
             console.log("Audio play failed:", error);
         });
     },
     showNotification: function(data) {
         if (Notification.permission === "granted") {
-            // Play the sound when they give permission for the notification
+            // This call correctly uses the user's preference by passing no argument.
             this.playSound();
             const notification = new Notification(data.title, {
                 body: data.body,
@@ -47,6 +72,7 @@ const NotificationManager = {
         }
     }
 };
+
 
 /**
  * Factory function for the Attachment Manager.
@@ -895,6 +921,24 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     ToastManager.initialize();
 
+    // --- AUDIO PRIMING LOGIC ---
+    const primeAudio = () => {
+        // This is a data URI for a tiny, silent WAV file.
+        // It's a standard technique to unlock browser audio.
+        const silentSound = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
+        const audio = new Audio(silentSound);
+        audio.play().then(() => {
+            console.log("Audio context primed successfully.");
+            // We only need to do this once, so the listener can be removed.
+            document.body.removeEventListener('click', primeAudio);
+        }).catch(error => {
+            // This might still fail in some very strict browser contexts, but it's our best shot.
+            console.warn("Could not prime audio on first click:", error);
+        });
+    };
+    // Add the event listener that will run only once.
+    document.body.addEventListener('click', primeAudio, { once: true });
+
     const searchInput = document.getElementById('global-search-input');
     const searchOverlay = document.getElementById('search-results-overlay');
     const channelSidebar = document.querySelector('.channel-sidebar');
@@ -1135,7 +1179,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-document.addEventListener('click', (e) => {
+    document.body.addEventListener('update-sound-preference', (evt) => {
+        const newSound = evt.detail['update-sound-preference'];
+        if (newSound && NotificationManager) {
+            console.log(`Updating notification sound to: ${newSound}`);
+            NotificationManager.soundFile = newSound;
+        }
+    });
+
+    document.addEventListener('click', (e) => {
         // If the click is on any emoji button, do nothing, as the button's own handler will manage it.
         if (e.target.closest('[id^="emoji-btn"]')) {
             return;
@@ -1240,18 +1292,15 @@ document.addEventListener('click', (e) => {
                 return;
             }
         } catch (e) {}
+        const messagesContainer = document.getElementById('chat-messages-container');
         const mainContent = document.querySelector('main.main-content');
         const currentUserId = mainContent.dataset.currentUserId;
-        const currentUsername = mainContent.dataset.currentUsername;
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
-        if (lastMessage) {
+
+        if (lastMessage && messagesContainer) {
             const messageAuthorId = lastMessage.dataset.userId;
-            const messageContentEl = lastMessage.querySelector('.message-content');
-            const messageContent = messageContentEl ? messageContentEl.innerText : '';
-            const mentionRegex = new RegExp(`@(${currentUsername}|here|channel)\\b`, 'i');
-            if (messageAuthorId !== currentUserId && mentionRegex.test(messageContent)) {
-                lastMessage.classList.add('mentioned-message');
-            }
+
+            // This part handles auto-scrolling, it can remain focused on the last message.
             if (messageAuthorId === currentUserId) {
                 setTimeout(scrollLastMessageIntoView, 0);
             } else {
@@ -1261,9 +1310,17 @@ document.addEventListener('click', (e) => {
                     if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
                 }
             }
-            initializeReactionPopovers(lastMessage);
-            processCodeBlocks(lastMessage);
-            handleMentionHighlights(lastMessage, null);
+
+            // Process highlights and popovers for the entire container now
+            initializeReactionPopovers(messagesContainer);
+            processCodeBlocks(messagesContainer);
+
+            // And call the highlight handler on the container, providing the conversation context
+            const conversationDiv = messagesContainer.querySelector('[data-conversation-db-id]');
+            if (conversationDiv) {
+                const conversationId = conversationDiv.dataset.conversationDbId;
+                handleMentionHighlights(messagesContainer, conversationId);
+            }
         }
     });
     if (messagesContainer) {
