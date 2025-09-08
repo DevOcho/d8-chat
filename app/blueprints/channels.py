@@ -26,6 +26,7 @@ from app.routes import (
     PAGE_SIZE,
     get_reactions_for_messages,
     get_attachments_for_messages,
+    check_and_get_read_state_oob,
 )
 from app.chat_manager import chat_manager
 import json
@@ -129,12 +130,16 @@ def get_channel_chat(channel_id):
     # Wrap it in a container with the correct ID for the OOB swap.
     chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
 
+    # Check for other unreads and add the result to the response
+    read_state_oob_html = check_and_get_read_state_oob(g.user, conversation)
+
     full_response = (
         messages_html
         + header_html
         + clear_badge_html
         + add_to_sidebar_html
         + chat_input_oob_html
+        + read_state_oob_html
     )
     response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"

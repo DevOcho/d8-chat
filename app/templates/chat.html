@@ -14,6 +14,20 @@
         <hr class="text-secondary">
         <!-- Activity panel -->
         <ul id="activity-links" class="list-unstyled mb-4">
+            <!-- Unread messages -->
+            <li>
+                <a href="#"
+                   id="unreads-link"
+                   class="text-decoration-none {{ 'fw-bold text-white' if has_unreads else 'text-light text-opacity-75' }}"
+                   hx-get="{{ url_for('activity.view_all_unreads') }}"
+                   hx-target="#chat-messages-container"
+                   hx-swap="innerHTML">
+                    <i class="bi bi-envelope-fill me-2"
+                       style="width: 16px;
+                              display: inline-block"></i>Unreads
+                </a>
+            </li>
+            <!-- Threads -->
             <li>
                 <a href="#"
                    id="threads-link"

@@ -74,3 +74,96 @@ def view_all_threads():
 
     # Combine all fragments into a single response.
     return make_response(threads_html + header_html + hide_input_html + read_link_html)
+
+
+@activity_bp.route("/chat/unreads")
+@login_required
+def view_all_unreads():
+    """
+    Renders a view showing all unread messages for the current user,
+    grouped by conversation.
+    """
+    unread_messages_query = (
+        Message.select(Message, User, Conversation)
+        .join(User)
+        .switch(Message)
+        .join(Conversation)
+        .join(
+            UserConversationStatus,
+            on=(
+                (UserConversationStatus.conversation == Conversation.id)
+                & (UserConversationStatus.user == g.user.id)
+            ),
+        )
+        .where(
+            (Message.user != g.user)
+            & (Message.created_at > UserConversationStatus.last_read_timestamp)
+        )
+        .order_by(Conversation.id, Message.created_at)
+    )
+
+    unread_messages = list(unread_messages_query)
+
+    from collections import defaultdict
+
+    grouped_unreads = defaultdict(list)
+    for msg in unread_messages:
+        grouped_unreads[msg.conversation].append(msg)
+
+    context_map = {}
+    if grouped_unreads:
+        channel_ids_to_find = set()
+        dm_partner_ids_to_find = set()
+
+        for conv in grouped_unreads.keys():
+            if conv.type == "channel":
+                channel_ids_to_find.add(int(conv.conversation_id_str.split("_")[1]))
+            elif conv.type == "dm":
+                user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+                partner_id = next(
+                    (uid for uid in user_ids if uid != g.user.id), g.user.id
+                )
+                dm_partner_ids_to_find.add(partner_id)
+
+        channel_lookup = {
+            c.id: f"# {c.name}"
+            for c in Channel.select().where(Channel.id.in_(list(channel_ids_to_find)))
+        }
+        user_lookup = {
+            u.id: (u.display_name or u.username)
+            for u in User.select().where(User.id.in_(list(dm_partner_ids_to_find)))
+        }
+
+        for conv in grouped_unreads.keys():
+            if conv.type == "channel":
+                channel_id = int(conv.conversation_id_str.split("_")[1])
+                context_map[conv.id] = channel_lookup.get(channel_id, "Unknown Channel")
+            elif conv.type == "dm":
+                user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+                partner_id = next(
+                    (uid for uid in user_ids if uid != g.user.id), g.user.id
+                )
+                context_map[conv.id] = user_lookup.get(partner_id, "Unknown User")
+
+    # Fetch reactions and attachments for all the unread messages at once.
+    reactions_map = get_reactions_for_messages(unread_messages)
+    attachments_map = get_attachments_for_messages(unread_messages)
+
+    # 1. Main Content: The list of unread messages.
+    unreads_html = render_template(
+        "partials/unreads_view.html",
+        grouped_unreads=grouped_unreads,
+        context_map=context_map,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,  # Pass the Message class for use in message.html
+    )
+
+    # 2. OOB Header: A simple header for the unreads view.
+    header_html = render_template("partials/unreads_header.html")
+
+    # 3. OOB Input Area: An empty div to hide the chat input.
+    hide_input_html = '<div id="chat-input-container" hx-swap-oob="true"></div>'
+
+    # Combine all fragments into a single response.
+    return make_response(unreads_html + header_html + hide_input_html)

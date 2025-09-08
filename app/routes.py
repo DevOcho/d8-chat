@@ -211,6 +211,38 @@ def get_attachments_for_messages(messages):
     return attachments_map
 
 
+def check_and_get_read_state_oob(current_user, just_read_conversation):
+    """
+    Checks if a user has any other unread messages after reading the current one.
+    If not, returns the HTML to swap the sidebar link back to the "read" state.
+    """
+    # Check for any other unread messages
+    has_other_unreads = (
+        Message.select(fn.COUNT(Message.id))
+        .join(Conversation)
+        .join(
+            UserConversationStatus,
+            on=(
+                (UserConversationStatus.conversation == Conversation.id)
+                & (UserConversationStatus.user == current_user.id)
+            ),
+        )
+        .where(
+            (Message.user != current_user)
+            & (Message.created_at > UserConversationStatus.last_read_timestamp)
+            # Exclude the conversation we just marked as read
+            & (Conversation.id != just_read_conversation.id)
+        )
+        .exists()
+    )
+
+    # If there are no other unreads, return the HTML to mark the link as read.
+    if not has_other_unreads:
+        return render_template("partials/unreads_link_read.html")
+
+    return ""
+
+
 def get_attachments_for_messages(messages):
     """
     Efficiently fetches and groups attachment data for a given list of messages.
@@ -447,6 +479,9 @@ def chat_interface():
                 "has_unread": has_unread,
             }
 
+    # Check if any of the conversations have unread messages.
+    has_unreads = any(info["has_unread"] for info in unread_info.values())
+
     # 6. Check for unread threads to determine if the sidebar link should be bold.
     last_view_time = g.user.last_threads_view_at or datetime.datetime.min
 
@@ -478,6 +513,8 @@ def chat_interface():
         direct_message_users=direct_message_users,
         online_users=chat_manager.online_users,
         unread_info=unread_info,
+        has_unreads=has_unreads,
+        has_unread_threads=has_unread_threads,
         theme=g.user.theme,
     )
 
@@ -1599,6 +1636,9 @@ def chat(ws):
                         )
 
                 if notification_html:
+                    unread_link_html = render_template(
+                        "partials/unreads_link_unread.html"
+                    )
                     member_ws.send(notification_html)
 
                 now = datetime.datetime.now()
