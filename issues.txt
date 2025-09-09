@@ -1,5 +1,7 @@
 Current issues with the slack_clone:
 
+Announce users entering and leaving channels
+
 Style bug when you start a new chat with a user (the avatars are squished together)
 
 Small extra box on the top of the chat inputs that exist solely for image uploads.  These shouldn't be visible until someone actually uploads an image.

@@ -1,0 +1,134 @@
+{% extends "admin/layout.html" %}
+
+{% block content %}
+    <h1>
+        Edit Channel:
+        <small class="text-muted">#{{ channel.name }}</small>
+    </h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} mt-3" role="alert">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <!-- FORM 1: EDIT CHANNEL DETAILS -->
+    <form action="{{ url_for('admin.edit_channel', channel_id=channel.id) }}"
+          method="POST"
+          class="mt-4">
+        <div class="mb-3">
+            <label for="name" class="form-label">Name</label>
+            <input type="text"
+                   class="form-control"
+                   id="name"
+                   name="name"
+                   value="{{ channel.name }}"
+                   required
+                   minlength="3"
+                   maxlength="80"
+                   {% if channel.name in ['general', 'announcements'] %}disabled{% endif %}>
+            <div class="form-text">
+                No spaces or special characters. Will be converted to lowercase.
+                {% if channel.name in ['general', 'announcements'] %}
+                    <strong class="text-warning">Default channel names cannot be changed.</strong>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label for="topic" class="form-label">Topic</label>
+            <input type="text"
+                   class="form-control"
+                   id="topic"
+                   name="topic"
+                   value="{{ channel.topic or '' }}">
+        </div>
+
+        <div class="mb-3">
+            <label for="description" class="form-label">Description</label>
+            <textarea class="form-control"
+                      id="description"
+                      name="description"
+                      rows="3">{{ channel.description or '' }}</textarea>
+        </div>
+
+        <div class="mb-3 form-check form-switch">
+            <input class="form-check-input"
+                   type="checkbox"
+                   role="switch"
+                   id="is_private"
+                   name="is_private"
+                   {% if channel.is_private %}checked{% endif %}>
+            <label class="form-check-label" for="is_private">Private Channel</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+        <a href="{{ url_for('admin.list_channels') }}" class="btn btn-secondary">Cancel</a>
+    </form>
+    <!-- END OF FORM 1 -->
+
+    <hr class="my-5">
+
+    <!-- MEMBER MANAGEMENT SECTION (Now separate from the form above) -->
+    <div class="mt-4">
+        <h3>Manage Members</h3>
+
+        <!-- FORM 2: ADD NEW MEMBER -->
+        <div class="card my-4">
+            <div class="card-body">
+                <h5 class="card-title">Add a new member</h5>
+                <form action="{{ url_for('admin.admin_add_channel_member', channel_id=channel.id) }}" method="POST">
+                    <div class="input-group">
+                        <select class="form-select" name="user_id" required>
+                            <option value="" selected disabled>Choose a user to add...</option>
+                            {% for user in users_to_add %}
+                                <option value="{{ user.id }}">
+                                    {{ user.display_name or user.username }} ({{ user.username }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <button class="btn btn-success" type="submit">Add to Channel</button>
+                    </div>
+                    {% if not users_to_add %}
+                        <p class="text-muted mt-2 mb-0">All workspace users are already in this channel.</p>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+
+        <!-- Current Members List (contains mini-forms for role and remove) -->
+        <h5 class="mt-4">Current Members ({{ current_members|length }})</h5>
+        <ul class="list-group">
+            {% for member in current_members %}
+                <li class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        {{ member.user.display_name or member.user.username }}
+                        <small class="text-muted">({{ member.user.username }})</small>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <!-- Form to change the user's role -->
+                        <form action="{{ url_for('admin.update_member_role', channel_id=channel.id, user_id=member.user.id) }}"
+                              method="POST"
+                              class="d-flex align-items-center me-3">
+                            <select name="role" class="form-select form-select-sm" onchange="this.form.submit()">
+                                <option value="member" {% if member.role == 'member' %}selected{% endif %}>Member</option>
+                                <option value="admin" {% if member.role == 'admin' %}selected{% endif %}>Admin</option>
+                            </select>
+                        </form>
+
+                        <!-- Form to remove the user from the channel -->
+                        <form action="{{ url_for('admin.remove_channel_member', channel_id=channel.id, user_id=member.user.id) }}"
+                              method="POST"
+                              onsubmit="return confirm('Are you sure you want to remove this user from the channel?');">
+                            <button type="submit" class="btn btn-sm btn-danger">Remove</button>
+                        </form>
+                    </div>
+                </li>
+            {% else %}
+                <li class="list-group-item text-muted">This channel has no members.</li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endblock %}

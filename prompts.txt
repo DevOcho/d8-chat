@@ -15,6 +15,8 @@ find . -type f \( -name "*.html" -o -name "*.ini" -o -name "*.py" -o -name "*.cs
 
 tree -I 'bin|lib|.git|__pycache__|*.pyc'
 
+pytest
+
 Search prompt:
 
 You are an expert software engineer specializing in building chat applications like Slack clones. The user is developing a Slack-like application and wants to add a comprehensive "search" feature that mimics how Slack handles searching. Based on Slack's official behavior:Searchable Content: Messages (including threads and direct messages), files, channels, people (users/coworkers), canvases (if your app supports document-like features; otherwise adapt to similar entities), and workflows (mobile-only filters). Archived channels and their messages/files remain fully searchable (on paid plans in Slack; assume always searchable in your app unless you implement plan tiers). Deleted content is not searchable.

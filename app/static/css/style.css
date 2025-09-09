@@ -723,3 +723,96 @@ emoji-picker {
 .thread-participant-avatar:not(:first-child) {
     margin-left: -10px; /* This creates the overlap effect */
 }
+
+/* ... (keep all existing CSS above this) ... */
+
+/* --- Admin Layout --- */
+.admin-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.admin-sidebar {
+  width: 280px;
+  background-color: #f8f9fa;
+  padding: 1.5rem;
+  flex-shrink: 0;
+  border-right: 1px solid #dee2e6;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-main-content {
+  flex-grow: 1;
+  padding: 2rem;
+  background-color: #ffffff;
+  overflow-y: auto;
+}
+
+/* Override for admin page to ensure full height layout */
+body.admin-page {
+  background-color: #f8f9fa; /* Match sidebar for seamless look */
+}
+
+.admin-sidebar .nav-link.active {
+    background-color: #343a40 !important; /* A dark color for active state */
+}
+
+/* ... (keep all existing CSS above this) ... */
+
+/* --- Admin Dark Mode --- */
+[data-bs-theme="dark"] .admin-sidebar {
+    background-color: #212529; /* Darker sidebar */
+    border-right-color: #343a40;
+}
+
+[data-bs-theme="dark"] .admin-sidebar h3 {
+    color: #f8f9fa; /* Lighter text for the title */
+}
+
+[data-bs-theme="dark"] .admin-main-content {
+    background-color: #343a40; /* Dark main content area */
+}
+
+[data-bs-theme="dark"] .admin-sidebar .nav-link:not(.active) {
+    color: #adb5bd; /* Lighter gray for non-active links */
+}
+
+[data-bs-theme="dark"] .admin-sidebar .nav-link:not(.active):hover {
+    color: #f8f9fa; /* White on hover */
+}
+
+[data-bs-theme="dark"] .admin-sidebar .nav-link.active {
+    background-color: #495057 !important; /* A medium dark color for active state */
+}
+
+[data-bs-theme="dark"] .card {
+    background-color: #212529;
+    border-color: #495057;
+}
+
+[data-bs-theme="dark"] h1,
+[data-bs-theme="dark"] .h5,
+[data-bs-theme="dark"] .text-gray-800 {
+    color: #f8f9fa !important;
+}
+
+[data-bs-theme="dark"] .text-gray-300 {
+    color: #6c757d !important;
+}
+
+[data-bs-theme="dark"] .table {
+    --bs-table-bg: #212529;
+    --bs-table-striped-bg: #2c3034;
+    --bs-table-striped-color: #f8f9fa;
+    --bs-table-active-bg: #373b3e;
+    --bs-table-active-color: #f8f9fa;
+    --bs-table-hover-bg: #323539;
+    --bs-table-hover-color: #f8f9fa;
+    color: #f8f9fa;
+    border-color: #373b3e;
+}
+
+[data-bs-theme="dark"] body.admin-page {
+    background-color: #343a40; /* Match the main content background */
+}

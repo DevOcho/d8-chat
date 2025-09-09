@@ -1,0 +1,55 @@
+{% extends "admin/layout.html" %}
+
+{% block content %}
+    <h1>Create a New Channel</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} mt-3" role="alert">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <form action="{{ url_for('admin.create_channel') }}" method="POST" class="mt-4">
+        <div class="mb-3">
+            <label for="name" class="form-label">Name</label>
+            <input type="text"
+                   class="form-control"
+                   id="name"
+                   name="name"
+                   placeholder="e.g- project-marketing"
+                   required
+                   minlength="3"
+                   maxlength="80">
+            <div class="form-text">No spaces or special characters. Will be converted to lowercase.</div>
+        </div>
+
+        <div class="mb-3">
+            <label for="topic" class="form-label">Topic</label>
+            <input type="text" class="form-control" id="topic" name="topic">
+            <div class="form-text">A brief, single-line summary of the channel's purpose.</div>
+        </div>
+
+        <div class="mb-3">
+            <label for="description" class="form-label">Description</label>
+            <textarea class="form-control" id="description" name="description" rows="3"></textarea>
+            <div class="form-text">A more detailed description of the channel.</div>
+        </div>
+
+        <div class="mb-3 form-check form-switch">
+            <input class="form-check-input"
+                   type="checkbox"
+                   role="switch"
+                   id="is_private"
+                   name="is_private">
+            <label class="form-check-label" for="is_private">
+                Private Channel
+                <span class="d-block text-muted small">When a channel is private, it can only be viewed or joined by invitation.</span>
+            </label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Create Channel</button>
+        <a href="{{ url_for('admin.list_channels') }}" class="btn btn-secondary">Cancel</a>
+    </form>
+{% endblock %}

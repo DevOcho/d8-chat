@@ -47,9 +47,6 @@ from .services import chat_service, minio_service
 # Main blueprint for general app routes
 main_bp = Blueprint("main", __name__)
 
-# Admin blueprint for admin-specific routes
-admin_bp = Blueprint("admin", __name__)
-
 # Number of messages per "page" meaning how many we will load at a time if they scroll back up
 PAGE_SIZE = 30
 
@@ -77,25 +74,6 @@ def login_required(view):
     def wrapped_view(**kwargs):
         if g.user is None:
             return redirect(url_for("main.login_page"))
-        return view(**kwargs)
-
-    return wrapped_view
-
-
-def admin_required(view):
-    """Decorator to ensure the user is logged in and is an admin."""
-
-    @functools.wraps(view)
-    def wrapped_view(**kwargs):
-        if g.user is None:
-            return redirect(url_for("main.login_page"))
-
-        # Check for admin role in the workspace
-        workspace_member = WorkspaceMember.get_or_none(user=g.user)
-        if not workspace_member or workspace_member.role != "admin":
-            flash("You do not have permission to access this page.", "danger")
-            return redirect(url_for("main.chat_interface"))
-
         return view(**kwargs)
 
     return wrapped_view
@@ -923,115 +901,6 @@ def toggle_reaction(message_id):
 
     # Return the HTML directly to the user who clicked. HTMX will swap it instantly.
     return broadcast_html, 200
-
-
-# --- Admin Routes ---
-@admin_bp.route("/users")
-@admin_required
-def list_users():
-    """Lists all users with their workspace role."""
-    # Query to join User and WorkspaceMember to get the role
-    users_with_roles = (
-        User.select(User, WorkspaceMember.role)
-        .join(WorkspaceMember, on=(User.id == WorkspaceMember.user))
-        .order_by(User.id)
-    )
-    return render_template("admin/user_list.html", users=users_with_roles)
-
-
-@admin_bp.route("/users/create", methods=["GET"])
-@admin_required
-def create_user_form():
-    return render_template("admin/create_user.html")
-
-
-@admin_bp.route("/users/create", methods=["POST"])
-@admin_required
-def create_user():
-    """Creates a new local user with a password and role."""
-    username = request.form.get("username")
-    email = request.form.get("email")
-    password = request.form.get("password")
-    role = request.form.get("role", "member")  # Default to 'member'
-    display_name = request.form.get("display_name")
-
-    if not all([username, email, password]):
-        flash("Username, email, and password are required.", "danger")
-        return redirect(url_for("admin.create_user_form"))
-
-    try:
-        with db.atomic():
-            # Create the User
-            new_user = User(
-                username=username,
-                email=email,
-                display_name=display_name,
-                last_threads_view_at=datetime.datetime.now(),
-            )
-            new_user.set_password(password)
-            new_user.save()
-
-            # Add them to the primary workspace
-            workspace = Workspace.get(id=1)
-            WorkspaceMember.create(user=new_user, workspace=workspace, role=role)
-
-            # Add them to the 'general' and 'announcements' channels
-            general = Channel.get(Channel.name == "general")
-            announcements = Channel.get(Channel.name == "announcements")
-            ChannelMember.create(user=new_user, channel=general)
-            ChannelMember.create(user=new_user, channel=announcements)
-
-            flash(f"User '{username}' created successfully.", "success")
-    except IntegrityError:
-        flash(f"Username or email '{username}' already exists.", "danger")
-        return redirect(url_for("admin.create_user_form"))
-
-    return redirect(url_for("admin.list_users"))
-
-
-# file: app/routes.py
-
-# ... after the create_user function ...
-@admin_bp.route("/users/edit/<int:user_id>", methods=["GET", "POST"])
-@admin_required
-def edit_user(user_id):
-    """Handles both displaying and processing the user edit form."""
-    user = User.get_or_none(id=user_id)
-    if not user:
-        flash("User not found.", "danger")
-        return redirect(url_for("admin.list_users"))
-
-    workspace_member = WorkspaceMember.get(user=user)
-
-    if request.method == "POST":
-        # Process the form submission
-        user.username = request.form.get("username")
-        user.display_name = request.form.get("display_name")
-        user.email = request.form.get("email")
-        workspace_member.role = request.form.get("role")
-
-        new_password = request.form.get("password")
-        if new_password:
-            user.set_password(new_password)
-
-        try:
-            with db.atomic():
-                user.save()
-                workspace_member.save()
-            flash(f"User '{user.username}' updated successfully.", "success")
-        except IntegrityError:
-            flash(f"Username or email already exists.", "danger")
-            # Don't redirect, so the admin can fix the error
-            return render_template(
-                "admin/edit_user.html", user=user, workspace_member=workspace_member
-            )
-
-        return redirect(url_for("admin.list_users"))
-
-    # For a GET request, just show the form
-    return render_template(
-        "admin/edit_user.html", user=user, workspace_member=workspace_member
-    )
 
 
 @main_bp.route("/profile/status", methods=["PUT"])
