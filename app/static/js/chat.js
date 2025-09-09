@@ -6,7 +6,7 @@
  * 2. General page-level logic for the chat interface (scrolling, code blocks, modals).
  */
 
-// Plays a sound file for preview purposes.
+// ... (keep the previewNotificationSound and NotificationManager objects exactly as they are) ...
 function previewNotificationSound(soundFile) {
     if (soundFile) {
         const audio = new Audio(`/audio/${soundFile}`);
@@ -81,20 +81,20 @@ const NotificationManager = {
 /**
  * Factory function for the Attachment Manager.
  * Creates an independent attachment handler for one editor instance.
- * @param {string} idSuffix - The unique suffix for this editor's elements.
+ * @param {object} editorState - A reference to the parent editor's state.
  */
-const createAttachmentManager = function(idSuffix = '') {
+// [THE FIX] Pass in the editorState so we can attach paste listeners to the inputs.
+const createAttachmentManager = function(editorState) {
     // State is scoped to this specific manager instance
     const state = {
-        fileInput: document.getElementById(`file-attachment-input${idSuffix}`),
-        attachmentBtn: document.getElementById(`file-attachment-btn${idSuffix}`),
-        hiddenAttachmentIds: document.getElementById(`attachment-file-ids${idSuffix}`),
-        previewContainer: document.getElementById(`attachment-previews${idSuffix}`),
+        fileInput: document.getElementById(`file-attachment-input${editorState.idSuffix}`),
+        attachmentBtn: document.getElementById(`file-attachment-btn${editorState.idSuffix}`),
+        hiddenAttachmentIds: document.getElementById(`attachment-file-ids${editorState.idSuffix}`),
+        previewContainer: document.getElementById(`attachment-previews${editorState.idSuffix}`),
         uploads: new Map()
     };
 
     const initialize = function() {
-        // Guard against missing elements, especially in the thread view which may not have attachments
         if (!state.fileInput || !state.attachmentBtn || !state.previewContainer || !state.hiddenAttachmentIds) {
             return;
         }
@@ -108,12 +108,45 @@ const createAttachmentManager = function(idSuffix = '') {
                 if (thumbnail) removeAttachment(thumbnail.dataset.uploadKey);
             }
         });
+
+        // [THE FIX] Add the paste event listeners to both the rich and markdown editors.
+        if (editorState.editor) {
+            editorState.editor.addEventListener('paste', handlePaste);
+        }
+        if (editorState.markdownView) {
+            editorState.markdownView.addEventListener('paste', handlePaste);
+        }
+    };
+
+    // [THE FIX] New function to handle the paste event.
+    const handlePaste = function(e) {
+        const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+        let foundImage = false;
+        const filesToUpload = [];
+
+        for (const item of items) {
+            if (item.kind === 'file' && item.type.startsWith('image/')) {
+                foundImage = true;
+                filesToUpload.push(item.getAsFile());
+            }
+        }
+
+        if (foundImage) {
+            e.preventDefault(); // Prevent default paste behavior ONLY if we found an image.
+            processAndUploadFiles(filesToUpload);
+        }
     };
 
     const handleFileSelect = function(e) {
         const files = e.target.files;
         if (!files.length) return;
+        processAndUploadFiles(files);
+        // Reset the file input so the user can select the same file again
+        state.fileInput.value = '';
+    };
 
+    // [THE FIX] Refactored logic into a reusable function.
+    const processAndUploadFiles = function(files) {
         // Limit to 30 files
         if ((state.uploads.size + files.length) > 30) {
             ToastManager.show('Upload Limit', 'You can only attach up to 30 files per message.', 'warning');
@@ -129,37 +162,28 @@ const createAttachmentManager = function(idSuffix = '') {
             });
             createPreviewAndUpload(file, uploadKey);
         }
-        // Reset the file input so the user can select the same file again
-        state.fileInput.value = '';
     };
 
     const createPreviewAndUpload = function(file, uploadKey) {
+        // ... (this function's content remains exactly the same)
         state.previewContainer.classList.add('has-attachments');
-
-        // 1. Create the thumbnail structure
         const thumbnailDiv = document.createElement('div');
         thumbnailDiv.className = 'attachment-thumbnail';
         thumbnailDiv.dataset.uploadKey = uploadKey;
         thumbnailDiv.innerHTML = `<img src="" alt="Uploading..." /><div class="spinner-border spinner-border-sm text-light position-absolute top-50 start-50"></div><button type="button" class="remove-attachment-btn">&times;</button>`;
         state.previewContainer.appendChild(thumbnailDiv);
-
-        // 2. Use FileReader to show a local preview immediately
         const reader = new FileReader();
         reader.onload = (e) => {
             thumbnailDiv.querySelector('img').src = e.target.result;
         };
         reader.readAsDataURL(file);
-
-        // 3. Start the actual upload
         const formData = new FormData();
         formData.append('file', file);
-
         fetch('/files/upload', {
                 method: 'POST',
                 body: formData
             })
             .then(response => {
-                // Upload finished, remove spinner
                 thumbnailDiv.querySelector('.spinner-border').remove();
                 if (!response.ok) return response.json().then(err => {
                     throw err;
@@ -185,11 +209,9 @@ const createAttachmentManager = function(idSuffix = '') {
     };
 
     const removeAttachment = function(uploadKey) {
-        // Remove from UI
+        // ... (this function's content remains exactly the same)
         const thumbnail = state.previewContainer.querySelector(`[data-upload-key="${uploadKey}"]`);
         if (thumbnail) thumbnail.remove();
-
-        // Remove from tracking
         state.uploads.delete(uploadKey);
         updateHiddenInput();
         if (state.uploads.size === 0) {
@@ -198,6 +220,7 @@ const createAttachmentManager = function(idSuffix = '') {
     };
 
     const updateHiddenInput = function() {
+        // ... (this function's content remains exactly the same)
         const successfulIds = Array.from(state.uploads.values())
             .filter(u => u.status === 'success' && u.fileId)
             .map(u => u.fileId);
@@ -205,6 +228,7 @@ const createAttachmentManager = function(idSuffix = '') {
     };
 
     const reset = function() {
+        // ... (this function's content remains exactly the same)
         if (!state.previewContainer || !state.hiddenAttachmentIds) return;
         state.previewContainer.innerHTML = '';
         state.previewContainer.classList.remove('has-attachments');
@@ -218,9 +242,7 @@ const createAttachmentManager = function(idSuffix = '') {
     };
 };
 
-/**
- * Factory function for the Mention Manager.
- */
+// ... (keep createMentionManager object exactly as it is) ...
 const createMentionManager = function(editorState) {
     const state = {
         editorState,
@@ -414,6 +436,7 @@ const createEditor = function(idSuffix = '') {
         }
 
         const isMarkdownMode = !!(elements.markdownView && elements.markdownView.style.display !== 'none');
+
         const turndownService = new TurndownService({
             headingStyle: 'atx',
             codeBlockStyle: 'fenced',
@@ -425,20 +448,20 @@ const createEditor = function(idSuffix = '') {
         });
 
         Object.assign(state, {
+            idSuffix,
             ...elements,
             turndownService,
             isMarkdownMode,
             typingTimer: null
         });
 
-        // Create and initialize dedicated managers for THIS editor instance.
-        attachmentManager = createAttachmentManager(idSuffix);
+        // Pass the editor's state object to the attachment manager.
+        attachmentManager = createAttachmentManager(state);
         attachmentManager.initialize();
 
         mentionManager = createMentionManager(state);
         mentionManager.initialize();
 
-        // Wire up the @mention button click handler
         const mentionButton = document.getElementById(`mention-btn${idSuffix}`);
         if (mentionButton) {
             mentionButton.addEventListener('click', () => {
@@ -460,6 +483,7 @@ const createEditor = function(idSuffix = '') {
         updateView();
     };
 
+    // ... (all the other helper functions inside createEditor remain exactly the same)
     const preprocessMarkdown = function(text) {
         const lines = text.split('\n');
         const processedLines = [];
@@ -813,6 +837,7 @@ const createEditor = function(idSuffix = '') {
     };
 };
 
+// ... (keep all the other event listeners and page logic exactly as they are) ...
 // --- Event Listeners to initialize editors ---
 const emojiPickerReady = customElements.whenDefined('emoji-picker');
 
