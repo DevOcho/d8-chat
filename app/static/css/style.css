@@ -307,7 +307,24 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
         border-left-color: #ffd700;
         color: #dcddde;
     }
+}
 
+/* --- Dark Mode Message Toolbar --- */
+[data-bs-theme="dark"] .message-toolbar {
+    background-color: #36393f; /* A dark card-like background */
+    border-color: #40444b;     /* A slightly lighter border */
+}
+
+/* Override the default .btn-light style for buttons inside the dark toolbar */
+[data-bs-theme="dark"] .message-toolbar .btn-light {
+    --bs-btn-color: #b9bbbe;             /* Light gray icon color */
+    --bs-btn-bg: transparent;              /* No background */
+    --bs-btn-border-color: transparent;    /* No border */
+    --bs-btn-hover-bg: #4e5258;         /* Subtle dark hover background */
+    --bs-btn-hover-color: #ffffff;           /* White icon on hover */
+    --bs-btn-hover-border-color: #e35a8b; /* Our pink theme color on hover */
+    --bs-btn-active-bg: #5a5f66;         /* Slightly darker for active/click state */
+    --bs-btn-active-color: #ffffff;
 }
 
 /* --- Emoji Picker Styles --- */

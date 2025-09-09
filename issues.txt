@@ -1,12 +1,6 @@
 Current issues with the slack_clone:
 
-I want to add "Direct Messages", and "Mentions & Reactions" to the options on the quick view.
-
-The message toolbar needs a darkmode version where the colors are flipped.
-
 Small extra box on the top of the chat inputs that exist solely for image uploads.  These shouldn't be visible until someone actually uploads an image.
-
-I'd love the chat input to turn into a file upload drop location when someone hovers an image over the chat window.
 
 Natalie: pasting doesn't work
 
@@ -28,6 +22,10 @@ If the server disconnects, it will reconnect for users at different times.  Mess
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
 ---
+
+I want to add "Direct Messages", and "Mentions & Reactions" to the Activity area on the quick view.
+
+I'd love the chat input to turn into a file upload drop location when someone hovers an image over the chat window.
 
 Group DMs (talk with more than one person) and also the ability to promote a group conversation to a channel.
 

@@ -537,3 +537,22 @@ def test_mention_search_filters_and_shows_special_mentions(
     # Crucially, it should NOT show the special mentions because the query doesn't match
     assert b"@here" not in response.data
     assert b"@channel" not in response.data
+
+
+def test_mention_search_includes_special_mentions(
+    logged_in_client, setup_channel_for_mentions
+):
+    """
+    GIVEN a channel with online and offline members
+    WHEN a mention search is performed with no query
+    THEN @here and @channel should be returned with correct counts.
+    """
+    conversation = setup_channel_for_mentions["conversation"]
+    response = logged_in_client.get(
+        f"/chat/conversation/{conversation.conversation_id_str}/mention_search?q="
+    )
+
+    assert response.status_code == 200
+    # We mocked 2 online users (user1, user2) out of 3 total members
+    assert b"Notifies 2 online members" in response.data
+    assert b"Notifies all 3 members" in response.data
