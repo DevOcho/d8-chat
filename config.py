@@ -24,6 +24,7 @@ class Config:
     MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
     MINIO_BUCKET_NAME = os.environ.get("MINIO_BUCKET_NAME", "d8chat")
     MINIO_SECURE = os.environ.get("MINIO_SECURE", "False").lower() == "true"
+    MINIO_PUBLIC_URL = os.environ.get("MINIO_PUBLIC_URL")
 
 
 class TestConfig(Config):

@@ -7,6 +7,8 @@ Faker
 Flask
 flask-login
 flask-sock
+gevent
+gunicorn
 Markdown
 minio
 peewee==3.18.2
