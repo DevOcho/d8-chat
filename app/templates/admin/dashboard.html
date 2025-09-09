@@ -5,7 +5,7 @@
 
     <!-- Stat Cards -->
     <div class="row">
-        <div class="col-xl-3 col-md-6 mb-4">
+        <div class="col-xl-4 col-md-6 mb-4">
             <div class="card border-left-primary shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
@@ -21,7 +21,23 @@
             </div>
         </div>
 
-        <div class="col-xl-3 col-md-6 mb-4">
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-indigo shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-indigo text-uppercase mb-1">Total Channels</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">{{ total_channels }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="bi bi-hash fs-2 text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4 col-md-6 mb-4">
             <div class="card border-left-success shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
@@ -37,7 +53,7 @@
             </div>
         </div>
 
-        <div class="col-xl-3 col-md-6 mb-4">
+        <div class="col-xl-4 col-md-6 mb-4">
             <div class="card border-left-info shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
@@ -52,8 +68,24 @@
                 </div>
             </div>
         </div>
+        
+        <div class="col-xl-4 col-md-6 mb-4">
+            <div class="card border-left-orange shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-orange text-uppercase mb-1">Total Storage Used</div>
+                            <div class="h5 mb-0 mr-3 font-weight-bold text-gray-800">{{ total_storage_bytes | format_bytes }}</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="bi bi-database-fill fs-2 text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-        <div class="col-xl-3 col-md-6 mb-4">
+        <div class="col-xl-4 col-md-6 mb-4">
             <div class="card border-left-warning shadow h-100 py-2">
                 <div class="card-body">
                     <div class="row no-gutters align-items-center">
@@ -149,6 +181,10 @@
         .card .border-left-success { border-left: 0.25rem solid #1cc88a !important; }
         .card .border-left-info { border-left: 0.25rem solid #36b9cc !important; }
         .card .border-left-warning { border-left: 0.25rem solid #f6c23e !important; }
+        .card .border-left-indigo { border-left: 0.25rem solid #6610f2 !important; }
+        .card .border-left-orange { border-left: 0.25rem solid #fd7e14 !important; }
         .text-gray-300 { color: #dddfeb !important; }
+        .text-indigo { color: #6610f2 !important; }
+        .text-orange { color: #fd7e14 !important; }
     </style>
 {% endblock admin_scripts %}

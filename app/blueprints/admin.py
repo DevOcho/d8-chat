@@ -56,6 +56,8 @@ def dashboard():
     total_users = User.select().count()
     total_messages = Message.select().count()
     total_files = UploadedFile.select().count()
+    total_channels = Channel.select().count()
+    total_storage_bytes = UploadedFile.select(fn.SUM(UploadedFile.file_size_bytes)).scalar() or 0
 
     # Calculate average messages per second over the last 7 days
     seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
@@ -102,6 +104,8 @@ def dashboard():
         total_users=total_users,
         total_messages=total_messages,
         total_files=total_files,
+        total_channels=total_channels,
+        total_storage_bytes=total_storage_bytes,
         avg_mps=avg_mps,
         chart_labels=chart_labels,
         chart_values=chart_values,

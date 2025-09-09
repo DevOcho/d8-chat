@@ -1,6 +1,18 @@
 Current issues with the slack_clone:
 
-Announce users entering and leaving channels
+Testing Party
+  - You can't paste a screenshot
+  - Emoji window is jumping if someone sends a message while i'm typing.
+  - Need the many people are typing message when it's more than 2 people typing
+  - Announce users entering and leaving channels
+  - When you @mention someone you should highilght their name as a link to a DM with them
+  - The server seemed to get congested and dropped messages
+  - Something strange is happening when people send a message in the channel and you are
+    watching it.  It will still go bold for you.
+  - Empty topics show "None".  Should be a nicer message.
+  - Single emoji should be larger (like whatsapp)
+  - Profile panel opens on the other side of the screen.
+  - code fencing not working
 
 Style bug when you start a new chat with a user (the avatars are squished together)
 

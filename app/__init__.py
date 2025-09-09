@@ -187,6 +187,19 @@ def create_app(config_class=Config):
         )
         return Markup(highlighted_text)
 
+    @app.template_filter("format_bytes")
+    def format_bytes_filter(size):
+        """Converts bytes to a human-readable format (KB, MB, GB)."""
+        if not size:
+            return "0 B"
+        power = 1024
+        n = 0
+        power_labels = {0: '', 1: 'K', 2: 'M', 3: 'G', 4: 'T'}
+        while size >= power and n < len(power_labels) - 1:
+            size /= power
+            n += 1
+        return f"{size:.2f} {power_labels[n]}B"
+
     # Import blueprints
     from .routes import main_bp 
     from .blueprints.admin import admin_bp
