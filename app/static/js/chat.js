@@ -50,12 +50,16 @@ const NotificationManager = {
         });
     },
     playSound: function(soundFile) {
-        // If a specific soundFile is passed, use it. Otherwise, use the user's preference.
-        const fileToPlay = soundFile || this.soundFile;
-        this.audio = new Audio(`/audio/${fileToPlay}`);
-        this.audio.play().catch(error => {
-            console.log("Audio play failed:", error);
-        });
+        // Only play sounds if the page is not currently in focus
+        //if (document.hidden) {
+        if (!document.hasFocus()) {
+            // If a specific soundFile is passed, use it. Otherwise, use the user's preference.
+            const fileToPlay = soundFile || this.soundFile;
+            this.audio = new Audio(`/audio/${fileToPlay}`);
+            this.audio.play().catch(error => {
+                console.log("Audio play failed:", error);
+            });
+        }
     },
     showNotification: function(data) {
         if (Notification.permission === "granted") {

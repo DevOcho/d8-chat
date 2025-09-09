@@ -1566,8 +1566,6 @@ def chat(ws):
                     continue
 
                 member_ws = chat_manager.all_clients[member.id]
-                if getattr(member_ws, "channel_id", None) == conv_id_str:
-                    continue
 
                 status, _ = UserConversationStatus.get_or_create(
                     user=member, conversation=conversation
@@ -1649,12 +1647,11 @@ def chat(ws):
                     .exists()
                 )
 
+                # Rule 1: Always notify with sound and a desktop notification for any mention
                 if is_a_mention:
-                    # Play a sound
                     sound_payload = {"type": "sound"}
                     chat_manager.send_to_user(member.id, sound_payload)
 
-                    # Browser notification
                     notification_payload = {
                         "type": "notification",
                         "title": f"New mention from {new_message.user.display_name or new_message.user.username}",
@@ -1667,7 +1664,9 @@ def chat(ws):
                     chat_manager.send_to_user(member.id, notification_payload)
                     status.last_notified_timestamp = now
                     status.save()
-                else:
+
+                # Rule 2: If it's not a mention, ONLY notify with sound if it's a DM (and respect the cooldown)
+                elif conversation.type == "dm":
                     should_notify = status.last_notified_timestamp is None or (
                         now - status.last_notified_timestamp
                     ) > datetime.timedelta(seconds=10)
