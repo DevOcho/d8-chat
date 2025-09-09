@@ -1,7 +1,8 @@
 import datetime
+from collections import defaultdict
 
-from flask import Blueprint, render_template, g, make_response
-from app.models import User, Message, Channel
+from flask import Blueprint, render_template, g, make_response, url_for
+from app.models import User, Message, Channel, Conversation, UserConversationStatus
 from app.routes import (
     login_required,
     get_reactions_for_messages,
@@ -21,7 +22,7 @@ def view_all_threads():
     g.user.last_threads_view_at = datetime.datetime.now()
     g.user.save()
 
-    # --- (The logic to query for threads is correct and remains unchanged) ---
+    # Get the threads so we can show them
     user_thread_replies = Message.select().where(
         (Message.user == g.user) & (Message.reply_type == "thread")
     )
@@ -104,11 +105,47 @@ def view_all_unreads():
 
     unread_messages = list(unread_messages_query)
 
-    from collections import defaultdict
-
     grouped_unreads = defaultdict(list)
     for msg in unread_messages:
         grouped_unreads[msg.conversation].append(msg)
+
+    # This block handles marking conversations as read and preparing UI updates.
+    oob_clear_badges_html = ""
+    if grouped_unreads:
+        conversations_to_update = grouped_unreads.keys()
+
+        # Update the database in a single query
+        now = datetime.datetime.now()
+        UserConversationStatus.update(last_read_timestamp=now).where(
+            (UserConversationStatus.user == g.user)
+            & (UserConversationStatus.conversation.in_(list(conversations_to_update)))
+        ).execute()
+
+        # Prepare the OOB swaps to clear the sidebar badges
+        clear_badge_fragments = []
+        for conv in conversations_to_update:
+            if conv.type == "channel":
+                channel = Channel.get_by_id(conv.conversation_id_str.split("_")[1])
+                link_text = f"# {channel.name}"
+                hx_get_url = url_for("channels.get_channel_chat", channel_id=channel.id)
+            else:  # DM
+                user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+                other_user_id = next(
+                    (uid for uid in user_ids if uid != g.user.id), g.user.id
+                )
+                other_user = User.get_by_id(other_user_id)
+                link_text = other_user.display_name or other_user.username
+                hx_get_url = url_for("dms.get_dm_chat", other_user_id=other_user.id)
+
+            clear_badge_fragments.append(
+                render_template(
+                    "partials/clear_badge.html",
+                    conv_id_str=conv.conversation_id_str,
+                    hx_get_url=hx_get_url,
+                    link_text=link_text,
+                )
+            )
+        oob_clear_badges_html = "".join(clear_badge_fragments)
 
     context_map = {}
     if grouped_unreads:
@@ -165,5 +202,14 @@ def view_all_unreads():
     # 3. OOB Input Area: An empty div to hide the chat input.
     hide_input_html = '<div id="chat-input-container" hx-swap-oob="true"></div>'
 
+    # 4. OOB Sidebar Link: Mark the link as read now that we're viewing the page.
+    read_link_html = render_template("partials/unreads_link_read.html")
+
     # Combine all fragments into a single response.
-    return make_response(unreads_html + header_html + hide_input_html)
+    return make_response(
+        unreads_html
+        + header_html
+        + hide_input_html
+        + read_link_html
+        + oob_clear_badges_html
+    )

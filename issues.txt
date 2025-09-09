@@ -1,6 +1,6 @@
 Current issues with the slack_clone:
 
-I want to add "Unreads", "Direct Messages", and "Mentions & Reactions" to the options on the quick view.
+I want to add "Direct Messages", and "Mentions & Reactions" to the options on the quick view.
 
 The message toolbar needs a darkmode version where the colors are flipped.
 

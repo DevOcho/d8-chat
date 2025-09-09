@@ -1640,6 +1640,7 @@ def chat(ws):
                         "partials/unreads_link_unread.html"
                     )
                     member_ws.send(notification_html)
+                    member_ws.send(unread_link_html)
 
                 now = datetime.datetime.now()
                 is_a_mention = (

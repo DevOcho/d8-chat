@@ -1005,12 +1005,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
-        const targetId = evt.detail.content.id || 'unknown';
-        if (targetId.startsWith('status-dot-') || targetId.startsWith('sidebar-presence-indicator-') || targetId.startsWith('thread-replies-list-') || targetId.startsWith('reactions-container-')) {
-            console.log(`Ignoring harmless OOB update for non-visible target: #${targetId}`);
+        const targetSelector = evt.detail.target; // The CSS selector of the target
+
+        // Handle events where the target is undefined.
+        if (!targetSelector) {
+            console.log("Ignoring harmless OOB update for an undefined target.");
             return;
         }
-        const errorMessage = `A UI update failed because the target '#${targetId}' could not be found.`;
+
+        // Check if the target *selector* starts with one of our known ignorable patterns.
+        // This is the correct way to identify the intended target of the OOB swap.
+        if (targetSelector.startsWith('#status-dot-') || targetSelector.startsWith('#sidebar-presence-indicator-') || targetSelector.startsWith('#thread-replies-list-') || targetSelector.startsWith('#reactions-container-')) {
+            console.log(`Ignoring harmless OOB update for non-visible target: ${targetSelector}`);
+            return; // This is an expected "error", so we stop here.
+        }
+
+        // If it's not one of our ignored targets, then it's a real problem we should show to the user.
+        const errorMessage = `A UI update failed because the target '${targetSelector}' could not be found.`;
         ToastManager.show('UI Sync Error', errorMessage, 'warning');
     });
 
