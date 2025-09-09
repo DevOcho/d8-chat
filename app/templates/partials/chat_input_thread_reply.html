@@ -1,15 +1,23 @@
-<div id="chat-input-container" class="chat-input-form">
-    <form ws-send id="message-form" autocomplete="off">
-        <input type="file" id="file-attachment-input" class="d-none" multiple>
-        <input type="hidden" name="attachment_file_id" id="attachment-file-ids">
-        <input type="hidden" name="parent_message_id" value="{{ message.id }}">
-        <input type="hidden" name="reply_type" value="quote">
+{# app/templates/partials/chat_input_thread_reply.html #}
+<div id="thread-input-container-{{ parent_message.id }}"
+     class="chat-input-form">
+    <form ws-send
+          id="message-form-thread-{{ parent_message.id }}"
+          autocomplete="off">
+        {# These hidden inputs provide context for a THREAD reply that QUOTES another message #}
+        <input type="hidden"
+               name="parent_message_id"
+               value="{{ parent_message.id }}">
+        <input type="hidden" name="reply_type" value="thread">
+        <input type="hidden" name="quoted_message_id" value="{{ message.id }}">
+        <input type="file"
+               id="file-attachment-input-thread-{{ parent_message.id }}"
+               class="d-none"
+               multiple>
+        <input type="hidden"
+               name="attachment_file_ids"
+               id="attachment-file-ids-thread-{{ parent_message.id }}">
         <div class="wysiwyg-editor-container">
-            <div id="attachment-previews"
-                 class="p-2 d-flex flex-wrap gap-2"
-                 style="display: none">
-                <!-- Image previews will be injected here by JavaScript -->
-            </div>
             <!-- Quoted Message UI -->
             <div class="quoted-reply p-2 rounded">
                 <div class="d-flex justify-content-between align-items-start">
@@ -17,19 +25,17 @@
                         <strong class="d-block">Replying to {{ message.user.display_name or message.user.username }}</strong>
                         <p class="mb-0 text-muted">{{ message.content | emojize | truncate(150, True) }}</p>
                     </div>
-                    <!-- This button cancels the reply and loads the default input -->
+                    <!-- This button cancels the reply and loads the default thread input -->
                     <button type="button"
                             class="btn-close"
                             aria-label="Cancel Reply"
                             title="Cancel Reply"
-                            hx-get="/chat/input/default"
-                            hx-target="#chat-input-container"
+                            hx-get="/chat/input/thread/{{ parent_message.id }}"
+                            hx-target="#thread-input-container-{{ parent_message.id }}"
                             hx-swap="outerHTML"></button>
                 </div>
             </div>
-            <!-- Typing indicator placeholder -->
-            <div id="typing-indicator" class="text-muted small"></div>
-            <!-- Top Toolbar (for WYSIWYG mode) -->
+            <!-- [START OF FIX] Add the missing top toolbar -->
             <div class="wysiwyg-toolbar toolbar-hidden">
                 <button type="button" data-command="bold" title="Bold (Ctrl+B)">
                     <i class="bi bi-type-bold"></i>
@@ -61,47 +67,51 @@
                     <i class="bi bi-code-slash"></i>
                 </button>
             </div>
-            <!-- Rich editor -->
-            <div id="wysiwyg-editor"
+            <!-- [END OF FIX] -->
+            <!-- Editor elements -->
+            <div id="wysiwyg-editor-thread-{{ parent_message.id }}"
                  class="wysiwyg-content"
                  contenteditable="true"
-                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}">
-                {{ draft_content_html | safe }}
-            </div>
-            <!-- Markdown view -->
-            <textarea id="markdown-toggle-view"
+                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"
+                 data-placeholder="Write a reply..."></div>
+            <textarea id="markdown-toggle-view-thread-{{ parent_message.id }}"
                       class="form-control"
-                      placeholder="Write a reply..."
                       rows="1"
-                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}">{{ draft_content }}</textarea>
-            <!-- Hidden textarea for form submission -->
-            <textarea id="chat-message-input" name="chat_message" style="display: none;">{{ draft_content }}</textarea>
-            <!-- Bottom Toolbar (always visible) -->
+                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}"
+                      placeholder="Write a reply..."></textarea>
+            <textarea id="chat-message-input-thread-{{ parent_message.id }}"
+                      name="chat_message"
+                      style="display: none"></textarea>
+            <!-- Bottom Toolbar -->
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
-                <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting">
+                <button type="button"
+                        id="format-toggle-btn-thread-{{ parent_message.id }}"
+                        title="Toggle Rich Formatting">
                     <i class="bi bi-type"></i>
                 </button>
-                <button type="button" id="file-attachment-btn" title="Attach a file">
+                <button type="button"
+                        id="file-attachment-btn-thread-{{ parent_message.id }}"
+                        title="Attach a file">
                     <i class="bi bi-paperclip"></i>
                 </button>
-                <button type="button" id="mention-btn" title="Mention User">
+                <button type="button"
+                        id="mention-btn-thread-{{ parent_message.id }}"
+                        title="Mention User">
                     <i class="bi bi-at"></i>
                 </button>
-                <button type="button" id="emoji-btn" title="Add Emoji">
+                <button type="button"
+                        id="emoji-btn-thread-{{ parent_message.id }}"
+                        title="Add Emoji">
                     <i class="bi bi-emoji-smile"></i>
                 </button>
                 <div class="ms-auto d-flex align-items-center">
-                    <button id="send-button"
+                    <button id="send-button-thread-{{ parent_message.id }}"
                             type="submit"
-                            class="btn btn-primary send-btn-dynamic">
-                        <!-- Button content will be injected by JavaScript -->
-                    </button>
+                            class="btn btn-primary send-btn-dynamic"></button>
                 </div>
             </div>
         </div>
-        <!-- Emoji picker container -->
-        <div id="emoji-picker-container"
-             class="position-relative"
+        <div id="emoji-picker-container-thread-{{ parent_message.id }}"
              style="display: none">
             <emoji-picker class="light"></emoji-picker>
         </div>
@@ -111,5 +121,8 @@
          hx-trigger="typing-event"
          style="display: none"></div>
 </div>
-{# This script will trigger the main Editor object to initialize on these new elements #}
-<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
+<script>
+    document.body.dispatchEvent(new CustomEvent('initializeEditor', {
+        detail: { idSuffix: '-thread-{{ parent_message.id }}' }
+    }));
+</script>

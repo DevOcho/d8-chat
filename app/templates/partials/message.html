@@ -9,6 +9,7 @@
 <div class="d-flex mb-1 message-container {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
      id="message-{{ message.id }}"
      data-user-id="{{ message.user.id }}"
+     data-raw-content="{{ message.content | e }}"
      data-attachments='[ {%- for att in image_attachments -%} { "url": "{{ att.url }}", "filename": "{{ att.original_filename | e }}" } {{- ", " if not loop.last else "" -}} {%- endfor -%} ]'>
     <div class="flex-shrink-0">
         {% with user=message.user, size=40 %}
@@ -21,13 +22,42 @@
             <small class="text-muted">{{ message.created_at.strftime("%I:%M %p") }}</small>
             {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
         </div>
-        {% if message.parent_message %}
+        {% set message_to_quote = message.quoted_message or (message.parent_message if message.reply_type == 'quote' else None) %}
+        {% if message_to_quote %}
             <div class="quoted-reply p-2 mb-2">
-                <strong>{{ message.parent_message.user.display_name or message.parent_message.user.username }}</strong>
-                <p class="mb-0 text-muted">{{ message.parent_message.content | emojize | truncate(100) }}</p>
+                <strong>{{ message_to_quote.user.display_name or message_to_quote.user.username }}</strong>
+                <p class="mb-0 text-muted">{{ message_to_quote.content | emojize | truncate(100) }}</p>
             </div>
         {% endif %}
         <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
+        {# Thread reply indicator #}
+        {% if not is_in_thread_view %}
+            {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}
+            {% set thread_reply_count = threaded_replies.count() %}
+            {% if thread_reply_count > 0 %}
+                <div id="thread-indicator-{{ message.id }}"
+                     class="d-flex align-items-center mt-2">
+                    <div class="thread-participant-avatars">
+                        {# Loop over the unique participants using the new model property #}
+                        {% for participant in message.thread_participants %}
+                            <div class="thread-participant-avatar">
+                                {% with user=participant, size=24 %}
+                                    {% include 'partials/_avatar_display.html' %}
+                                {% endwith %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <a href="#"
+                       class="text-decoration-none small ms-2"
+                       data-bs-toggle="offcanvas"
+                       data-bs-target="#right-panel-offcanvas"
+                       hx-get="{{ url_for('main.view_thread', parent_message_id=message.id) }}"
+                       hx-target="#right-panel-offcanvas">
+                        {{ thread_reply_count }} {{ 'reply' if thread_reply_count == 1 else 'replies' }}
+                    </a>
+                </div>
+            {% endif %}
+        {% endif %}
         {% set image_count = image_attachments | length %}
         {% if image_count > 0 %}
             {% set grid_count = '4+' if image_count >= 4 else image_count|string %}

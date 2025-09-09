@@ -44,7 +44,13 @@
             <div class="login-form-container">
                 <h1 class="mb-3">Login to D8 Chat</h1>
                 <p class="text-muted mb-4">Enter your credentials or use SSO to continue.</p>
-                <form>
+                {# --- [START OF CHANGES] --- #}
+                <!-- Add this block to display login errors -->
+                {% if request.args.get('error') %}
+                    <div class="alert alert-danger" role="alert">{{ request.args.get("error") }}</div>
+                {% endif %}
+                <!-- Update the form tag and remove 'disabled' from inputs/button -->
+                <form action="{{ url_for('main.login') }}" method="POST">
                     <div class="mb-3">
                         <label for="username" class="form-label">Username or Email</label>
                         <input type="text"
@@ -52,7 +58,7 @@
                                id="username"
                                name="username"
                                placeholder="you@example.com"
-                               disabled>
+                               required>
                     </div>
                     <div class="mb-3">
                         <label for="password" class="form-label">Password</label>
@@ -60,9 +66,9 @@
                                class="form-control"
                                id="password"
                                name="password"
-                               disabled>
+                               required>
                     </div>
-                    <button type="submit" class="btn btn-pink w-100" disabled>Login</button>
+                    <button type="submit" class="btn btn-pink w-100">Login</button>
                 </form>
                 <div class="sso-divider">
                     <span>OR</span>

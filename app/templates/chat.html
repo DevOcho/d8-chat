@@ -12,6 +12,35 @@
     <div class="sidebar channel-sidebar p-3">
         <h5 class="text-white">DevOcho</h5>
         <hr class="text-secondary">
+        <!-- Activity panel -->
+        <ul id="activity-links" class="list-unstyled mb-4">
+            <!-- Unread messages -->
+            <li>
+                <a href="#"
+                   id="unreads-link"
+                   class="text-decoration-none {{ 'fw-bold text-white' if has_unreads else 'text-light text-opacity-75' }}"
+                   hx-get="{{ url_for('activity.view_all_unreads') }}"
+                   hx-target="#chat-messages-container"
+                   hx-swap="innerHTML">
+                    <i class="bi bi-envelope-fill me-2"
+                       style="width: 16px;
+                              display: inline-block"></i>Unreads
+                </a>
+            </li>
+            <!-- Threads -->
+            <li>
+                <a href="#"
+                   id="threads-link"
+                   class="text-decoration-none {{ 'fw-bold text-white' if has_unread_threads else 'text-light text-opacity-75' }}"
+                   hx-get="{{ url_for('activity.view_all_threads') }}"
+                   hx-target="#chat-messages-container"
+                   hx-swap="innerHTML">
+                    <i class="bi bi-chat-square-text me-2"
+                       style="width: 16px;
+                              display: inline-block"></i>Threads
+                </a>
+            </li>
+        </ul>
         <!-- Channel list -->
         <div class="d-flex justify-content-between align-items-center">
             <h6 class="mt-4 text-light text-opacity-75">Channels</h6>
@@ -148,6 +177,7 @@
           ws-connect="/ws/chat"
           hx-ext="ws"
           ws-disable-replay="true"
+          data-notification-sound="{{ g.user.notification_sound }}"
           data-current-user-id="{{ g.user.id }}"
           data-current-user-username="{{ g.user.username }}">
         <!-- Global Search Bar -->
@@ -241,45 +271,37 @@
                 </div>
             </div>
         </div>
-    </main>
-    <!-- Slide-Out Panel -->
-    <div class="offcanvas offcanvas-end"
-         tabindex="-1"
-         id="right-panel-offcanvas"
-         aria-labelledby="right-panel-label">
-        <div class="offcanvas-header">
-            <h5 id="right-panel-label">Details</h5>
-            <button type="button"
-                    class="btn-close"
-                    data-bs-dismiss="offcanvas"
-                    aria-label="Close"></button>
-        </div>
-        <div class="offcanvas-body" id="right-panel-body">
-            <!-- Content will be loaded here by HTMX -->
-            <div class="text-center">
-                <div class="spinner-border" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>
-        </div>
-    </div>
-    <!-- Generic HTMX Modal -->
-    <div class="modal fade"
-         id="htmx-modal"
-         tabindex="-1"
-         aria-labelledby="htmxModalLabel"
-         aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content" id="htmx-modal-content">
+        <!-- Slide-Out Panel -->
+        <div class="offcanvas offcanvas-end"
+             tabindex="-1"
+             id="right-panel-offcanvas">
+            <div class="offcanvas-body" id="right-panel-body">
                 <!-- Content will be loaded here by HTMX -->
-                <div class="modal-body text-center">
+                <div class="text-center">
                     <div class="spinner-border" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+        <!-- Generic HTMX Modal -->
+        <div class="modal fade"
+             id="htmx-modal"
+             tabindex="-1"
+             aria-labelledby="htmxModalLabel"
+             aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content" id="htmx-modal-content">
+                    <!-- Content will be loaded here by HTMX -->
+                    <div class="modal-body text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
 {% endblock %}
 {% block scripts %}
     <script type="module"

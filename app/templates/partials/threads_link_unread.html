@@ -1,0 +1,12 @@
+{# This is the "unread" (bold) state of the threads link for OOB swaps #}
+<a href="#"
+   id="threads-link"
+   class="text-decoration-none fw-bold text-white"
+   hx-get="{{ url_for('activity.view_all_threads') }}"
+   hx-target="#chat-messages-container"
+   hx-swap="innerHTML"
+   hx-swap-oob="true">
+    <i class="bi bi-chat-square-text me-2"
+       style="width: 16px;
+              display: inline-block"></i>Threads
+</a>

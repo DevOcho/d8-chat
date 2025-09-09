@@ -1,3 +1,5 @@
+import datetime
+
 from authlib.integrations.flask_client import OAuth
 from flask import url_for, session, redirect, render_template, current_app
 from .models import (
@@ -88,6 +90,7 @@ def handle_auth_callback():
                     display_name=display_name,
                     sso_provider="authentik",
                     is_active=True,
+                    last_threads_view_at=datetime.datetime.now(),
                 )
 
             # 1. Add to Workspace and Broadcast

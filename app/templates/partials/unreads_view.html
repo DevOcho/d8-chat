@@ -1,0 +1,14 @@
+<div id="unreads-list-container" class="h-100" style="overflow-y: auto;">
+    {% if grouped_unreads %}
+        {# Loop through each conversation that has unread messages #}
+        {% for conversation, messages in grouped_unreads.items() %}
+            {# We will render a separate partial for each group #}
+            {% include 'partials/unread_message_group.html' %}
+        {% endfor %}
+    {% else %}
+        <div class="text-center text-muted p-5">
+            <h5>You're all caught up!</h5>
+            <p>You'll find new messages from all of your conversations here.</p>
+        </div>
+    {% endif %}
+</div>

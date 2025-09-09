@@ -197,3 +197,42 @@ def test_profile_access(logged_in_client):
         b"Personal Information" in response.data
     )  # Check for a heading in the partial
     assert b"Test User" in response.data
+
+
+def test_update_notification_sound_success(logged_in_client):
+    """
+    GIVEN a logged-in user
+    WHEN they submit a valid new sound preference
+    THEN their preference should be updated and a trigger event fired.
+    """
+    user = User.get_by_id(1)
+    assert user.notification_sound == "d8-notification.mp3"
+
+    response = logged_in_client.put(
+        "/profile/notification_sound", data={"sound": "slack-notification.mp3"}
+    )
+
+    assert response.status_code == 200
+    assert "HX-Trigger" in response.headers
+    assert "update-sound-preference" in response.headers["HX-Trigger"]
+
+    updated_user = User.get_by_id(1)
+    assert updated_user.notification_sound == "slack-notification.mp3"
+
+
+def test_update_notification_sound_invalid(logged_in_client):
+    """
+    GIVEN a logged-in user
+    WHEN they submit an invalid sound preference
+    THEN they should receive a 400 error and their preference should not change.
+    """
+    user = User.get_by_id(1)
+    original_sound = user.notification_sound
+
+    response = logged_in_client.put(
+        "/profile/notification_sound", data={"sound": "invalid-sound.wav"}
+    )
+
+    assert response.status_code == 400
+    updated_user = User.get_by_id(1)
+    assert updated_user.notification_sound == original_sound

@@ -19,7 +19,9 @@ from flask import (
     g,
     make_response,
     current_app,
+    flash,
 )
+from flask_login import login_user, logout_user, current_user
 from peewee import fn
 from werkzeug.utils import secure_filename
 
@@ -75,6 +77,25 @@ def login_required(view):
     def wrapped_view(**kwargs):
         if g.user is None:
             return redirect(url_for("main.login_page"))
+        return view(**kwargs)
+
+    return wrapped_view
+
+
+def admin_required(view):
+    """Decorator to ensure the user is logged in and is an admin."""
+
+    @functools.wraps(view)
+    def wrapped_view(**kwargs):
+        if g.user is None:
+            return redirect(url_for("main.login_page"))
+
+        # Check for admin role in the workspace
+        workspace_member = WorkspaceMember.get_or_none(user=g.user)
+        if not workspace_member or workspace_member.role != "admin":
+            flash("You do not have permission to access this page.", "danger")
+            return redirect(url_for("main.chat_interface"))
+
         return view(**kwargs)
 
     return wrapped_view
@@ -151,6 +172,80 @@ def get_reactions_for_messages(messages):
 def get_attachments_for_messages(messages):
     """
     Efficiently fetches and groups attachment data for a given list of messages.
+    Args:
+        messages: A list of Peewee Message model instances.
+
+    Returns:
+        A dictionary mapping message IDs to a list of their attachments.
+        Example: { 123: [ {'url': '...', 'original_filename': '...'}, ... ] }
+    """
+    attachments_map = {}
+    if not messages:
+        return attachments_map
+
+    from .models import MessageAttachment, UploadedFile
+
+    message_ids = [m.id for m in messages]
+
+    all_links = (
+        MessageAttachment.select(MessageAttachment, UploadedFile)
+        .join(UploadedFile)
+        .where(MessageAttachment.message_id.in_(message_ids))
+    )
+
+    for link in all_links:
+        mid = link.message_id
+        att = link.attachment
+
+        if mid not in attachments_map:
+            attachments_map[mid] = []
+
+        attachments_map[mid].append(
+            {
+                "url": att.url,
+                "original_filename": att.original_filename,
+                "mime_type": att.mime_type,
+            }
+        )
+
+    return attachments_map
+
+
+def check_and_get_read_state_oob(current_user, just_read_conversation):
+    """
+    Checks if a user has any other unread messages after reading the current one.
+    If not, returns the HTML to swap the sidebar link back to the "read" state.
+    """
+    # Check for any other unread messages
+    has_other_unreads = (
+        Message.select(fn.COUNT(Message.id))
+        .join(Conversation)
+        .join(
+            UserConversationStatus,
+            on=(
+                (UserConversationStatus.conversation == Conversation.id)
+                & (UserConversationStatus.user == current_user.id)
+            ),
+        )
+        .where(
+            (Message.user != current_user)
+            & (Message.created_at > UserConversationStatus.last_read_timestamp)
+            # Exclude the conversation we just marked as read
+            & (Conversation.id != just_read_conversation.id)
+        )
+        .exists()
+    )
+
+    # If there are no other unreads, return the HTML to mark the link as read.
+    if not has_other_unreads:
+        return render_template("partials/unreads_link_read.html")
+
+    return ""
+
+
+def get_attachments_for_messages(messages):
+    """
+    Efficiently fetches and groups attachment data for a given list of messages.
 
     Args:
         messages: A list of Peewee Message model instances.
@@ -207,6 +302,27 @@ def login_page():
     return render_template("login.html")
 
 
+@main_bp.route("/login", methods=["POST"])
+def login():
+    """Handles username/password login form submission."""
+    username = request.form.get("username")
+    password = request.form.get("password")
+
+    # Find the user by username or email
+    user = User.get_or_none((User.username == username) | (User.email == username))
+
+    # Check if user exists and password is correct
+    if user and user.check_password(password):
+        # Use flask-login to manage the session
+        login_user(user)
+        # We still set this for compatibility with our existing g.user loader
+        session["user_id"] = user.id
+        return redirect(url_for("main.chat_interface"))
+
+    # If login fails, redirect back to the main page with an error
+    return redirect(url_for("main.index", error="Invalid username or password."))
+
+
 @main_bp.route("/sso-login")
 def sso_login():
     """Redirects to the SSO provider for login."""
@@ -233,6 +349,7 @@ def authorize():
 @main_bp.route("/logout")
 def logout():
     """Logs the user out by clearing the session."""
+    logout_user()
     session.clear()
     return redirect(url_for("main.index"))
 
@@ -242,9 +359,13 @@ def logout():
 @login_required
 def profile():
     """Renders the profile details partial for the offcanvas panel."""
-    return render_template(
+
+    html = render_template(
         "partials/profile_details.html", user=g.user, theme=g.user.theme
     )
+    response = make_response(html)
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
 
 
 # --- CHAT INTERFACE ROUTES ---
@@ -358,12 +479,42 @@ def chat_interface():
                 "has_unread": has_unread,
             }
 
+    # Check if any of the conversations have unread messages.
+    has_unreads = any(info["has_unread"] for info in unread_info.values())
+
+    # 6. Check for unread threads to determine if the sidebar link should be bold.
+    last_view_time = g.user.last_threads_view_at or datetime.datetime.min
+
+    # Find all parent message IDs the user is involved in (started or replied to)
+    user_thread_replies = Message.select().where(
+        (Message.user == g.user) & (Message.reply_type == "thread")
+    )
+    involved_parent_ids = {reply.parent_message_id for reply in user_thread_replies}
+    started_thread_parents = Message.select(Message.id).where(
+        (Message.user == g.user) & (Message.last_reply_at.is_null(False))
+    )
+    for parent in started_thread_parents:
+        involved_parent_ids.add(parent.id)
+
+    has_unread_threads = False
+    if involved_parent_ids:
+        has_unread_threads = (
+            Message.select(fn.COUNT(Message.id))
+            .where(
+                (Message.id.in_(list(involved_parent_ids)))
+                & (Message.last_reply_at > last_view_time)
+            )
+            .exists()
+        )
+
     return render_template(
         "chat.html",
         channels=user_channels,
         direct_message_users=direct_message_users,
         online_users=chat_manager.online_users,
         unread_info=unread_info,
+        has_unreads=has_unreads,
+        has_unread_threads=has_unread_threads,
         theme=g.user.theme,
     )
 
@@ -379,7 +530,15 @@ def get_message_view(message_id):
         return "", 404
 
     # This is used by the "Cancel" button on the edit form.
-    return render_template("partials/message.html", message=message)
+    reactions_map = get_reactions_for_messages([message])
+    attachments_map = get_attachments_for_messages([message])
+    return render_template(
+        "partials/message.html",
+        message=message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
 
 
 @main_bp.route("/chat/message/<int:message_id>/edit", methods=["GET"])
@@ -401,6 +560,9 @@ def update_message(message_id):
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
 
+    # Check if the edit is happening within the thread view context
+    is_in_thread_view = request.form.get("is_in_thread_view") == "true"
+
     new_content = request.form.get("content")
     if new_content:
         # Update the message in the database
@@ -412,17 +574,32 @@ def update_message(message_id):
         conv_id_str = message.conversation.conversation_id_str
 
         # Render the updated message partial
-        updated_message_html = render_template("partials/message.html", message=message)
+        reactions_map = get_reactions_for_messages([message])
+        attachments_map = get_attachments_for_messages([message])
+        updated_message_html = render_template(
+            "partials/message.html",
+            message=message,
+            reactions_map=reactions_map,
+            attachments_map=attachments_map,
+            Message=Message,
+            is_in_thread_view=is_in_thread_view,
+        )
 
-        # Construct the OOB swap HTML for the broadcast. This tells all
-        # clients to replace the message's outer HTML with the updated version.
+        # Construct the OOB swap HTML for the broadcast.
         broadcast_html = f'<div id="message-{message.id}" hx-swap-oob="outerHTML">{updated_message_html}</div>'
 
         # Broadcast the HTML fragment to all subscribers of the conversation
         chat_manager.broadcast(conv_id_str, broadcast_html)
 
     # The original hx-put request also needs a response. Return the updated partial.
-    return render_template("partials/message.html", message=message)
+    return render_template(
+        "partials/message.html",
+        message=message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+        is_in_thread_view=is_in_thread_view,
+    )
 
 
 @main_bp.route("/chat/message/<int:message_id>", methods=["DELETE"])
@@ -435,26 +612,24 @@ def delete_message(message_id):
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
 
-    # Check for an attachment *before* deleting the message.
-    attachment_to_delete = message.attachment
+    # Use the correct 'attachments' property and prepare to loop
+    attachments_to_delete = list(message.attachments)
     conv_id_str = message.conversation.conversation_id_str
 
     try:
-        # Use a database transaction to ensure both deletes succeed or fail together.
+        # Use a database transaction to ensure all deletes succeed or fail together.
         with db.atomic():
             # Delete the message from the database
-            message.delete_instance()
+            message.delete_instance(
+                recursive=True
+            )  # recursive will delete related MessageAttachment links
 
-            # If there was an attachment, delete it from our records and from Minio.
-            if attachment_to_delete:
+            # If there were attachments, delete them from Minio and our records.
+            for attachment in attachments_to_delete:
                 try:
-                    # Delete from Minio storage first
-                    minio_service.delete_file(attachment_to_delete.stored_filename)
-                    # Then delete the record from our database
-                    attachment_to_delete.delete_instance()
+                    minio_service.delete_file(attachment.stored_filename)
+                    attachment.delete_instance()
                 except Exception as e:
-                    # If the file cleanup fails, log it but don't fail the whole request.
-                    # The user's primary goal was to delete the message.
                     print(
                         f"Error during attachment cleanup for message {message_id}: {e}"
                     )
@@ -467,7 +642,7 @@ def delete_message(message_id):
     broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
     chat_manager.broadcast(conv_id_str, broadcast_html)
 
-    return "", 204  # Use 200 OK because we are broadcasting, 204 can be ignored by HTMX
+    return "", 204
 
 
 @main_bp.route("/chat/input/default")
@@ -494,6 +669,87 @@ def get_reply_chat_input(message_id):
         draft_content=draft_content,
         draft_content_html=draft_content_html,
     )
+
+
+@main_bp.route("/chat/message/<int:message_id>/load_for_thread_reply")
+@login_required
+def load_for_thread_reply(message_id):
+    """
+    Loads the thread chat input component configured for quoting another message
+    within the thread.
+    """
+    try:
+        message_to_reply_to = Message.get_by_id(message_id)
+
+        # A reply within a thread must itself be a child of a parent message.
+        if not message_to_reply_to.parent_message:
+            return "Cannot reply to this message in a thread context.", 400
+
+        parent_message = message_to_reply_to.parent_message
+
+        return render_template(
+            "partials/chat_input_thread_reply.html",
+            message=message_to_reply_to,
+            parent_message=parent_message,
+        )
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+
+@main_bp.route("/chat/thread/<int:parent_message_id>")
+@login_required
+def view_thread(parent_message_id):
+    """Renders the thread view partial for the side panel."""
+    try:
+        parent_message = Message.get_by_id(parent_message_id)
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+    channel = None
+    if parent_message.conversation.type == "channel":
+        channel_id = int(parent_message.conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(channel_id)
+
+    thread_replies = (
+        Message.select()
+        .where(
+            (Message.parent_message == parent_message)
+            & (Message.reply_type == "thread")
+        )
+        .order_by(Message.created_at.asc())
+    )
+
+    all_thread_messages = [parent_message] + list(thread_replies)
+    reactions_map = get_reactions_for_messages(all_thread_messages)
+    attachments_map = get_attachments_for_messages(all_thread_messages)
+
+    response = make_response(
+        render_template(
+            "partials/thread_view.html",
+            parent_message=parent_message,
+            thread_replies=thread_replies,
+            reactions_map=reactions_map,
+            attachments_map=attachments_map,
+            channel=channel,
+            Message=Message,
+            is_in_thread_view=True,  # This flag tells the templates they are in the side panel
+        )
+    )
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
+
+
+@main_bp.route("/chat/input/thread/<int:parent_message_id>")
+@login_required
+def get_thread_chat_input(parent_message_id):
+    """Serves the dedicated chat input form for a thread view."""
+    try:
+        parent_message = Message.get_by_id(parent_message_id)
+        return render_template(
+            "partials/chat_input_thread.html", parent_message=parent_message
+        )
+    except Message.DoesNotExist:
+        return "", 404
 
 
 # --- PROFILE EDITING ROUTES ---
@@ -670,27 +926,112 @@ def toggle_reaction(message_id):
 
 
 # --- Admin Routes ---
-
-
 @admin_bp.route("/users")
+@admin_required
 def list_users():
-    users = User.select()
-    return render_template("admin/user_list.html", users=users)
+    """Lists all users with their workspace role."""
+    # Query to join User and WorkspaceMember to get the role
+    users_with_roles = (
+        User.select(User, WorkspaceMember.role)
+        .join(WorkspaceMember, on=(User.id == WorkspaceMember.user))
+        .order_by(User.id)
+    )
+    return render_template("admin/user_list.html", users=users_with_roles)
 
 
 @admin_bp.route("/users/create", methods=["GET"])
+@admin_required
 def create_user_form():
     return render_template("admin/create_user.html")
 
 
 @admin_bp.route("/users/create", methods=["POST"])
+@admin_required
 def create_user():
+    """Creates a new local user with a password and role."""
     username = request.form.get("username")
     email = request.form.get("email")
-    if username and email:
-        User.create(username=username, email=email)
+    password = request.form.get("password")
+    role = request.form.get("role", "member")  # Default to 'member'
+    display_name = request.form.get("display_name")
+
+    if not all([username, email, password]):
+        flash("Username, email, and password are required.", "danger")
+        return redirect(url_for("admin.create_user_form"))
+
+    try:
+        with db.atomic():
+            # Create the User
+            new_user = User(
+                username=username,
+                email=email,
+                display_name=display_name,
+                last_threads_view_at=datetime.datetime.now(),
+            )
+            new_user.set_password(password)
+            new_user.save()
+
+            # Add them to the primary workspace
+            workspace = Workspace.get(id=1)
+            WorkspaceMember.create(user=new_user, workspace=workspace, role=role)
+
+            # Add them to the 'general' and 'announcements' channels
+            general = Channel.get(Channel.name == "general")
+            announcements = Channel.get(Channel.name == "announcements")
+            ChannelMember.create(user=new_user, channel=general)
+            ChannelMember.create(user=new_user, channel=announcements)
+
+            flash(f"User '{username}' created successfully.", "success")
+    except IntegrityError:
+        flash(f"Username or email '{username}' already exists.", "danger")
+        return redirect(url_for("admin.create_user_form"))
+
+    return redirect(url_for("admin.list_users"))
+
+
+# file: app/routes.py
+
+# ... after the create_user function ...
+@admin_bp.route("/users/edit/<int:user_id>", methods=["GET", "POST"])
+@admin_required
+def edit_user(user_id):
+    """Handles both displaying and processing the user edit form."""
+    user = User.get_or_none(id=user_id)
+    if not user:
+        flash("User not found.", "danger")
         return redirect(url_for("admin.list_users"))
-    return redirect(url_for("admin.create_user_form"))
+
+    workspace_member = WorkspaceMember.get(user=user)
+
+    if request.method == "POST":
+        # Process the form submission
+        user.username = request.form.get("username")
+        user.display_name = request.form.get("display_name")
+        user.email = request.form.get("email")
+        workspace_member.role = request.form.get("role")
+
+        new_password = request.form.get("password")
+        if new_password:
+            user.set_password(new_password)
+
+        try:
+            with db.atomic():
+                user.save()
+                workspace_member.save()
+            flash(f"User '{user.username}' updated successfully.", "success")
+        except IntegrityError:
+            flash(f"Username or email already exists.", "danger")
+            # Don't redirect, so the admin can fix the error
+            return render_template(
+                "admin/edit_user.html", user=user, workspace_member=workspace_member
+            )
+
+        return redirect(url_for("admin.list_users"))
+
+    # For a GET request, just show the form
+    return render_template(
+        "admin/edit_user.html", user=user, workspace_member=workspace_member
+    )
 
 
 @main_bp.route("/profile/status", methods=["PUT"])
@@ -747,6 +1088,30 @@ def update_theme():
     return "Invalid theme", 400
 
 
+@main_bp.route("/profile/notification_sound", methods=["PUT"])
+@login_required
+def update_notification_sound():
+    """Updates the user's notification sound preference."""
+    new_sound = request.form.get("sound")
+    # A list of the sounds we know are available.
+    allowed_sounds = ["d8-notification.mp3", "slack-notification.mp3"]
+
+    if new_sound and new_sound in allowed_sounds:
+        user = g.user
+        user.notification_sound = new_sound
+        user.save()
+
+        # We'll trigger a custom event that our JavaScript can listen for
+        # to update the sound without a page reload.
+        response = make_response("")
+        response.headers["HX-Trigger"] = json.dumps(
+            {"update-sound-preference": new_sound}
+        )
+        return response
+
+    return "Invalid sound choice", 400
+
+
 @main_bp.route("/chat/user/preference/wysiwyg", methods=["PUT"])
 @login_required
 def set_wysiwyg_preference():
@@ -792,6 +1157,33 @@ def load_message_for_edit(message_id):
     return render_template("partials/chat_input_edit.html", message=message)
 
 
+@main_bp.route("/chat/message/<int:message_id>/load_for_thread_edit")
+@login_required
+def load_message_for_thread_edit(message_id):
+    """
+    Loads the thread chat input component configured for editing a specific message.
+    """
+    try:
+        message = Message.get_by_id(message_id)
+        if message.user_id != g.user.id:
+            return "Unauthorized", 403
+
+        # We need the parent message context to correctly ID the container
+        if not message.parent_message:
+            return "Cannot edit a parent message from this view.", 400
+
+        # Convert markdown to HTML for the WYSIWYG view
+        message_content_html = to_html(message.content)
+
+        return render_template(
+            "partials/chat_input_thread_edit.html",
+            message=message,
+            message_content_html=message_content_html,
+        )
+    except Message.DoesNotExist:
+        return "Message not found", 404
+
+
 @main_bp.route("/chat/messages/older/<string:conversation_id>")
 @login_required
 def get_older_messages(conversation_id):
@@ -827,11 +1219,16 @@ def get_older_messages(conversation_id):
     messages = list(reversed(query))
 
     # The new partial handles rendering the messages and the next trigger
+    reactions_map = get_reactions_for_messages(messages)
+    attachments_map = get_attachments_for_messages(messages)
     return render_template(
         "partials/message_batch.html",
         messages=messages,
         conversation_id=conversation_id,
         PAGE_SIZE=PAGE_SIZE,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
     )
 
 
@@ -903,6 +1300,7 @@ def jump_to_message(message_id):
             PAGE_SIZE=PAGE_SIZE,
             reactions_map=reactions_map,
             attachments_map=attachments_map,
+            Message=Message,
         )
         clear_badge_html = render_template(
             "partials/clear_badge.html",
@@ -925,6 +1323,7 @@ def jump_to_message(message_id):
             PAGE_SIZE=PAGE_SIZE,
             reactions_map=reactions_map,
             attachments_map=attachments_map,
+            Message=Message,
         )
 
         if not created and other_user.id != g.user.id:
@@ -1001,9 +1400,10 @@ def chat(ws):
             # --- New Message Handling ---
             chat_text = data.get("chat_message")
             parent_id = data.get("parent_message_id")
+            reply_type = data.get("reply_type")
             attachment_file_ids = data.get("attachment_file_ids")
+            quoted_message_id = data.get("quoted_message_id")
 
-            # Confirm we have either a message or an attachment for this message
             if not chat_text and not attachment_file_ids:
                 continue
 
@@ -1027,70 +1427,128 @@ def chat(ws):
                 conversation=conversation,
                 chat_text=chat_text,
                 parent_id=parent_id,
+                reply_type=reply_type,
                 attachment_file_ids=attachment_file_ids,
+                quoted_message_id=quoted_message_id,
             )
 
-            # we need reactions for this message even if none exist
-            reactions_map_for_new_message = get_reactions_for_messages([new_message])
-            attachments_map_for_new_message = get_attachments_for_messages(
-                [new_message]
-            )
+            # --- NEW BROADCAST LOGIC ---
+            if new_message.reply_type == "thread":
+                # This is a threaded reply.
+                broadcast_html = ""
 
-            new_message_html = render_template(
-                "partials/message.html",
-                message=new_message,
-                reactions_map=reactions_map_for_new_message,
-                attachments_map=attachments_map_for_new_message,
-            )
-            message_to_broadcast = (
-                f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-            )
+                # 1. The new message to append to the thread panel for those viewing it.
+                reactions_map_for_reply = get_reactions_for_messages([new_message])
+                attachments_map_for_reply = get_attachments_for_messages([new_message])
+                new_reply_html = render_template(
+                    "partials/message.html",
+                    message=new_message,
+                    reactions_map=reactions_map_for_reply,
+                    attachments_map=attachments_map_for_reply,
+                    Message=Message,
+                    is_in_thread_view=True,
+                )
+                broadcast_html += f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
 
-            chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
+                # 2. The updated parent message for the main channel view (shows the new reply count).
+                parent_message = Message.get_by_id(parent_id)
+                reactions_map_for_parent = get_reactions_for_messages([parent_message])
+                attachments_map_for_parent = get_attachments_for_messages(
+                    [parent_message]
+                )
+                parent_in_channel_html = render_template(
+                    "partials/message.html",
+                    message=parent_message,
+                    reactions_map=reactions_map_for_parent,
+                    attachments_map=attachments_map_for_parent,
+                    Message=Message,
+                    is_in_thread_view=False,
+                )
+                broadcast_html += f'<div id="message-{parent_id}" hx-swap-oob="outerHTML">{parent_in_channel_html}</div>'
 
-            message_for_sender = message_to_broadcast
-            if parent_id:
-                input_html = render_template("partials/chat_input_default.html")
-                message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
-            ws.send(message_for_sender)
+                # 3. The "unread" indicator for the sidebar "Threads" link.
+                all_participant_ids = {parent_message.user_id}
+                replies = Message.select(Message.user_id).where(
+                    Message.parent_message == parent_message
+                )
+                for reply in replies:
+                    all_participant_ids.add(reply.user_id)
 
-            """
-            current_time = datetime.datetime.now()
-            if conv_id_str in chat_manager.active_connections:
-                with db.atomic():
-                    for viewer_ws in chat_manager.active_connections[conv_id_str]:
-                        (
-                            UserConversationStatus.update(
-                                last_read_timestamp=current_time
-                            )
-                            .where(
-                                (UserConversationStatus.user == viewer_ws.user)
-                                & (UserConversationStatus.conversation == conversation)
-                            )
+                unread_link_html = render_template("partials/threads_link_unread.html")
+                for user_id in all_participant_ids:
+                    if user_id != ws.user.id and user_id in chat_manager.all_clients:
+                        chat_manager.send_to_user(user_id, unread_link_html)
 
-                            .execute()
+                all_participant_ids = {parent_message.user_id}
+                replies = Message.select(Message.user_id).where(
+                    Message.parent_message == parent_message
+                )
+                for reply in replies:
+                    all_participant_ids.add(reply.user_id)
+
+                unread_link_html = render_template("partials/threads_link_unread.html")
+                now = datetime.datetime.now()
+
+                for user_id in all_participant_ids:
+                    # Don't notify the sender or users who are not online
+                    if user_id == ws.user.id or user_id not in chat_manager.all_clients:
+                        continue
+
+                    # Send the "unread" indicator to the sidebar
+                    chat_manager.send_to_user(user_id, unread_link_html)
+
+                    # Now, check if we should also send a sound notification
+                    try:
+                        # We need the user's status for the PARENT conversation
+                        # to check their notification cooldown.
+                        status, _ = UserConversationStatus.get_or_create(
+                            user_id=user_id, conversation=parent_message.conversation
                         )
-                        # Now, determine if this new message is a mention FOR THIS SPECIFIC VIEWER
-                        is_mention_for_viewer = Mention.select().where(
-                            (Mention.message == new_message) &
-                            (Mention.user == viewer_ws.user)
-                        ).exists()
 
-                        # Prepare the HTML payload for this specific viewer
-                        final_html_for_viewer = render_template(
-                            "partials/_message_realtime_wrapper.html",
-                            message_html=new_message_html,
-                            is_mention=is_mention_for_viewer
+                        should_notify = status.last_notified_timestamp is None or (
+                            now - status.last_notified_timestamp
+                        ) > datetime.timedelta(seconds=10)
+
+                        if should_notify:
+                            sound_payload = {"type": "sound"}
+                            chat_manager.send_to_user(user_id, sound_payload)
+                            status.last_notified_timestamp = now
+                            status.save()
+
+                    except Exception as e:
+                        print(
+                            f"Error sending thread notification to user {user_id}: {e}"
                         )
 
-                        # If the viewer is the original sender and it was a reply, add the input reset
-                        if viewer_ws == ws and parent_id:
-                            input_html = render_template("partials/chat_input_default.html")
-                            final_html_for_viewer += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+                # Broadcast to all clients in the conversation and send back to the sender.
+                chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
+                ws.send(broadcast_html)
 
-                        viewer_ws.send(final_html_for_viewer)
-            """
+            else:
+                # This is a regular message or a quoted reply, which appears in the main feed.
+                reactions_map = get_reactions_for_messages([new_message])
+                attachments_map = get_attachments_for_messages([new_message])
+                new_message_html = render_template(
+                    "partials/message.html",
+                    message=new_message,
+                    reactions_map=reactions_map,
+                    attachments_map=attachments_map,
+                    Message=Message,
+                )
+                message_to_broadcast = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
 
+                # Broadcast to others
+                chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
+
+                # Send back to the sender, potentially with an input reset for quoted replies.
+                message_for_sender = message_to_broadcast
+                if new_message.reply_type == "quote":
+                    input_html = render_template("partials/chat_input_default.html")
+                    message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+                ws.send(message_for_sender)
+
+            # --- Notification logic for users NOT viewing the channel remains the same ---
+            # (The existing notification logic from line 976 onwards is fine)
             if conversation.type == "channel":
                 channel_id = conversation.conversation_id_str.split("_")[1]
                 channel = Channel.get_by_id(channel_id)
@@ -1108,8 +1566,6 @@ def chat(ws):
                     continue
 
                 member_ws = chat_manager.all_clients[member.id]
-                if getattr(member_ws, "channel_id", None) == conv_id_str:
-                    continue
 
                 status, _ = UserConversationStatus.get_or_create(
                     user=member, conversation=conversation
@@ -1178,7 +1634,11 @@ def chat(ws):
                         )
 
                 if notification_html:
+                    unread_link_html = render_template(
+                        "partials/unreads_link_unread.html"
+                    )
                     member_ws.send(notification_html)
+                    member_ws.send(unread_link_html)
 
                 now = datetime.datetime.now()
                 is_a_mention = (
@@ -1187,7 +1647,11 @@ def chat(ws):
                     .exists()
                 )
 
+                # Rule 1: Always notify with sound and a desktop notification for any mention
                 if is_a_mention:
+                    sound_payload = {"type": "sound"}
+                    chat_manager.send_to_user(member.id, sound_payload)
+
                     notification_payload = {
                         "type": "notification",
                         "title": f"New mention from {new_message.user.display_name or new_message.user.username}",
@@ -1200,10 +1664,12 @@ def chat(ws):
                     chat_manager.send_to_user(member.id, notification_payload)
                     status.last_notified_timestamp = now
                     status.save()
-                else:
+
+                # Rule 2: If it's not a mention, ONLY notify with sound if it's a DM (and respect the cooldown)
+                elif conversation.type == "dm":
                     should_notify = status.last_notified_timestamp is None or (
                         now - status.last_notified_timestamp
-                    ) > datetime.timedelta(seconds=60)
+                    ) > datetime.timedelta(seconds=10)
                     if should_notify:
                         sound_payload = {"type": "sound"}
                         chat_manager.send_to_user(member.id, sound_payload)

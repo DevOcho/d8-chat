@@ -1,24 +1,91 @@
 # tests/test_dms.py
+import pytest
+from app.models import User, Conversation, UserConversationStatus, WorkspaceMember
 
-from app.models import User, Conversation, UserConversationStatus
+# A smaller page size for the user search modal
+DM_SEARCH_PAGE_SIZE = 20
 
 
-def test_get_start_dm_form_lists_other_users(logged_in_client):
+@pytest.fixture
+def setup_dm_search_users(test_db):
     """
-    GIVEN two users exist in the database
-    WHEN the "start DM" modal is requested by user 1
-    THEN it should list the other user but not the logged-in user.
+    Creates a number of users to test searching and pagination for starting DMs.
+    - user1 (testuser) is the logged-in user.
+    - user2 (dm_partner) is already in a DM with user1.
+    - 25 other users (search_user_00 to search_user_24) are available to be searched.
     """
-    # --- THE FIX: Use a distinct username to prevent substring issues ---
-    User.create(id=2, username="anotheruser", email="another@example.com")
+    user1 = User.get_by_id(1)
+    workspace = WorkspaceMember.get(user=user1).workspace
 
+    # User already in a DM
+    user2 = User.create(id=2, username="dm_partner", email="partner@example.com")
+    WorkspaceMember.create(user=user2, workspace=workspace)
+    conv, _ = Conversation.get_or_create(conversation_id_str="dm_1_2", type="dm")
+    UserConversationStatus.create(user=user1, conversation=conv)
+
+    # Create more users than will fit on one page
+    for i in range(DM_SEARCH_PAGE_SIZE + 5):
+        user = User.create(
+            id=i + 3,
+            # Zero-pad the number to ensure correct alphabetical sorting
+            username=f"search_user_{i:02d}",
+            email=f"search{i}@example.com",
+            display_name=f"Search User {i:02d}",
+        )
+        WorkspaceMember.create(user=user, workspace=workspace)
+
+
+def test_get_start_dm_form_lists_other_users(logged_in_client, setup_dm_search_users):
+    """
+    GIVEN multiple users exist
+    WHEN the "start DM" modal is requested
+    THEN it should list available users but not the logged-in user or existing DM partners.
+    """
     response = logged_in_client.get("/chat/dms/start")
 
     assert response.status_code == 200
-    # Assert the distinct username is present
-    assert b"anotheruser" in response.data
-    # Assert the original username is NOT present. This will now work correctly.
+    # The logged-in user should not be in the list
     assert b"testuser" not in response.data
+    # The user already in a DM should not be in the list
+    assert b"dm_partner" not in response.data
+    # The first searchable user (with padding) should be present
+    assert b"search_user_00" in response.data
+    # Check for the "Load More" button since we created more users than the page size
+    assert b"Load More" in response.data
+
+
+def test_search_users_for_dm(logged_in_client, setup_dm_search_users):
+    """
+    WHEN searching for users to start a DM
+    THEN it should only return users matching the query.
+    """
+    # Search for a specific user that should only have one match
+    response = logged_in_client.get("/chat/dms/search?q=search_user_15")
+
+    assert response.status_code == 200
+    assert b"search_user_15" in response.data
+    # [THE FIX] Check for a user that definitely does not match the query.
+    assert b"search_user_07" not in response.data
+    assert (
+        b"Load More" not in response.data
+    )  # Should not be a load more button for one result
+
+
+def test_search_users_for_dm_pagination(logged_in_client, setup_dm_search_users):
+    """
+    WHEN searching returns more results than the page size
+    THEN the "Load More" button should correctly fetch the next page.
+    """
+    # Request the second page of results for a broad query
+    response = logged_in_client.get("/chat/dms/search?q=search_user&page=2")
+
+    assert response.status_code == 200
+    # The last user created should be on the second page
+    assert b"search_user_24" in response.data
+    # The first user should NOT be on the second page
+    assert b"search_user_00" not in response.data
+    # There are no more pages, so the button should not be present
+    assert b"Load More" not in response.data
 
 
 def test_open_dm_chat_with_user(logged_in_client):
@@ -28,7 +95,6 @@ def test_open_dm_chat_with_user(logged_in_client):
     THEN a Conversation and two UserConversationStatus records should be created.
     """
     user1 = User.get_by_id(1)
-    # --- THE FIX: Use a distinct username ---
     user2 = User.create(id=2, username="anotheruser", email="another@example.com")
 
     assert Conversation.select().where(Conversation.type == "dm").count() == 0
@@ -37,14 +103,12 @@ def test_open_dm_chat_with_user(logged_in_client):
 
     assert response.status_code == 200
     assert b'<div id="chat-header-container" hx-swap-oob="true">' in response.data
-    # Assert the distinct username is present
     assert b"anotheruser" in response.data
 
     # Verify database records were created
     expected_conv_id_str = f"dm_{user1.id}_{user2.id}"
     conv = Conversation.get_or_none(conversation_id_str=expected_conv_id_str)
     assert conv is not None
-    # ... (rest of the assertions are correct) ...
     assert conv.type == "dm"
     status1 = UserConversationStatus.get_or_none(user=user1, conversation=conv)
     status2 = UserConversationStatus.get_or_none(user=user2, conversation=conv)

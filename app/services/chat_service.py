@@ -19,7 +19,9 @@ def handle_new_message(
     conversation: Conversation,
     chat_text: str,
     parent_id: int = None,
+    reply_type: str = None,
     attachment_file_ids: str = None,
+    quoted_message_id: int = None,
 ):
     """
     Handles the business logic for creating a new message and its associated mentions.
@@ -34,6 +36,7 @@ def handle_new_message(
     Returns:
         The newly created Message object.
     """
+
     with db.atomic():
         # Step 1: Create the core message object
         new_message = Message.create(
@@ -41,7 +44,16 @@ def handle_new_message(
             conversation=conversation,
             content=chat_text,
             parent_message=parent_id if parent_id else None,
+            reply_type=reply_type if parent_id else None,
+            quoted_message=quoted_message_id if quoted_message_id else None,
         )
+
+        # If this is a thread reply, update the parent's last_reply_at timestamp
+        if reply_type == "thread" and parent_id:
+            parent_message = Message.get_or_none(id=parent_id)
+            if parent_message:
+                parent_message.last_reply_at = new_message.created_at
+                parent_message.save()
 
         # Step 2: Link any attachments if IDs are provided
         if attachment_file_ids:

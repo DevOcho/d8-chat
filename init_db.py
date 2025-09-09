@@ -1,5 +1,8 @@
 # init_db.py
 
+import datetime
+import secrets
+
 from app import create_app
 from app.models import (
     db,
@@ -110,6 +113,41 @@ def seed_initial_data():
         conversation_id_str=f"channel_{announcements_channel.id}",
         defaults={"type": "channel"},
     )
+
+    # Create the default admin user if they don't exist
+    admin_user, created = User.get_or_create(
+        username="admin",
+        defaults={
+            "email": "admin@d8chat.com",
+            "is_active": True,
+            "display_name": "Admin User",
+            "last_threads_view_at": datetime.datetime.now(),
+        },
+    )
+
+    if created:
+        # Generate a secure, random password
+        temp_password = secrets.token_urlsafe(16)
+        admin_user.set_password(temp_password)
+        admin_user.save()
+
+        # Add admin to the workspace with the 'admin' role
+        WorkspaceMember.create(user=admin_user, workspace=workspace, role="admin")
+
+        # Add admin to the default channels
+        ChannelMember.create(user=admin_user, channel=general_channel)
+        ChannelMember.create(user=admin_user, channel=announcements_channel)
+
+        print("\n" + "=" * 50)
+        print("  ADMIN USER CREATED  ".center(50, "="))
+        print("=" * 50)
+        print(f"  Username: {admin_user.username}")
+        print(f"  Password: {temp_password}")
+        print("=" * 50)
+        print("  Please use these credentials to log in for the first time.  \n")
+    else:
+        print("Admin user already exists, skipping creation.")
+
     print("Initial data seeded.")
 
 

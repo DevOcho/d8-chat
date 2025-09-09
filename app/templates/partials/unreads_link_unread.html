@@ -1,0 +1,12 @@
+{# This is the "unread" (bold) state of the unreads link for OOB swaps #}
+<a href="#"
+   id="unreads-link"
+   class="text-decoration-none fw-bold text-white"
+   hx-get="{{ url_for('activity.view_all_unreads') }}"
+   hx-target="#chat-messages-container"
+   hx-swap="innerHTML"
+   hx-swap-oob="true">
+    <i class="bi bi-envelope-fill me-2"
+       style="width: 16px;
+              display: inline-block"></i>Unreads
+</a>

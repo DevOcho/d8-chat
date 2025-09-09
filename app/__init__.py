@@ -5,14 +5,23 @@ from config import Config
 import bleach
 import emoji
 from flask import Flask, g
+from flask_login import LoginManager
 from flask_sock import Sock
 from markupsafe import Markup
 
-from .models import initialize_db
+from .models import initialize_db, User
 from .sso import init_sso
 from .services import minio_service
 
 sock = Sock()  # Create a Sock instance
+
+# Flask Login =================================================================
+login_manager = LoginManager()
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.get_or_none(User.id == user_id)
 
 
 def create_app(config_class=Config):
@@ -33,8 +42,9 @@ def create_app(config_class=Config):
     # Initialize Minio Client
     minio_service.init_app(app)
 
-    # Initialize SSO
+    # Initialize SSO, Flask Login, and Websockets
     init_sso(app)
+    login_manager.init_app(app)
     sock.init_app(app)  # Initialize Sock with the app
 
     # --- Register custom template filter for Markdown ---
@@ -183,6 +193,7 @@ def create_app(config_class=Config):
     from .blueprints.channels import channels_bp
     from .blueprints.dms import dms_bp
     from .blueprints.files import files_bp
+    from .blueprints.activity import activity_bp
 
     # Register blueprints
     app.register_blueprint(main_bp)
@@ -191,5 +202,6 @@ def create_app(config_class=Config):
     app.register_blueprint(channels_bp)
     app.register_blueprint(dms_bp)
     app.register_blueprint(files_bp)
+    app.register_blueprint(activity_bp)
 
     return app

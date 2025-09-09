@@ -1,0 +1,121 @@
+{# app/templates/partials/chat_input_thread.html #}
+<div id="thread-input-container-{{ parent_message.id }}"
+     class="chat-input-form">
+    <div id="typing-indicator" class="text-muted small"></div>
+    <form ws-send
+          id="message-form-thread-{{ parent_message.id }}"
+          autocomplete="off">
+        {# These hidden inputs provide the necessary context for a threaded reply #}
+        <input type="hidden"
+               name="parent_message_id"
+               value="{{ parent_message.id }}">
+        <input type="hidden" name="reply_type" value="thread">
+        <input type="file"
+               id="file-attachment-input-thread-{{ parent_message.id }}"
+               class="d-none"
+               multiple>
+        <input type="hidden"
+               name="attachment_file_ids"
+               id="attachment-file-ids-thread-{{ parent_message.id }}">
+        <div class="wysiwyg-editor-container">
+            <div id="attachment-previews-thread-{{ parent_message.id }}"
+                 class="p-2 d-flex flex-wrap gap-2"
+                 style="display: none">
+                <!-- Image previews will be injected here by JavaScript -->
+            </div>
+            <div class="wysiwyg-toolbar toolbar-hidden">
+                <!-- Toolbar buttons (Bold, Italic, etc.) -->
+                <button type="button" data-command="bold" title="Bold (Ctrl+B)">
+                    <i class="bi bi-type-bold"></i>
+                </button>
+                <button type="button" data-command="italic" title="Italic (Ctrl+I)">
+                    <i class="bi bi-type-italic"></i>
+                </button>
+                <button type="button" data-command="strikethrough" title="Strikethrough">
+                    <i class="bi bi-type-strikethrough"></i>
+                </button>
+                <button type="button"
+                        data-command="insertUnorderedList"
+                        title="Bulleted List">
+                    <i class="bi bi-list-ul"></i>
+                </button>
+                <button type="button" data-command="insertOrderedList" title="Numbered List">
+                    <i class="bi bi-list-ol"></i>
+                </button>
+                <button type="button"
+                        data-command="formatBlock"
+                        data-value="blockquote"
+                        title="Quote">
+                    <i class="bi bi-quote"></i>
+                </button>
+                <button type="button"
+                        data-command="formatBlock"
+                        data-value="pre"
+                        title="Code Block">
+                    <i class="bi bi-code-slash"></i>
+                </button>
+            </div>
+            <!-- The contenteditable div for the rich editor -->
+            <div id="wysiwyg-editor-thread-{{ parent_message.id }}"
+                 class="wysiwyg-content"
+                 contenteditable="true"
+                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"
+                 place-holder="Reply..."
+                 data-placeholder="Reply..."></div>
+            <!-- The textarea for Markdown mode -->
+            <textarea id="markdown-toggle-view-thread-{{ parent_message.id }}"
+                      class="form-control"
+                      rows="1"
+                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}"
+                      placeholder="Reply..."
+                      data-placeholder="Reply..."></textarea>
+            <!-- This hidden input will hold the final markdown content for submission -->
+            <textarea id="chat-message-input-thread-{{ parent_message.id }}"
+                      name="chat_message"
+                      style="display: none"></textarea>
+            <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
+                <!-- Bottom toolbar buttons (attachments, @mention, emoji) -->
+                <button type="button"
+                        id="format-toggle-btn-thread-{{ parent_message.id }}"
+                        title="Toggle Rich Formatting">
+                    <i class="bi bi-type"></i>
+                </button>
+                <button type="button"
+                        id="file-attachment-btn-thread-{{ parent_message.id }}"
+                        title="Attach a file">
+                    <i class="bi bi-paperclip"></i>
+                </button>
+                <button type="button"
+                        id="mention-btn-thread-{{ parent_message.id }}"
+                        title="Mention User">
+                    <i class="bi bi-at"></i>
+                </button>
+                <button type="button"
+                        id="emoji-btn-thread-{{ parent_message.id }}"
+                        title="Add Emoji">
+                    <i class="bi bi-emoji-smile"></i>
+                </button>
+                <div class="ms-auto d-flex align-items-center">
+                    <button id="send-button-thread-{{ parent_message.id }}"
+                            type="submit"
+                            class="btn send-btn-dynamic"></button>
+                </div>
+            </div>
+        </div>
+        <!-- Emoji picker container, positioned relative to the form -->
+        <div id="emoji-picker-container-thread-{{ parent_message.id }}"
+             style="display: none">
+            <emoji-picker class="light"></emoji-picker>
+        </div>
+    </form>
+    <div id="typing-sender"
+         ws-send
+         hx-trigger="typing-event"
+         style="display: none"></div>
+</div>
+{# This script triggers a NEW, dedicated initializer in chat.js #}
+<script>
+    document.body.dispatchEvent(new CustomEvent('initializeEditor', {
+        detail: { idSuffix: '-thread-{{ parent_message.id }}' }
+    }));
+</script>

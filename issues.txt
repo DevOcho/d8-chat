@@ -2,7 +2,7 @@ Current issues with the slack_clone:
 
 Style bug when you start a new chat with a user (the avatars are squished together)
 
-Avatar doesn't update in the (you) chat or the sidebar without a page refresh.
+Small extra box on the top of the chat inputs that exist solely for image uploads.  These shouldn't be visible until someone actually uploads an image.
 
 Natalie: pasting doesn't work
 
@@ -11,10 +11,6 @@ Sagrario: She doesn't like that Hash tags are being formatted as headers in mark
 We need to be able to upload files.
 
 We need a way to search and add gifs
-
-I also think we are going to need to implement threads but I only want them in channels.
-
-We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
 
 We need to create a full administration section
   - Users Management
@@ -27,9 +23,17 @@ If the server disconnects, it will reconnect for users at different times.  Mess
 
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
----
+========
+
+We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
+
+I want to add "Direct Messages", and "Mentions & Reactions" to the Activity area on the quick view.
+
+I'd love the chat input to turn into a file upload drop location when someone hovers an image over the chat window.
 
 Group DMs (talk with more than one person) and also the ability to promote a group conversation to a channel.
+
+We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
 
 Set a work hours time and change the status icon to indicate if it's within our outside of their work hours.  The work hours can be set in the profile (for example, 8am to 5pm).
 

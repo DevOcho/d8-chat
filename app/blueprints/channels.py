@@ -26,6 +26,7 @@ from app.routes import (
     PAGE_SIZE,
     get_reactions_for_messages,
     get_attachments_for_messages,
+    check_and_get_read_state_oob,
 )
 from app.chat_manager import chat_manager
 import json
@@ -114,6 +115,7 @@ def get_channel_chat(channel_id):
         reactions_map=reactions_map,
         attachments_map=attachments_map,
         conversation_id=conversation.id,
+        Message=Message,
     )
 
     clear_badge_html = render_template(
@@ -123,7 +125,22 @@ def get_channel_chat(channel_id):
         link_text=f"# {channel.name}",
     )
 
-    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
+    # Also render the default chat input to ensure it's present.
+    chat_input_html = render_template("partials/chat_input_default.html")
+    # Wrap it in a container with the correct ID for the OOB swap.
+    chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
+
+    # Check for other unreads and add the result to the response
+    read_state_oob_html = check_and_get_read_state_oob(g.user, conversation)
+
+    full_response = (
+        messages_html
+        + header_html
+        + clear_badge_html
+        + add_to_sidebar_html
+        + chat_input_oob_html
+        + read_state_oob_html
+    )
     response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
     return response
@@ -174,13 +191,17 @@ def get_channel_details(channel_id):
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
 
-    return render_template(
-        "partials/channel_details.html",
-        channel=channel,
-        admins=admins,
-        members_count=members_count,
-        current_user_membership=current_user_membership,
+    response = make_response(
+        render_template(
+            "partials/channel_details.html",
+            channel=channel,
+            admins=admins,
+            members_count=members_count,
+            current_user_membership=current_user_membership,
+        )
     )
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
 
 
 @channels_bp.route("/chat/channel/<int:channel_id>/details/about", methods=["GET"])
@@ -643,20 +664,29 @@ def leave_channel(channel_id):
     conversation_self, _ = Conversation.get_or_create(
         conversation_id_str=conv_id_str_self, defaults={"type": "dm"}
     )
-    messages_self = (
+    messages_query = (
         Message.select()
         .where(Message.conversation == conversation_self)
         .order_by(Message.created_at.desc())
         .limit(PAGE_SIZE)
     )
 
+    # We need to fetch reactions and attachments for the messages we are about to render.
+    messages_self = list(reversed(messages_query))
+    reactions_map = get_reactions_for_messages(messages_self)
+    attachments_map = get_attachments_for_messages(messages_self)
+
     dm_header_html = render_template("partials/dm_header.html", other_user=user_self)
+    # Pass the new maps to the template context.
     dm_messages_html = render_template(
         "partials/dm_messages.html",
-        messages=list(reversed(messages_self)),
+        messages=messages_self,
         other_user=user_self,
         last_read_timestamp=datetime.datetime.now(),
         PAGE_SIZE=PAGE_SIZE,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
     )
     messages_swap_html = f'<div id="chat-messages-container" hx-swap-oob="innerHTML">{dm_messages_html}</div>'
 

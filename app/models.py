@@ -3,7 +3,10 @@
 import datetime
 import os
 
+import bcrypt
+from flask_login import UserMixin
 from peewee import (
+    fn,
     Model,
     Proxy,
     TextField,
@@ -59,7 +62,7 @@ class Workspace(BaseModel):
     name = CharField(unique=True)
 
 
-class User(BaseModel):
+class User(BaseModel, UserMixin):
     id = PrimaryKeyField()
     username = CharField(unique=True)
     email = CharField(unique=True)
@@ -75,7 +78,23 @@ class User(BaseModel):
     presence_status = CharField(default="online")  # 'online', 'away', or 'busy'
     theme = CharField(default="system")  # 'light', 'dark', or 'system'
     wysiwyg_enabled = BooleanField(default=False, null=False)
+    last_threads_view_at = DateTimeField(null=True)
     avatar = DeferredForeignKey("UploadedFile", backref="user_avatar", null=True)
+    notification_sound = CharField(default="d8-notification.mp3")
+
+    def set_password(self, password):
+        """Hashes the password and stores it."""
+        self.password_hash = bcrypt.hashpw(
+            password.encode("utf-8"), bcrypt.gensalt()
+        ).decode("utf-8")
+
+    def check_password(self, password):
+        """Checks if the provided password matches the stored hash."""
+        if self.password_hash:
+            return bcrypt.checkpw(
+                password.encode("utf-8"), self.password_hash.encode("utf-8")
+            )
+        return False
 
     @property
     def avatar_url(self):
@@ -130,6 +149,9 @@ class Message(BaseModel):
     content = TextField()
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField("self", backref="replies", null=True)
+    reply_type = CharField(null=True)  # Can be 'quote' or 'thread'
+    last_reply_at = DateTimeField(null=True)
+    quoted_message = DeferredForeignKey("Message", backref="quotes", null=True)
 
     @property
     def attachments(self):
@@ -138,6 +160,21 @@ class Message(BaseModel):
             UploadedFile.select()
             .join(MessageAttachment)
             .where(MessageAttachment.message == self)
+        )
+
+    @property
+    def thread_participants(self):
+        """
+        Returns a query for the 3 most recent, unique users who replied
+        to this message in a thread.
+        """
+        return (
+            User.select()
+            .join(Message, on=(User.id == Message.user))
+            .where((Message.parent_message == self) & (Message.reply_type == "thread"))
+            .group_by(User.id)
+            .order_by(fn.MAX(Message.created_at).desc())
+            .limit(3)
         )
 
 

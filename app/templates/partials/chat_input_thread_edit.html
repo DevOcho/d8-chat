@@ -1,24 +1,21 @@
-<div id="chat-input-container" class="chat-input-form">
-    <!--
-      This form has two key HTMX attributes:
-      1. hx-put/hx-target: Submits the form via PUT to update the original message in the chat history.
-      2. hx-on::after-request: A hook that fires after the PUT is complete. If it was successful,
-         it triggers a separate GET request to load the default chat input, effectively exiting "edit mode".
-    -->
+{# app/templates/partials/chat_input_thread_edit.html #}
+<div id="thread-input-container-{{ message.parent_message.id }}"
+     class="chat-input-form">
     <form hx-put="/chat/message/{{ message.id }}"
           hx-target="#message-{{ message.id }}"
           hx-swap="outerHTML"
-          hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/default', {target: '#chat-input-container', swap: 'outerHTML'})"
-          id="message-form"
+          hx-vals='{"is_in_thread_view": "true"}'
+          hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/thread/{{ message.parent_message.id }}', {target: '#thread-input-container-{{ message.parent_message.id }}', swap: 'outerHTML'})"
+          id="message-form-thread-{{ message.parent_message.id }}"
           autocomplete="off">
-        <input type="file" id="file-attachment-input" class="d-none" multiple>
-        <input type="hidden" name="attachment_file_id" id="attachment-file-ids">
+        <input type="file"
+               id="file-attachment-input-thread-{{ message.parent_message.id }}"
+               class="d-none"
+               multiple>
+        <input type="hidden"
+               name="attachment_file_ids"
+               id="attachment-file-ids-thread-{{ message.parent_message.id }}">
         <div class="wysiwyg-editor-container">
-            <div id="attachment-previews"
-                 class="p-2 d-flex flex-wrap gap-2"
-                 style="display: none">
-                <!-- Image previews will be injected here by JavaScript -->
-            </div>
             <!-- Editing Block UI -->
             <div class="editing-block p-2 rounded">
                 <div class="d-flex justify-content-between align-items-start">
@@ -30,12 +27,11 @@
                             class="btn-close"
                             aria-label="Cancel Edit"
                             title="Cancel Edit"
-                            hx-get="/chat/input/default"
-                            hx-target="#chat-input-container"
+                            hx-get="/chat/input/thread/{{ message.parent_message.id }}"
+                            hx-target="#thread-input-container-{{ message.parent_message.id }}"
                             hx-swap="outerHTML"></button>
                 </div>
             </div>
-            <div id="typing-indicator" class="text-muted small"></div>
             <div class="wysiwyg-toolbar toolbar-hidden">
                 <button type="button" data-command="bold" title="Bold (Ctrl+B)">
                     <i class="bi bi-type-bold"></i>
@@ -67,40 +63,48 @@
                     <i class="bi bi-code-slash"></i>
                 </button>
             </div>
-            <!-- Rich Text Format -->
-            <div id="wysiwyg-editor"
+            <div id="wysiwyg-editor-thread-{{ message.parent_message.id }}"
                  class="wysiwyg-content"
                  contenteditable="true"
-                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"></div>
-            <!-- Markdow Format -->
-            <textarea id="markdown-toggle-view"
+                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}">
+                {{ message_content_html | safe }}
+            </div>
+            <textarea id="markdown-toggle-view-thread-{{ message.parent_message.id }}"
                       class="form-control"
                       rows="1"
                       style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}">{{ message.content }}</textarea>
-            <!-- This hidden input will hold the final markdown content for submission -->
-            <textarea id="chat-message-input" name="content" style="display: none;">{{ message.content }}</textarea>
+            <textarea id="chat-message-input-thread-{{ message.parent_message.id }}"
+                      name="content"
+                      style="display: none">{{ message.content }}</textarea>
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
-                <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting">
+                <button type="button"
+                        id="format-toggle-btn-thread-{{ message.parent_message.id }}"
+                        title="Toggle Rich Formatting">
                     <i class="bi bi-type"></i>
                 </button>
-                <button type="button" id="file-attachment-btn" title="Attach a file">
+                <button type="button"
+                        id="file-attachment-btn-thread-{{ message.parent_message.id }}"
+                        title="Attach a file">
                     <i class="bi bi-paperclip"></i>
                 </button>
-                <button type="button" id="mention-btn" title="Mention User">
+                <button type="button"
+                        id="mention-btn-thread-{{ message.parent_message.id }}"
+                        title="Mention User">
                     <i class="bi bi-at"></i>
                 </button>
-                <button type="button" id="emoji-btn" title="Add Emoji">
+                <button type="button"
+                        id="emoji-btn-thread-{{ message.parent_message.id }}"
+                        title="Add Emoji">
                     <i class="bi bi-emoji-smile"></i>
                 </button>
                 <div class="ms-auto d-flex align-items-center">
-                    <button id="send-button"
+                    <button id="send-button-thread-{{ message.parent_message.id }}"
                             type="submit"
                             class="btn btn-primary send-btn-dynamic">Save Changes</button>
                 </div>
             </div>
         </div>
-        <div id="emoji-picker-container"
-             class="position-relative"
+        <div id="emoji-picker-container-thread-{{ message.parent_message.id }}"
              style="display: none">
             <emoji-picker class="light"></emoji-picker>
         </div>
@@ -110,5 +114,8 @@
          hx-trigger="typing-event"
          style="display: none"></div>
 </div>
-{# This script triggers our main Editor object in chat.js to initialize these new elements #}
-<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
+<script>
+    document.body.dispatchEvent(new CustomEvent('initializeEditor', {
+        detail: { idSuffix: '-thread-{{ message.parent_message.id }}' }
+    }));
+</script>

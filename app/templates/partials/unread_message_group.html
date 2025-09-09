@@ -1,0 +1,28 @@
+<div class="p-3 border-bottom">
+    {# The header for this group of messages. It's a link to the full conversation. #}
+    {% if conversation.type == 'channel' %}
+        {% set channel_id = conversation.conversation_id_str.split('_')[1] %}
+        <a href="#"
+           class="text-decoration-none text-body"
+           hx-get="{{ url_for('channels.get_channel_chat', channel_id=channel_id) }}"
+           hx-target="#chat-messages-container"
+           title="Jump to #{{ context_map.get(conversation.id, '').lstrip('# ') }}">
+            <h5 class="mb-2">{{ context_map.get(conversation.id) }}</h5>
+        </a>
+    {% elif conversation.type == 'dm' %}
+        {# This logic finds the ID of the "other" user in the DM conversation string #}
+        {% set user_ids = conversation.conversation_id_str.split('_')[1:] %}
+        {% set other_user_id = (user_ids | select('ne', g.user.id|string) | list | first) or g.user.id %}
+        <a href="#"
+           class="text-decoration-none text-body"
+           hx-get="{{ url_for('dms.get_dm_chat', other_user_id=other_user_id) }}"
+           hx-target="#chat-messages-container"
+           title="Jump to conversation with {{ context_map.get(conversation.id) }}">
+            <h5 class="mb-2">{{ context_map.get(conversation.id) }}</h5>
+        </a>
+    {% endif %}
+    {# Now, render the actual messages in this group using our existing message partial #}
+    {% for message in messages %}
+        {% include 'partials/message.html' %}
+    {% endfor %}
+</div>

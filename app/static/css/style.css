@@ -45,14 +45,25 @@ body, html {
   padding: 1rem;
   background-color: #f8f9fa;
 }
-#message-form {
+/* Change this selector */
+form[id^="message-form"] {
   position: relative;
 }
 .message-container {
   position: relative;
   padding: 0.5rem;
   border-radius: 0.25rem;
+  transition: background-color 0.15s ease-in-out;
 }
+
+.message-container:hover {
+  background-color: #f8f9fa; /* A subtle light gray for light mode */
+}
+
+[data-bs-theme="dark"] .message-container:hover {
+    background-color: #313a4a; /* row highlight */
+}
+
 .message-content {
     word-wrap: break-word;
 }
@@ -88,6 +99,7 @@ body, html {
 
 /* --- [RESTORED] Login Page Styles --- */
 html.login-page, body.login-page { overflow: auto; }
+html.admin-page, body.admin-page { overflow: auto; }
 .login-page-container { display: flex; min-height: 100vh; width: 100%; background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
 .feature-panel { flex-basis: 45%; background-color: #1a1d21; color: #ffffff; padding: 3rem 4rem; display: flex; flex-direction: column; justify-content: center; }
 .login-logo { max-width: 250px; height: auto; }
@@ -145,13 +157,53 @@ html.login-page, body.login-page { overflow: auto; }
 .wysiwyg-content { min-height: 38px; max-height: 30vh; overflow-y: auto; padding: 0.5rem 0.75rem; word-wrap: break-word; }
 #chat-message-input, .toolbar-hidden { display: none; }
 #markdown-toggle-view { height: 38px; min-height: 38px; resize: none; padding: 0.5rem 0.75rem; line-height: 1.5; max-height: 30vh; overflow-y: auto; }
-.wysiwyg-editor-container > #markdown-toggle-view.form-control { border: 0; border-radius: 0; }
+.wysiwyg-editor-container > textarea.form-control { border: 0; border-radius: 0; }
 kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; background-color: #f7f7f7; color: #333; font-size: 0.8em; font-family: monospace; }
-#send-button.send-btn-dynamic { background-color: #fdf5f8; color: #495057; border: 1px solid #ec729c; padding: 0.375rem 0.75rem; display: flex; align-items: center; gap: 0.5rem; transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out; }
-#send-button.send-btn-dynamic i { color: #ec729c; }
-#send-button.send-btn-dynamic .send-shortcut { border-left: 1px solid rgba(236, 114, 156, 0.4); padding-left: 0.6rem; display: flex; align-items: center; gap: 0.2rem; }
-#send-button.send-btn-dynamic:hover { background-color: #f8f9fa; border-color: #e35a8b; }
+
+/* send button */
+.send-btn-dynamic {
+    background-color: #fdf5f8;
+    color: #495057;
+    border: 1px solid #ec729c;
+    padding: 0.375rem 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+}
+
+.send-btn-dynamic i {
+    color: #ec729c;
+}
+
+.send-btn-dynamic .send-shortcut {
+    border-left: 1px solid rgba(236, 114, 156, 0.4);
+    padding-left: 0.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+}
+
+.send-btn-dynamic:hover {
+    background-color: #f8f9fa;
+    border-color: #e35a8b;
+}
+
 .wysiwyg-content:focus, #markdown-toggle-view:focus { outline: 0 !important; box-shadow: none !important; }
+
+.wysiwyg-content[data-placeholder]:not(:focus):empty::before {
+    content: attr(data-placeholder);
+    color: #6c757d; /* Standard Bootstrap placeholder color */
+    pointer-events: none;
+    display: block; /* For top/bottom padding */
+}
+
+[data-bs-theme="dark"] .wysiwyg-content,
+[data-bs-theme="dark"] .wysiwyg-editor-container textarea {
+    background-color: #40444b;
+    color: #dcddde;
+}
+[data-bs-theme="dark"] .wysiwyg-content:focus, textarea:focus { outline: 0 !important; box-shadow: none !important; }
 
 /* --- Rendered Message Content Styles --- */
 .message-content > * + * { margin-top: 0.6em; }
@@ -212,8 +264,19 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     .wysiwyg-toolbar button:hover { background-color: #4e5258; }
 
     /* Send Button */
-    #send-button.send-btn-dynamic { background-color: #40444b; color: #dcddde; }
-    #send-button.send-btn-dynamic:hover { background-color: #4e5258; }
+    .send-btn-dynamic {
+        color: #dcddde;
+        background-color: #40444b;
+        border-color: #ec729c;
+    }
+    .send-btn-dynamic:hover {
+        color: #dcddde;
+        background-color: #4e5258;
+        border-color: #e35a8b;
+    }
+    .send-btn-dynamic i {
+        color: #ec729c;
+    }
 
     /* Blockquotes */
     .message-content blockquote, .wysiwyg-content blockquote { border-left-color: cornflowerblue; color: #b9bbbe; }
@@ -244,11 +307,28 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
         border-left-color: #ffd700;
         color: #dcddde;
     }
+}
 
+/* --- Dark Mode Message Toolbar --- */
+[data-bs-theme="dark"] .message-toolbar {
+    background-color: #36393f; /* A dark card-like background */
+    border-color: #40444b;     /* A slightly lighter border */
+}
+
+/* Override the default .btn-light style for buttons inside the dark toolbar */
+[data-bs-theme="dark"] .message-toolbar .btn-light {
+    --bs-btn-color: #b9bbbe;             /* Light gray icon color */
+    --bs-btn-bg: transparent;              /* No background */
+    --bs-btn-border-color: transparent;    /* No border */
+    --bs-btn-hover-bg: #4e5258;         /* Subtle dark hover background */
+    --bs-btn-hover-color: #ffffff;           /* White icon on hover */
+    --bs-btn-hover-border-color: #e35a8b; /* Our pink theme color on hover */
+    --bs-btn-active-bg: #5a5f66;         /* Slightly darker for active/click state */
+    --bs-btn-active-color: #ffffff;
 }
 
 /* --- Emoji Picker Styles --- */
-#emoji-picker-container {
+[id^="emoji-picker-container"] {
     position: absolute;
     bottom: 100%; /* Position it right above the input container */
     right: 0;
@@ -315,6 +395,7 @@ emoji-picker {
 /* --- Attachment Preview Styles --- */
 #attachment-previews.has-attachments {
     display: flex !important; /* Override the inline style to show the container */
+    border-bottom: 1px solid #dee2e6;
 }
 
 .attachment-thumbnail {
@@ -348,6 +429,10 @@ emoji-picker {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+[data-bs-theme="dark"] #attachment-previews.has-attachments {
+    border-bottom-color: #2f3136 !important;
 }
 
 [data-bs-theme="dark"] #attachment-previews {
@@ -389,7 +474,7 @@ emoji-picker {
 .attachment-grid {
     display: grid;
     gap: 4px;
-    max-width: 450px; /* Limit the max width of the grid */
+    max-width: 380px; /* Limit the max width of the grid */
     border-radius: 12px;
     overflow: hidden; /* This is key to making the corner radius apply to child images */
 }
@@ -421,7 +506,7 @@ emoji-picker {
 /* Layout for three images */
 .attachment-grid[data-count="3"] {
     grid-template-columns: 1fr 1fr;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: 1 / 1;
 }
 
 .attachment-grid[data-count="3"] .attachment-grid-item:first-child {
@@ -622,4 +707,19 @@ emoji-picker {
 #image-carousel-modal .carousel-control-next-icon {
     width: 100%;
     height: 100%;
+}
+
+/* --- Thread Indicator Styles --- */
+.thread-participant-avatars {
+    display: flex;
+}
+
+.thread-participant-avatar {
+    border-radius: 50%;
+    border: 2px solid var(--bs-body-bg); /* Use CSS variable to adapt to light/dark mode */
+    background-color: var(--bs-body-bg);
+}
+
+.thread-participant-avatar:not(:first-child) {
+    margin-left: -10px; /* This creates the overlap effect */
 }

@@ -19,6 +19,7 @@ from app.routes import (
     PAGE_SIZE,
     get_reactions_for_messages,
     get_attachments_for_messages,
+    check_and_get_read_state_oob,
 )
 from app.chat_manager import chat_manager
 import datetime
@@ -180,6 +181,7 @@ def get_dm_chat(other_user_id):
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
         attachments_map=attachments_map,
+        Message=Message,
     )
 
     # If the DM already existed for this user, send command to clear the badge.
@@ -213,8 +215,22 @@ def get_dm_chat(other_user_id):
             except Exception as e:
                 print(f"Could not send real-time DM add to user {other_user.id}: {e}")
 
+    # Also render the default chat input to ensure it's present.
+    chat_input_html = render_template("partials/chat_input_default.html")
+    chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
+
+    # Check for other unreads and add the result to the response
+    read_state_oob_html = check_and_get_read_state_oob(g.user, conversation)
+
     # Send everything we have
-    full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
+    full_response = (
+        messages_html
+        + header_html
+        + clear_badge_html
+        + add_to_sidebar_html
+        + chat_input_oob_html
+        + read_state_oob_html
+    )
     response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
     return response
@@ -228,7 +244,11 @@ def get_dm_details(other_user_id):
     if not other_user:
         return "User not found", 404
 
-    return render_template("partials/dm_details.html", other_user=other_user)
+    response = make_response(
+        render_template("partials/dm_details.html", other_user=other_user)
+    )
+    response.headers["HX-Trigger"] = "open-offcanvas"
+    return response
 
 
 @dms_bp.route("/chat/dm/<int:other_user_id>/leave", methods=["DELETE"])

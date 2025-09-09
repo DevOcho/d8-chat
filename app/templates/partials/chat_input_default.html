@@ -6,8 +6,7 @@
         <div class="wysiwyg-editor-container">
             <div id="attachment-previews"
                  class="p-2 d-flex flex-wrap gap-2"
-                 style="border-bottom: 1px solid #dee2e6;
-                        display: none">
+                 style="display: none">
                 <!-- Image previews will be injected here by JavaScript -->
             </div>
             <!-- Top Toolbar is now hidden by default -->
@@ -90,4 +89,4 @@
          style="display: none"></div>
 </div>
 {# This script will run as soon as the partial is loaded into the DOM #}
-<script>document.body.dispatchEvent(new Event('chatInputLoaded'));</script>
+<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
