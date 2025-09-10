@@ -506,6 +506,7 @@ emoji-picker {
 /* Layout for three images */
 .attachment-grid[data-count="3"] {
     grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
     aspect-ratio: 1 / 1;
 }
 
@@ -537,6 +538,25 @@ emoji-picker {
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+.attachment-grid-item {
+    position: relative;
+    background-color: #f0f0f0; /* Fallback color while images load */
+}
+
+/* Add these new rules for the link tag */
+.attachment-grid-item a {
+    display: block;
+    height: 100%;
+    width: 100%;
+}
+
+.attachment-grid-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* Ensures images fill their grid area without distortion */
+    display: block;
 }
 
 [data-bs-theme="dark"] .attachment-grid-item {
