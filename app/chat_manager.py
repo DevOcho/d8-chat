@@ -7,6 +7,7 @@ class ChatManager:
         self.active_connections = {}
         self.online_users = {}
         self.all_clients = {}
+        self.typing_users = {}
 
     def _send_message(self, ws, message):
         """A robust, centralized method for sending any message (dict or string)."""
@@ -68,6 +69,14 @@ class ChatManager:
                 if not self.active_connections[channel_id]:
                     del self.active_connections[channel_id]
             ws.channel_id = None
+        # When a user unsubscribes (disconnects or changes channels),
+        # make sure to stop their typing status in their previous channel.
+        user_id = getattr(getattr(ws, "user", None), "id", None)
+        username = getattr(getattr(ws, "user", None), "username", None)
+        if user_id and username and hasattr(ws, "channel_id") and ws.channel_id:
+            self.handle_typing_event(
+                ws.channel_id, ws.user, is_typing=False, sender_ws=ws
+            )
 
     def broadcast(self, channel_id, message, sender_ws=None, is_event=False):
         clients_to_send_to = []
@@ -81,6 +90,28 @@ class ChatManager:
         for client_ws in clients_to_send_to:
             if client_ws != sender_ws:
                 self._send_message(client_ws, message)
+
+    def handle_typing_event(self, conversation_id, user, is_typing, sender_ws):
+        """Manages the state of typing users in a conversation and broadcasts updates."""
+        if not conversation_id or not user:
+            return
+
+        # Ensure a set exists for the conversation
+        self.typing_users.setdefault(conversation_id, set())
+
+        if is_typing:
+            self.typing_users[conversation_id].add(user.username)
+        else:
+            self.typing_users[conversation_id].discard(user.username)
+
+        # Get the current list of typists
+        typists = list(self.typing_users.get(conversation_id, []))
+
+        # Prepare the JSON payload to broadcast
+        payload = {"type": "typing_update", "typists": typists}
+
+        # Broadcast the new list to everyone in the channel (except the sender)
+        self.broadcast(conversation_id, payload, sender_ws=sender_ws)
 
     def send_to_user(self, user_id, message):
         """Sends a direct message to a specific user if they are online."""

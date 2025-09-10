@@ -1,90 +1,95 @@
-{% set all_attachments = attachments_map.get(message.id, []) %}
-{# Create a list containing only the image attachments #}
-{% set image_attachments = [] %}
-{% for att in all_attachments %}
-    {% if att.mime_type.startswith('image/') %}
-        {% set _ = image_attachments.append(att) %}
-    {% endif %}
-{% endfor %}
-<div class="d-flex mb-1 message-container {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
-     id="message-{{ message.id }}"
-     data-user-id="{{ message.user.id }}"
-     data-raw-content="{{ message.content | e }}"
-     data-attachments='[ {%- for att in image_attachments -%} { "url": "{{ att.url }}", "filename": "{{ att.original_filename | e }}" } {{- ", " if not loop.last else "" -}} {%- endfor -%} ]'>
-    <div class="flex-shrink-0">
-        {% with user=message.user, size=40 %}
-            {% include 'partials/_avatar_display.html' %}
-        {% endwith %}
-    </div>
-    <div class="flex-grow-1 ms-3">
-        <div>
-            <strong class="me-2">{{ message.user.display_name or message.user.username }}</strong>
-            <small class="text-muted">{{ message.created_at.strftime("%I:%M %p") }}</small>
-            {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
-        </div>
-        {% set message_to_quote = message.quoted_message or (message.parent_message if message.reply_type == 'quote' else None) %}
-        {% if message_to_quote %}
-            <div class="quoted-reply p-2 mb-2">
-                <strong>{{ message_to_quote.user.display_name or message_to_quote.user.username }}</strong>
-                <p class="mb-0 text-muted">{{ message_to_quote.content | emojize | truncate(100) }}</p>
-            </div>
+{% if message.user %}
+    {% set all_attachments = attachments_map.get(message.id, []) %}
+    {# Create a list containing only the image attachments #}
+    {% set image_attachments = [] %}
+    {% for att in all_attachments %}
+        {% if att.mime_type.startswith('image/') %}
+            {% set _ = image_attachments.append(att) %}
         {% endif %}
-        <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
-        {# Thread reply indicator #}
-        {% if not is_in_thread_view %}
-            {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}
-            {% set thread_reply_count = threaded_replies.count() %}
-            {% if thread_reply_count > 0 %}
-                <div id="thread-indicator-{{ message.id }}"
-                     class="d-flex align-items-center mt-2">
-                    <div class="thread-participant-avatars">
-                        {# Loop over the unique participants using the new model property #}
-                        {% for participant in message.thread_participants %}
-                            <div class="thread-participant-avatar">
-                                {% with user=participant, size=24 %}
-                                    {% include 'partials/_avatar_display.html' %}
-                                {% endwith %}
-                            </div>
-                        {% endfor %}
-                    </div>
-                    <a href="#"
-                       class="text-decoration-none small ms-2"
-                       data-bs-toggle="offcanvas"
-                       data-bs-target="#right-panel-offcanvas"
-                       hx-get="{{ url_for('main.view_thread', parent_message_id=message.id) }}"
-                       hx-target="#right-panel-offcanvas">
-                        {{ thread_reply_count }} {{ 'reply' if thread_reply_count == 1 else 'replies' }}
-                    </a>
+    {% endfor %}
+    <div class="d-flex mb-1 message-container {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
+         id="message-{{ message.id }}"
+         data-user-id="{{ message.user.id }}"
+         data-raw-content="{{ message.content | e }}"
+         data-attachments='[ {%- for att in image_attachments -%} { "url": "{{ att.url }}", "filename": "{{ att.original_filename | e }}" } {{- ", " if not loop.last else "" -}} {%- endfor -%} ]'>
+        <div class="flex-shrink-0">
+            {% with user=message.user, size=40 %}
+                {% include 'partials/_avatar_display.html' %}
+            {% endwith %}
+        </div>
+        <div class="flex-grow-1 ms-3">
+            <div>
+                <strong class="me-2">{{ message.user.display_name or message.user.username }}</strong>
+                <small class="text-muted">{{ message.created_at.strftime("%I:%M %p") }}</small>
+                {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
+            </div>
+            {% set message_to_quote = message.quoted_message or (message.parent_message if message.reply_type == 'quote' else None) %}
+            {% if message_to_quote %}
+                <div class="quoted-reply p-2 mb-2">
+                    <strong>{{ message_to_quote.user.display_name or message_to_quote.user.username }}</strong>
+                    <p class="mb-0 text-muted">{{ message_to_quote.content | emojize | truncate(100) }}</p>
                 </div>
             {% endif %}
-        {% endif %}
-        {% set image_count = image_attachments | length %}
-        {% if image_count > 0 %}
-            {% set grid_count = '4+' if image_count >= 4 else image_count|string %}
-            <div class="attachment-grid mt-2" data-count="{{ grid_count }}">
-                {% for attachment in image_attachments[:4] %}
-                    <div class="attachment-grid-item">
+            <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
+            {# Thread reply indicator #}
+            {% if not is_in_thread_view %}
+                {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}
+                {% set thread_reply_count = threaded_replies.count() %}
+                {% if thread_reply_count > 0 %}
+                    <div id="thread-indicator-{{ message.id }}"
+                         class="d-flex align-items-center mt-2">
+                        <div class="thread-participant-avatars">
+                            {# Loop over the unique participants using the new model property #}
+                            {% for participant in message.thread_participants %}
+                                <div class="thread-participant-avatar">
+                                    {% with user=participant, size=24 %}
+                                        {% include 'partials/_avatar_display.html' %}
+                                    {% endwith %}
+                                </div>
+                            {% endfor %}
+                        </div>
                         <a href="#"
-                           data-bs-toggle="modal"
-                           data-bs-target="#image-carousel-modal"
-                           data-message-id="{{ message.id }}"
-                           data-start-index="{{ loop.index0 }}">
-                            <img src="{{ attachment.url }}" alt="{{ attachment.original_filename }}">
-                            {% if loop.index == 4 and image_count > 4 %}<div class="attachment-overlay">+{{ image_count - 4 }}</div>{% endif %}
+                           class="text-decoration-none small ms-2"
+                           data-bs-toggle="offcanvas"
+                           data-bs-target="#right-panel-offcanvas"
+                           hx-get="{{ url_for('main.view_thread', parent_message_id=message.id) }}"
+                           hx-target="#right-panel-offcanvas">
+                            {{ thread_reply_count }} {{ 'reply' if thread_reply_count == 1 else 'replies' }}
                         </a>
                     </div>
-                {% endfor %}
-            </div>
-        {% endif %}
-        <div id="reactions-container-{{ message.id }}"
-             class="mt-1 d-flex flex-wrap gap-1">
-            {% if reactions_map and message.id in reactions_map %}
-                {% set grouped_reactions = reactions_map[message.id] %}
-                {% include 'partials/reactions.html' %}
+                {% endif %}
             {% endif %}
+            {% set image_count = image_attachments | length %}
+            {% if image_count > 0 %}
+                {% set grid_count = '4+' if image_count >= 4 else image_count|string %}
+                <div class="attachment-grid mt-2" data-count="{{ grid_count }}">
+                    {% for attachment in image_attachments[:4] %}
+                        <div class="attachment-grid-item">
+                            <a href="#"
+                               data-bs-toggle="modal"
+                               data-bs-target="#image-carousel-modal"
+                               data-message-id="{{ message.id }}"
+                               data-start-index="{{ loop.index0 }}">
+                                <img src="{{ attachment.url }}" alt="{{ attachment.original_filename }}">
+                                {% if loop.index == 4 and image_count > 4 %}<div class="attachment-overlay">+{{ image_count - 4 }}</div>{% endif %}
+                            </a>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            <div id="reactions-container-{{ message.id }}"
+                 class="mt-1 d-flex flex-wrap gap-1">
+                {% if reactions_map and message.id in reactions_map %}
+                    {% set grouped_reactions = reactions_map[message.id] %}
+                    {% include 'partials/reactions.html' %}
+                {% endif %}
+            </div>
         </div>
+        {% if g.user %}
+            {% include 'partials/message_toolbar.html' %}
+        {% endif %}
     </div>
-    {% if g.user %}
-        {% include 'partials/message_toolbar.html' %}
-    {% endif %}
-</div>
+{% else %}
+    <!-- System Announcement Message -->
+    <div class="system-message" id="message-{{ message.id }}">{{ message.content }}</div>
+{% endif %}

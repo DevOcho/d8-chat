@@ -43,8 +43,8 @@ def test_get_presigned_url(mocker):
     WHEN get_presigned_url is called with an object name
     THEN it should call the client's presigned_get_object method with the correct parameters.
     """
-    # Arrange: Mock the global minio_client used by the service
-    mock_client = mocker.patch("app.services.minio_service.minio_client")
+    # Arrange: Mock the CORRECT (public) global minio_client used by the service
+    mock_client = mocker.patch("app.services.minio_service.minio_client_public")
     mock_client.presigned_get_object.return_value = "http://mock-url.com/file"
 
     # Act
@@ -66,7 +66,7 @@ def test_get_presigned_url_handles_s3error(mocker):
     THEN it should catch the exception and return None.
     """
     # Arrange: Configure the mock to raise a correctly instantiated S3Error.
-    mock_client = mocker.patch("app.services.minio_service.minio_client")
+    mock_client = mocker.patch("app.services.minio_service.minio_client_public")
     mock_client.presigned_get_object.side_effect = S3Error(
         code="DummyCode",
         message="Test S3 Error",
@@ -90,7 +90,7 @@ def test_delete_file_success(mocker):
     THEN it should call the client's remove_object method and return True.
     """
     # Arrange
-    mock_client = mocker.patch("app.services.minio_service.minio_client")
+    mock_client = mocker.patch("app.services.minio_service.minio_client_internal")
 
     # Act
     result = minio_service.delete_file("file-to-delete.png")
@@ -109,7 +109,7 @@ def test_delete_file_handles_s3error(mocker):
     THEN it should catch the exception and return False.
     """
     # Arrange
-    mock_client = mocker.patch("app.services.minio_service.minio_client")
+    mock_client = mocker.patch("app.services.minio_service.minio_client_internal")
     mock_client.remove_object.side_effect = S3Error(
         code="DummyCode",
         message="Test S3 Delete Error",
@@ -133,7 +133,7 @@ def test_upload_file_service_success(mocker):
     THEN it should call the Minio client's put_object and return True.
     """
     # Arrange
-    mock_client = mocker.patch("app.services.minio_service.minio_client")
+    mock_client = mocker.patch("app.services.minio_service.minio_client_internal")
     mocker.patch("builtins.open", mocker.mock_open(read_data=b"test data"))
     mocker.patch("os.stat").return_value.st_size = 9  # Mock file size
 
@@ -156,7 +156,7 @@ def test_upload_file_service_handles_s3error(mocker):
     THEN it should catch the error and return False.
     """
     # Arrange
-    mock_client = mocker.patch("app.services.minio_service.minio_client")
+    mock_client = mocker.patch("app.services.minio_service.minio_client_internal")
     mock_client.put_object.side_effect = S3Error(
         code="DummyCode",
         message="Upload Failed",

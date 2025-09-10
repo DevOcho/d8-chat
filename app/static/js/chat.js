@@ -1245,14 +1245,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.body.addEventListener('htmx:beforeSwap', (evt) => {
-        if (evt.detail.target.id === 'chat-messages-container' && evt.detail.requestConfig.verb === 'get') {
-            const typingIndicator = document.getElementById('typing-indicator');
-            if (typingIndicator) {
-                typingIndicator.innerHTML = '';
-            }
+    // This function will be responsible for updating the typing indicator UI.
+    const updateTypingIndicator = (typists = []) => {
+        // Find the indicator in the main chat input AND in the thread view, if it's open.
+        const indicators = document.querySelectorAll('[id^="typing-indicator"]');
+        if (!indicators.length) return;
+
+        // Filter out the current user's own username from the list.
+        const currentUsername = document.querySelector('main.main-content')?.dataset.currentUserUsername;
+        const otherTypists = typists.filter(username => username !== currentUsername);
+
+        let message = '';
+        const count = otherTypists.length;
+
+        if (count === 1) {
+            message = `${otherTypists[0]} is typing...`;
+        } else if (count === 2) {
+            message = `${otherTypists[0]} and ${otherTypists[1]} are typing...`;
+        } else if (count > 2) {
+            message = 'Several people are typing...';
         }
-    });
+
+        // Update all visible typing indicators.
+        indicators.forEach(indicator => {
+            indicator.textContent = message;
+        });
+    };
+
     let userWasNearBottom = false;
     document.body.addEventListener('htmx:wsBeforeMessage', function() {
         userWasNearBottom = isUserNearBottom();
@@ -1316,6 +1335,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const data = JSON.parse(event.detail.message);
             if (typeof data === 'object' && data.type) {
+                if (data.type === 'typing_update') {
+                    updateTypingIndicator(data.typists);
+                    return; // Stop processing, this was just a typing event.
+                }
                 if (data.type === 'avatar_update') {
                     const {
                         user_id,

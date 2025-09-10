@@ -145,7 +145,7 @@ class Conversation(BaseModel):
 class Message(BaseModel):
     id = PrimaryKeyField()
     conversation = ForeignKeyField(Conversation, backref="messages")
-    user = ForeignKeyField(User, backref="messages")
+    user = ForeignKeyField(User, backref="messages", null=True)
     content = TextField()
     is_edited = BooleanField(default=False)
     parent_message = ForeignKeyField("self", backref="replies", null=True)

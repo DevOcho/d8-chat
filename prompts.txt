@@ -15,7 +15,7 @@ find . -type f \( -name "*.html" -o -name "*.ini" -o -name "*.py" -o -name "*.cs
 
 tree -I 'bin|lib|.git|__pycache__|*.pyc'
 
-pytest
+pytest --cov=app --cov-report=term-missing
 
 Search prompt:
 

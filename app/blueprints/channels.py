@@ -335,15 +335,31 @@ def add_channel_member(channel_id):
     channel = Channel.get_or_none(id=channel_id)
     if not user_id_to_add or not channel:
         return "Invalid request", 400
+
+    user_to_add = User.get_or_none(id=user_id_to_add)
+    if not user_to_add:
+        return "User to add not found", 404
+
     current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not current_user_membership:
         return "You are not a member of this channel.", 403
     if channel.invites_restricted_to_admins and current_user_membership.role != "admin":
         return "Only admins can invite new members to this channel.", 403
     ChannelMember.get_or_create(user_id=user_id_to_add, channel_id=channel_id)
+
+    # Announce that the user has joined
     conversation, _ = Conversation.get_or_create(
-        conversation_id_str=f"channel_{channel_id}", defaults={"type": "channel"}
+        conversation_id_str=f"channel_{channel.id}", defaults={"type": "channel"}
     )
+
+    join_message_content = f"{(user_to_add.display_name or user_to_add.username)} has been added to the channel by {(g.user.display_name or g.user.username)}."
+    join_message = Message.create(
+        user=None, conversation=conversation, content=join_message_content
+    )
+    # Render and broadcast the new system message
+    message_html = render_template("partials/message.html", message=join_message)
+    broadcast_html = f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
+    chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     UserConversationStatus.get_or_create(
         user_id=user_id_to_add, conversation=conversation
@@ -463,6 +479,23 @@ def remove_channel_member(channel_id, user_id_to_remove):
             if admin_count == 1:
                 return "You cannot remove the last admin of the channel.", 403
         membership_to_delete.delete_instance()
+
+        # Announce that the user has been removed
+        conversation, _ = Conversation.get_or_create(
+            conversation_id_str=f"channel_{channel.id}",
+            defaults={"type": "channel"},
+        )
+        removed_message_content = f"{(user_to_remove.display_name or user_to_remove.username)} has been removed from the channel by {(g.user.display_name or g.user.username)}."
+        removed_message = Message.create(
+            user=None, conversation=conversation, content=removed_message_content
+        )
+        # Render and broadcast the new system message
+        message_html = render_template("partials/message.html", message=removed_message)
+        broadcast_html = (
+            f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
+        )
+        chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
+
         if user_id_to_remove in chat_manager.all_clients:
             try:
                 remove_html = (
@@ -654,6 +687,24 @@ def leave_channel(channel_id):
         ChannelMember.delete().where(
             (ChannelMember.user == g.user) & (ChannelMember.channel == channel)
         ).execute()
+
+        # Announce that the user has left
+        conversation, _ = Conversation.get_or_create(
+            conversation_id_str=f"channel_{channel.id}",
+            defaults={"type": "channel"},
+        )
+        leave_message_content = (
+            f"{(g.user.display_name or g.user.username)} has left the channel."
+        )
+        leave_message = Message.create(
+            user=None, conversation=conversation, content=leave_message_content
+        )
+        # Render and broadcast the new system message
+        message_html = render_template("partials/message.html", message=leave_message)
+        broadcast_html = (
+            f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
+        )
+        chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     remove_from_list_html = (
         f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
@@ -889,6 +940,25 @@ def join_channel(channel_id):
 
     if not is_already_member:
         ChannelMember.create(user=g.user, channel=channel)
+
+        # Announce that the user has joined
+        conversation, _ = Conversation.get_or_create(
+            conversation_id_str=f"channel_{channel.id}",
+            defaults={"type": "channel"},
+        )
+        join_message_content = (
+            f"{(g.user.display_name or g.user.username)} has joined the channel."
+        )
+        join_message = Message.create(
+            user=None, conversation=conversation, content=join_message_content
+        )
+
+        # Render and broadcast the new system message
+        message_html = render_template("partials/message.html", message=join_message)
+        broadcast_html = (
+            f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
+        )
+        chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     new_sidebar_item_html = render_template(
         "partials/channel_list_item.html", channel=channel

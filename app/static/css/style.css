@@ -724,7 +724,14 @@ emoji-picker {
     margin-left: -10px; /* This creates the overlap effect */
 }
 
-/* ... (keep all existing CSS above this) ... */
+/* --- System Announcement Message Styles --- */
+.system-message {
+    text-align: center;
+    color: var(--bs-secondary-color); /* Adapts to light/dark mode */
+    font-size: 0.875em;
+    padding: 0.5rem 0;
+}
+
 
 /* --- Admin Layout --- */
 .admin-layout {

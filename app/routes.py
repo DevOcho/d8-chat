@@ -1262,8 +1262,12 @@ def chat(ws):
 
             if event_type in ["typing_start", "typing_stop"]:
                 is_typing = event_type == "typing_start"
-                indicator_html = f'<div id="typing-indicator" hx-swap-oob="true">{f"<p>{ws.user.username} is typing...</p>" if is_typing else ""}</div>'
-                chat_manager.broadcast(conv_id_str, indicator_html, sender_ws=ws)
+                chat_manager.handle_typing_event(
+                    conversation_id=conv_id_str,
+                    user=ws.user,
+                    is_typing=is_typing,
+                    sender_ws=ws,
+                )
                 continue
 
             # --- New Message Handling ---
