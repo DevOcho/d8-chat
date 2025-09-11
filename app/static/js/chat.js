@@ -79,11 +79,44 @@ const NotificationManager = {
 
 
 /**
+ * [THE FIX] Move ToastManager outside the DOMContentLoaded listener
+ * to make it accessible to other parts of the script.
+ */
+const ToastManager = {
+    toastEl: null,
+    headerEl: null,
+    titleEl: null,
+    bodyEl: null,
+    bootstrapToast: null,
+    initialize: function() {
+        this.toastEl = document.getElementById('app-toast');
+        this.headerEl = document.getElementById('toast-header');
+        this.titleEl = document.getElementById('toast-title');
+        this.bodyEl = document.getElementById('toast-body-content');
+        if (this.toastEl) this.bootstrapToast = new bootstrap.Toast(this.toastEl, { delay: 5000 });
+    },
+    show: function(title, message, level = 'danger', autohide = true) {
+        if (!this.bootstrapToast || !this.titleEl || !this.bodyEl) return;
+        this.titleEl.textContent = title;
+        this.bodyEl.textContent = message;
+        this.headerEl.className = 'toast-header';
+        this.headerEl.classList.add(`bg-${level}`, 'text-white');
+        this.bootstrapToast = new bootstrap.Toast(this.toastEl, { autohide: autohide, delay: 5000 });
+        this.bootstrapToast.show();
+    },
+    hide: function() {
+        if (this.bootstrapToast) {
+            this.bootstrapToast.hide();
+        }
+    }
+};
+
+
+/**
  * Factory function for the Attachment Manager.
  * Creates an independent attachment handler for one editor instance.
  * @param {object} editorState - A reference to the parent editor's state.
  */
-// Pass in the editorState so we can attach paste listeners to the inputs.
 const createAttachmentManager = function(editorState) {
     // State is scoped to this specific manager instance
     const state = {
@@ -109,7 +142,6 @@ const createAttachmentManager = function(editorState) {
             }
         });
 
-        // Add the paste event listeners to both the rich and markdown editors.
         if (editorState.editor) {
             editorState.editor.addEventListener('paste', handlePaste);
         }
@@ -118,7 +150,6 @@ const createAttachmentManager = function(editorState) {
         }
     };
 
-    // New function to handle the paste event.
     const handlePaste = function(e) {
         const items = (e.clipboardData || e.originalEvent.clipboardData).items;
         let foundImage = false;
@@ -132,7 +163,7 @@ const createAttachmentManager = function(editorState) {
         }
 
         if (foundImage) {
-            e.preventDefault(); // Prevent default paste behavior ONLY if we found an image.
+            e.preventDefault();
             processAndUploadFiles(filesToUpload);
         }
     };
@@ -141,13 +172,10 @@ const createAttachmentManager = function(editorState) {
         const files = e.target.files;
         if (!files.length) return;
         processAndUploadFiles(files);
-        // Reset the file input so the user can select the same file again
         state.fileInput.value = '';
     };
 
-    // Refactored logic into a reusable function.
     const processAndUploadFiles = function(files) {
-        // Limit to 30 files
         if ((state.uploads.size + files.length) > 30) {
             ToastManager.show('Upload Limit', 'You can only attach up to 30 files per message.', 'warning');
             return;
@@ -165,7 +193,6 @@ const createAttachmentManager = function(editorState) {
     };
 
     const createPreviewAndUpload = function(file, uploadKey) {
-        // ... (this function's content remains exactly the same)
         state.previewContainer.classList.add('has-attachments');
         const thumbnailDiv = document.createElement('div');
         thumbnailDiv.className = 'attachment-thumbnail';
@@ -201,6 +228,10 @@ const createAttachmentManager = function(editorState) {
             .catch(error => {
                 const errorMessage = error.error || "Upload failed";
                 console.error("Upload failed for key", uploadKey, ":", errorMessage);
+                
+                // [THE FIX] Add a user-facing toast notification for the error.
+                ToastManager.show('Upload Error', errorMessage, 'danger');
+
                 const upload = state.uploads.get(uploadKey);
                 if (upload) upload.status = 'error';
                 thumbnailDiv.style.opacity = '0.5';
@@ -209,7 +240,6 @@ const createAttachmentManager = function(editorState) {
     };
 
     const removeAttachment = function(uploadKey) {
-        // ... (this function's content remains exactly the same)
         const thumbnail = state.previewContainer.querySelector(`[data-upload-key="${uploadKey}"]`);
         if (thumbnail) thumbnail.remove();
         state.uploads.delete(uploadKey);
@@ -220,7 +250,6 @@ const createAttachmentManager = function(editorState) {
     };
 
     const updateHiddenInput = function() {
-        // ... (this function's content remains exactly the same)
         const successfulIds = Array.from(state.uploads.values())
             .filter(u => u.status === 'success' && u.fileId)
             .map(u => u.fileId);
@@ -228,7 +257,6 @@ const createAttachmentManager = function(editorState) {
     };
 
     const reset = function() {
-        // ... (this function's content remains exactly the same)
         if (!state.previewContainer || !state.hiddenAttachmentIds) return;
         state.previewContainer.innerHTML = '';
         state.previewContainer.classList.remove('has-attachments');
@@ -242,7 +270,7 @@ const createAttachmentManager = function(editorState) {
     };
 };
 
-// ... (keep createMentionManager object exactly as it is) ...
+// ... (createMentionManager object exactly as it is) ...
 const createMentionManager = function(editorState) {
     const state = {
         editorState,
@@ -918,37 +946,7 @@ const ImageCarouselManager = {
 document.addEventListener('DOMContentLoaded', () => {
     ImageCarouselManager.initialize();
     NotificationManager.initialize();
-
-    const ToastManager = {
-        toastEl: document.getElementById('app-toast'),
-        headerEl: document.getElementById('toast-header'),
-        titleEl: document.getElementById('toast-title'),
-        bodyEl: document.getElementById('toast-body-content'),
-        bootstrapToast: null,
-        initialize: function() {
-            if (this.toastEl) this.bootstrapToast = new bootstrap.Toast(this.toastEl, {
-                delay: 5000
-            });
-        },
-        show: function(title, message, level = 'danger', autohide = true) {
-            if (!this.bootstrapToast || !this.titleEl || !this.bodyEl) return;
-            this.titleEl.textContent = title;
-            this.bodyEl.textContent = message;
-            this.headerEl.className = 'toast-header';
-            this.headerEl.classList.add(`bg-${level}`, 'text-white');
-            this.bootstrapToast = new bootstrap.Toast(this.toastEl, {
-                autohide: autohide,
-                delay: 5000
-            });
-            this.bootstrapToast.show();
-        },
-        hide: function() {
-            if (this.bootstrapToast) {
-                this.bootstrapToast.hide();
-            }
-        }
-    };
-    ToastManager.initialize();
+    ToastManager.initialize(); // Initialize the now-global manager here
 
     // --- AUDIO PRIMING LOGIC ---
     const primeAudio = () => {

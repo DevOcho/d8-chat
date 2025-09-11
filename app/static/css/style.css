@@ -886,3 +886,39 @@ a.mention-link:hover {
 .message-content.jumbo-emoji p {
     margin-bottom: 0;
 }
+
+/* --- Drag and Drop Overlay Styles --- */
+#drop-zone-overlay {
+    display: none; /* Hidden by default */
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    z-index: 1050; /* Above most content, below modals */
+    border: 3px dashed #ffffff;
+    border-radius: 8px;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none; /* Allows underlying elements to be targeted by dragleave */
+}
+
+/* This class will be toggled by JS to show the overlay */
+.main-content.drag-over #drop-zone-overlay {
+    display: flex;
+}
+
+#drop-zone-text {
+    color: #ffffff;
+    font-size: 1.5rem;
+    font-weight: bold;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+#drop-zone-text i {
+    font-size: 4rem;
+}
