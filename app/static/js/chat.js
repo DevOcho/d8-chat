@@ -1,32 +1,23 @@
 /**
  * D8-Chat Main JavaScript File
- *
- * This file handles two main responsibilities:
- * 1. The WYSIWYG Chat Input Editor, encapsulated in the `Editor` object.
- * 2. General page-level logic for the chat interface (scrolling, code blocks, modals).
  */
 
-// ... (keep the previewNotificationSound and NotificationManager objects exactly as they are) ...
+// ... (previewNotificationSound and NotificationManager objects remain the same) ...
 function previewNotificationSound(soundFile) {
     if (soundFile) {
         const audio = new Audio(`/audio/${soundFile}`);
-        audio.play().catch(error => {
-            console.error("Sound preview failed:", error);
-        });
+        audio.play().catch(error => { console.error("Sound preview failed:", error); });
     }
 }
 
-
-// Object to manage all notification-related logic
 const NotificationManager = {
-    soundFile: 'd8-notification.mp3', // A default value
-    audio: null, // This will be created on-demand
+    soundFile: 'd8-notification.mp3',
+    audio: null,
     initialize: function() {
         const mainContent = document.querySelector('main.main-content');
         if (mainContent && mainContent.dataset.notificationSound) {
             this.soundFile = mainContent.dataset.notificationSound;
         }
-
         if (!("Notification" in window)) {
             console.log("This browser does not support desktop notification");
             return;
@@ -35,7 +26,6 @@ const NotificationManager = {
         if (!button) return;
         if (Notification.permission === "default") {
             button.style.display = 'block';
-            // Use .bind(this) to ensure 'this' refers to NotificationManager
             button.addEventListener('click', this.requestPermission.bind(this));
         }
     },
@@ -43,45 +33,31 @@ const NotificationManager = {
         Notification.requestPermission().then(permission => {
             const button = document.getElementById('enable-notifications-btn');
             if (button) button.style.display = 'none';
-            // If permission is granted, play a confirmation sound.
             if (permission === "granted") {
                 this.playSound('d8-notification.mp3');
             }
         });
     },
     playSound: function(soundFile) {
-        // Only play sounds if the page is not currently in focus
-        //if (document.hidden) {
         if (!document.hasFocus()) {
-            // If a specific soundFile is passed, use it. Otherwise, use the user's preference.
             const fileToPlay = soundFile || this.soundFile;
             this.audio = new Audio(`/audio/${fileToPlay}`);
-            this.audio.play().catch(error => {
-                console.log("Audio play failed:", error);
-            });
+            this.audio.play().catch(error => { console.log("Audio play failed:", error); });
         }
     },
     showNotification: function(data) {
         if (Notification.permission === "granted") {
-            // This call correctly uses the user's preference by passing no argument.
             this.playSound();
             const notification = new Notification(data.title, {
                 body: data.body,
                 icon: data.icon,
                 tag: data.tag
             });
-            notification.onclick = () => {
-                window.focus();
-            };
+            notification.onclick = () => { window.focus(); };
         }
     }
 };
 
-
-/**
- * [THE FIX] Move ToastManager outside the DOMContentLoaded listener
- * to make it accessible to other parts of the script.
- */
 const ToastManager = {
     toastEl: null,
     headerEl: null,
@@ -105,20 +81,14 @@ const ToastManager = {
         this.bootstrapToast.show();
     },
     hide: function() {
-        if (this.bootstrapToast) {
-            this.bootstrapToast.hide();
-        }
+        if (this.bootstrapToast) { this.bootstrapToast.hide(); }
     }
 };
 
-
 /**
  * Factory function for the Attachment Manager.
- * Creates an independent attachment handler for one editor instance.
- * @param {object} editorState - A reference to the parent editor's state.
  */
 const createAttachmentManager = function(editorState) {
-    // State is scoped to this specific manager instance
     const state = {
         fileInput: document.getElementById(`file-attachment-input${editorState.idSuffix}`),
         attachmentBtn: document.getElementById(`file-attachment-btn${editorState.idSuffix}`),
@@ -131,9 +101,7 @@ const createAttachmentManager = function(editorState) {
         if (!state.fileInput || !state.attachmentBtn || !state.previewContainer || !state.hiddenAttachmentIds) {
             return;
         }
-        state.attachmentBtn.addEventListener('click', () => {
-            state.fileInput.click();
-        });
+        state.attachmentBtn.addEventListener('click', () => state.fileInput.click());
         state.fileInput.addEventListener('change', handleFileSelect);
         state.previewContainer.addEventListener('click', (e) => {
             if (e.target.classList.contains('remove-attachment-btn')) {
@@ -141,27 +109,20 @@ const createAttachmentManager = function(editorState) {
                 if (thumbnail) removeAttachment(thumbnail.dataset.uploadKey);
             }
         });
-
-        if (editorState.editor) {
-            editorState.editor.addEventListener('paste', handlePaste);
-        }
-        if (editorState.markdownView) {
-            editorState.markdownView.addEventListener('paste', handlePaste);
-        }
+        if (editorState.editor) editorState.editor.addEventListener('paste', handlePaste);
+        if (editorState.markdownView) editorState.markdownView.addEventListener('paste', handlePaste);
     };
 
     const handlePaste = function(e) {
         const items = (e.clipboardData || e.originalEvent.clipboardData).items;
         let foundImage = false;
         const filesToUpload = [];
-
         for (const item of items) {
             if (item.kind === 'file' && item.type.startsWith('image/')) {
                 foundImage = true;
                 filesToUpload.push(item.getAsFile());
             }
         }
-
         if (foundImage) {
             e.preventDefault();
             processAndUploadFiles(filesToUpload);
@@ -180,14 +141,9 @@ const createAttachmentManager = function(editorState) {
             ToastManager.show('Upload Limit', 'You can only attach up to 30 files per message.', 'warning');
             return;
         }
-
         for (const file of files) {
             const uploadKey = `upload-${Date.now()}-${Math.random()}`;
-            state.uploads.set(uploadKey, {
-                file: file,
-                fileId: null,
-                status: 'pending'
-            });
+            state.uploads.set(uploadKey, { file: file, fileId: null, status: 'pending' });
             createPreviewAndUpload(file, uploadKey);
         }
     };
@@ -200,21 +156,14 @@ const createAttachmentManager = function(editorState) {
         thumbnailDiv.innerHTML = `<img src="" alt="Uploading..." /><div class="spinner-border spinner-border-sm text-light position-absolute top-50 start-50"></div><button type="button" class="remove-attachment-btn">&times;</button>`;
         state.previewContainer.appendChild(thumbnailDiv);
         const reader = new FileReader();
-        reader.onload = (e) => {
-            thumbnailDiv.querySelector('img').src = e.target.result;
-        };
+        reader.onload = (e) => { thumbnailDiv.querySelector('img').src = e.target.result; };
         reader.readAsDataURL(file);
         const formData = new FormData();
         formData.append('file', file);
-        fetch('/files/upload', {
-                method: 'POST',
-                body: formData
-            })
+        fetch('/files/upload', { method: 'POST', body: formData })
             .then(response => {
                 thumbnailDiv.querySelector('.spinner-border').remove();
-                if (!response.ok) return response.json().then(err => {
-                    throw err;
-                });
+                if (!response.ok) return response.json().then(err => { throw err; });
                 return response.json();
             })
             .then(data => {
@@ -228,10 +177,7 @@ const createAttachmentManager = function(editorState) {
             .catch(error => {
                 const errorMessage = error.error || "Upload failed";
                 console.error("Upload failed for key", uploadKey, ":", errorMessage);
-                
-                // [THE FIX] Add a user-facing toast notification for the error.
                 ToastManager.show('Upload Error', errorMessage, 'danger');
-
                 const upload = state.uploads.get(uploadKey);
                 if (upload) upload.status = 'error';
                 thumbnailDiv.style.opacity = '0.5';
@@ -264,23 +210,19 @@ const createAttachmentManager = function(editorState) {
         updateHiddenInput();
     };
 
+    // [THE FIX] Expose the processAndUploadFiles function so we can call it from outside.
     return {
         initialize,
-        reset
+        reset,
+        processAndUploadFiles
     };
 };
 
-// ... (createMentionManager object exactly as it is) ...
+// ... (createMentionManager object remains the same) ...
 const createMentionManager = function(editorState) {
     const state = {
-        editorState,
-        popoverContainer: null,
-        active: false,
-        triggerPosition: -1,
-        query: '',
-        isSelecting: false
+        editorState, popoverContainer: null, active: false, triggerPosition: -1, query: '', isSelecting: false
     };
-
     const initialize = function() {
         const popoverContainer = document.createElement('div');
         popoverContainer.className = 'border rounded shadow-sm bg-body';
@@ -289,12 +231,8 @@ const createMentionManager = function(editorState) {
         state.popoverContainer = popoverContainer;
         bindEvents();
     };
-
     const bindEvents = function() {
-        const {
-            editor,
-            markdownView
-        } = state.editorState;
+        const { editor, markdownView } = state.editorState;
         editor.addEventListener('input', handleInput);
         markdownView.addEventListener('input', handleInput);
         editor.addEventListener('keydown', handleKeyDown);
@@ -304,17 +242,9 @@ const createMentionManager = function(editorState) {
             if (item) selectItem(item);
         });
     };
-
     const handleInput = function() {
-        if (state.isSelecting) {
-            state.isSelecting = false;
-            return;
-        }
-        const {
-            isMarkdownMode,
-            markdownView,
-            editor
-        } = state.editorState;
+        if (state.isSelecting) { state.isSelecting = false; return; }
+        const { isMarkdownMode, markdownView, editor } = state.editorState;
         let text, cursorPosition;
         if (isMarkdownMode) {
             text = markdownView.value;
@@ -331,23 +261,17 @@ const createMentionManager = function(editorState) {
         if (triggerIndex !== -1 && (triggerIndex === 0 || /\s/.test(textUpToCursor[triggerIndex - 1]))) {
             state.query = textUpToCursor.substring(triggerIndex + 1);
             state.triggerPosition = triggerIndex;
-            if (state.query.includes(' ')) {
-                hidePopover();
-                return;
-            }
+            if (state.query.includes(' ')) { hidePopover(); return; }
             fetchUsers(state.query);
         } else {
             hidePopover();
         }
     };
-
     const handleKeyDown = function(e) {
         if (!state.active) return;
         const items = state.popoverContainer.querySelectorAll('.mention-suggestion-item');
         if (items.length === 0) return;
         let activeItem = state.popoverContainer.querySelector('.mention-suggestion-item.active');
-
-        // We want to control these keys
         if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
             e.preventDefault();
             e.stopPropagation();
@@ -366,30 +290,18 @@ const createMentionManager = function(editorState) {
             }
         }
     };
-
     const fetchUsers = function(query) {
         const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-        if (!activeConv) {
-            hidePopover();
-            return;
-        }
+        if (!activeConv) { hidePopover(); return; }
         const conversationIdStr = activeConv.dataset.conversationId;
         const url = `/chat/conversation/${conversationIdStr}/mention_search?q=${encodeURIComponent(query)}`;
-        htmx.ajax('GET', url, {
-            target: state.popoverContainer,
-            swap: 'innerHTML'
-        });
+        htmx.ajax('GET', url, { target: state.popoverContainer, swap: 'innerHTML' });
         showPopover();
     };
-
     const selectItem = function(item) {
         state.isSelecting = true;
         const username = item.dataset.username;
-        const {
-            isMarkdownMode,
-            markdownView,
-            editor
-        } = state.editorState;
+        const { isMarkdownMode, markdownView, editor } = state.editorState;
         if (isMarkdownMode) {
             const text = markdownView.value;
             const pre = text.substring(0, state.triggerPosition);
@@ -409,11 +321,8 @@ const createMentionManager = function(editorState) {
             document.execCommand('insertText', false, `@${username} `);
         }
         hidePopover();
-        (isMarkdownMode ? markdownView : editor).dispatchEvent(new Event('input', {
-            bubbles: true
-        }));
+        (isMarkdownMode ? markdownView : editor).dispatchEvent(new Event('input', { bubbles: true }));
     };
-
     const showPopover = function() {
         state.popoverContainer.style.display = 'block';
         state.active = true;
@@ -423,11 +332,7 @@ const createMentionManager = function(editorState) {
         state.popoverContainer.innerHTML = '';
         state.active = false;
     };
-
-    return {
-        initialize,
-        state
-    };
+    return { initialize, state };
 };
 
 /**
@@ -439,6 +344,7 @@ const createEditor = function(idSuffix = '') {
     let mentionManager = null;
 
     const initialize = function() {
+        // ... (initialize function remains exactly the same) ...
         const messageForm = document.getElementById(`message-form${idSuffix}`);
         if (!messageForm) return;
 
@@ -465,25 +371,11 @@ const createEditor = function(idSuffix = '') {
 
         const isMarkdownMode = !!(elements.markdownView && elements.markdownView.style.display !== 'none');
 
-        const turndownService = new TurndownService({
-            headingStyle: 'atx',
-            codeBlockStyle: 'fenced',
-            br: '\n'
-        });
-        turndownService.addRule('strikethrough', {
-            filter: ['del', 's', 'strike'],
-            replacement: c => `~~${c}~~`
-        });
+        const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', br: '\n' });
+        turndownService.addRule('strikethrough', { filter: ['del', 's', 'strike'], replacement: c => `~~${c}~~` });
 
-        Object.assign(state, {
-            idSuffix,
-            ...elements,
-            turndownService,
-            isMarkdownMode,
-            typingTimer: null
-        });
-
-        // Pass the editor's state object to the attachment manager.
+        Object.assign(state, { idSuffix, ...elements, turndownService, isMarkdownMode, typingTimer: null });
+        
         attachmentManager = createAttachmentManager(state);
         attachmentManager.initialize();
 
@@ -495,13 +387,9 @@ const createEditor = function(idSuffix = '') {
             mentionButton.addEventListener('click', () => {
                 insertText('@');
                 const activeInput = state.isMarkdownMode ? state.markdownView : state.editor;
-                activeInput.dispatchEvent(new Event('input', {
-                    bubbles: true,
-                    cancelable: true
-                }));
+                activeInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
             });
         }
-
         setupEmojiPickerListeners();
         setupToolbarListener();
         setupInputListeners();
@@ -511,7 +399,7 @@ const createEditor = function(idSuffix = '') {
         updateView();
     };
 
-    // ... (all the other helper functions inside createEditor remain exactly the same)
+    // ... (all helper functions like insertText, focusActiveInput, etc. remain the same) ...
     const preprocessMarkdown = function(text) {
         const lines = text.split('\n');
         const processedLines = [];
@@ -525,11 +413,7 @@ const createEditor = function(idSuffix = '') {
         return processedLines.join('\n');
     };
     const insertText = function(text) {
-        const {
-            editor,
-            markdownView,
-            isMarkdownMode
-        } = state;
+        const { editor, markdownView, isMarkdownMode } = state;
         if (isMarkdownMode) {
             const start = markdownView.selectionStart;
             const end = markdownView.selectionEnd;
@@ -542,29 +426,17 @@ const createEditor = function(idSuffix = '') {
             document.execCommand('insertText', false, text);
         }
         const activeInput = isMarkdownMode ? markdownView : editor;
-        activeInput.dispatchEvent(new Event('input', {
-            bubbles: true,
-            cancelable: true
-        }));
+        activeInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
     };
     const focusActiveInput = function() {
-        const {
-            editor,
-            markdownView,
-            isMarkdownMode
-        } = state;
+        const { editor, markdownView, isMarkdownMode } = state;
         const activeInput = isMarkdownMode ? markdownView : editor;
         if (activeInput && typeof activeInput.focus === 'function') {
             setTimeout(() => activeInput.focus(), 0);
         }
     };
     const updateView = function() {
-        const {
-            editor,
-            markdownView,
-            topToolbar,
-            isMarkdownMode
-        } = state;
+        const { editor, markdownView, topToolbar, isMarkdownMode } = state;
         if (isMarkdownMode) {
             editor.style.display = 'none';
             markdownView.style.display = 'block';
@@ -580,11 +452,7 @@ const createEditor = function(idSuffix = '') {
         updateSendButton();
     };
     const updateSendButton = function() {
-        const {
-            sendButton,
-            isMarkdownMode,
-            messageForm
-        } = state;
+        const { sendButton, isMarkdownMode, messageForm } = state;
         const replyTypeInput = messageForm.querySelector('input[name="reply_type"]');
         const isQuoteReply = replyTypeInput && replyTypeInput.value === 'quote';
         const sendText = isQuoteReply ? "Reply" : "Send";
@@ -597,11 +465,7 @@ const createEditor = function(idSuffix = '') {
         }
     };
     const resizeActiveInput = function() {
-        const {
-            editor,
-            markdownView,
-            isMarkdownMode
-        } = state;
+        const { editor, markdownView, isMarkdownMode } = state;
         const activeInput = isMarkdownMode ? markdownView : editor;
         setTimeout(() => {
             if (activeInput) {
@@ -611,13 +475,7 @@ const createEditor = function(idSuffix = '') {
         }, 0);
     };
     const updateStateAndButtons = function() {
-        const {
-            editor,
-            hiddenInput,
-            turndownService,
-            blockquoteButton,
-            topToolbar
-        } = state;
+        const { editor, hiddenInput, turndownService, blockquoteButton, topToolbar } = state;
         if (!editor || !hiddenInput || !turndownService) return;
         const htmlContent = editor.innerHTML;
         const markdownContent = turndownService.turndown(htmlContent).trim();
@@ -645,25 +503,16 @@ const createEditor = function(idSuffix = '') {
         return false;
     };
     const sendTypingStatus = function(isTyping) {
-        const {
-            typingSender
-        } = state;
+        const { typingSender } = state;
         const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
         if (activeConv) {
-            const payload = {
-                type: isTyping ? 'typing_start' : 'typing_stop',
-                conversation_id: activeConv.dataset.conversationId
-            };
+            const payload = { type: isTyping ? 'typing_start' : 'typing_stop', conversation_id: activeConv.dataset.conversationId };
             typingSender.setAttribute('hx-vals', JSON.stringify(payload));
             htmx.trigger(typingSender, 'typing-event');
         }
     };
     const setupEmojiPickerListeners = function() {
-        const {
-            emojiButton,
-            emojiPicker,
-            emojiPickerContainer
-        } = state;
+        const { emojiButton, emojiPicker, emojiPickerContainer } = state;
         if (!emojiButton || !emojiPicker || !emojiPickerContainer) return;
         emojiButton.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -690,10 +539,7 @@ const createEditor = function(idSuffix = '') {
                 const format = isSelectionInBlockquote() ? 'div' : 'blockquote';
                 document.execCommand('formatBlock', false, format);
             } else {
-                const {
-                    command,
-                    value
-                } = button.dataset;
+                const { command, value } = button.dataset;
                 document.execCommand(command, false, value);
             }
             state.editor.focus();
@@ -723,9 +569,7 @@ const createEditor = function(idSuffix = '') {
     const setupKeydownListeners = function() {
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const keydownHandler = (e) => {
-            if (mentionManager && mentionManager.state.active) {
-                return;
-            }
+            if (mentionManager && mentionManager.state.active) { return; }
             if (!state.isMarkdownMode && e.key === 'Enter' && !e.shiftKey) {
                 const selection = window.getSelection();
                 if (selection.rangeCount) {
@@ -771,32 +615,19 @@ const createEditor = function(idSuffix = '') {
             }
             const hasText = state.hiddenInput.value.trim() !== '';
             const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
-            if (!hasText && !hasAttachment) {
-                e.preventDefault();
-                return;
-            }
+            if (!hasText && !hasAttachment) { e.preventDefault(); return; }
             clearTimeout(state.typingTimer);
             sendTypingStatus(false);
         });
         state.messageForm.addEventListener('htmx:wsAfterSend', () => {
             const isThread = idSuffix.startsWith('-thread-');
-
             if (isThread) {
-                // If we're in a thread, a successful send should always revert to the default thread input.
-                // This handles both simple replies and quote replies within the thread.
                 const parentMessageId = idSuffix.split('-').pop();
-                htmx.ajax('GET', `/chat/input/thread/${parentMessageId}`, {
-                    target: `#thread-input-container-${parentMessageId}`,
-                    swap: 'outerHTML'
-                });
+                htmx.ajax('GET', `/chat/input/thread/${parentMessageId}`, { target: `#thread-input-container-${parentMessageId}`, swap: 'outerHTML' });
             } else {
-                // We need to hand the same logic for the main chat input
                 const isQuoteReply = state.messageForm.querySelector('input[name="reply_type"]') && state.messageForm.querySelector('input[name="reply_type"]').value === 'quote';
                 if (isQuoteReply) {
-                    htmx.ajax('GET', '/chat/input/default', {
-                        target: '#chat-input-container',
-                        swap: 'outerHTML'
-                    });
+                    htmx.ajax('GET', '/chat/input/default', { target: '#chat-input-container', swap: 'outerHTML' });
                 } else {
                     const { editor, markdownView, hiddenInput } = state;
                     editor.innerHTML = '';
@@ -814,22 +645,11 @@ const createEditor = function(idSuffix = '') {
     };
     const setupToggleButtonListener = function() {
         state.formatToggleButton.addEventListener('click', () => {
-            const {
-                editor,
-                markdownView,
-                isMarkdownMode,
-                turndownService
-            } = state;
+            const { editor, markdownView, isMarkdownMode, turndownService } = state;
             if (isMarkdownMode) {
                 const markdownContent = markdownView.value;
                 if (markdownContent.trim() !== '') {
-                    htmx.ajax('POST', '/chat/utility/markdown-to-html', {
-                        values: {
-                            text: markdownContent
-                        },
-                        target: editor,
-                        swap: 'innerHTML'
-                    }).then(() => {
+                    htmx.ajax('POST', '/chat/utility/markdown-to-html', { values: { text: markdownContent }, target: editor, swap: 'innerHTML' }).then(() => {
                         updateStateAndButtons();
                     });
                 } else {
@@ -847,36 +667,35 @@ const createEditor = function(idSuffix = '') {
             updateView();
             if (idSuffix === '') {
                 const wysiwygIsEnabled = !state.isMarkdownMode;
-                htmx.ajax('PUT', '/chat/user/preference/wysiwyg', {
-                    values: {
-                        'wysiwyg_enabled': wysiwygIsEnabled
-                    },
-                    swap: 'none'
-                });
+                htmx.ajax('PUT', '/chat/user/preference/wysiwyg', { values: { 'wysiwyg_enabled': wysiwygIsEnabled }, swap: 'none' });
             }
         });
     };
 
+    // [THE FIX] Expose the attachmentManager instance so we can access it globally.
     return {
         initialize,
         focusActiveInput,
         state,
-        updateStateAndButtons
+        updateStateAndButtons,
+        attachmentManager
     };
 };
 
-// ... (keep all the other event listeners and page logic exactly as they are) ...
 // --- Event Listeners to initialize editors ---
 const emojiPickerReady = customElements.whenDefined('emoji-picker');
 
 document.body.addEventListener('initializeEditor', (event) => {
     emojiPickerReady.then(() => {
         const { idSuffix } = event.detail;
-
         const editorInstance = createEditor(idSuffix);
         editorInstance.initialize();
 
-        // Only auto-focus if it's a thread input.
+        // [THE FIX] If this is the main chat input, store its attachment manager globally.
+        if (idSuffix === '') {
+            window.mainAttachmentManager = editorInstance.attachmentManager;
+        }
+
         if (idSuffix && idSuffix.startsWith('-thread-')) {
             editorInstance.focusActiveInput();
         }
@@ -884,9 +703,8 @@ document.body.addEventListener('initializeEditor', (event) => {
 });
 
 // --- Image Carousel Manager ---
-// ... (This object and its full implementation remain unchanged)
-const ImageCarouselManager = {
-    /* ... */ };
+// ... (This object remains the same)
+const ImageCarouselManager = { /* ... */ };
 (function() {
     const mgr = ImageCarouselManager;
     mgr.modalEl = null;
@@ -946,26 +764,64 @@ const ImageCarouselManager = {
 document.addEventListener('DOMContentLoaded', () => {
     ImageCarouselManager.initialize();
     NotificationManager.initialize();
-    ToastManager.initialize(); // Initialize the now-global manager here
+    ToastManager.initialize();
+
+    // --- [THE FIX] New Drag and Drop Logic ---
+    const mainContent = document.querySelector('main.main-content');
+    if (mainContent) {
+        mainContent.addEventListener('dragenter', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mainContent.classList.add('drag-over');
+        });
+
+        mainContent.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        mainContent.addEventListener('dragleave', (e) => {
+            // This prevents the overlay from flickering when moving over child elements
+            if (e.relatedTarget && mainContent.contains(e.relatedTarget)) {
+                return;
+            }
+            e.preventDefault();
+            e.stopPropagation();
+            mainContent.classList.remove('drag-over');
+        });
+
+        mainContent.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            mainContent.classList.remove('drag-over');
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                // Use the globally exposed attachment manager for the main input
+                if (window.mainAttachmentManager && typeof window.mainAttachmentManager.processAndUploadFiles === 'function') {
+                    window.mainAttachmentManager.processAndUploadFiles(files);
+                } else {
+                    console.error("Main attachment manager is not available.");
+                    ToastManager.show('Error', 'Could not process dropped files.', 'danger');
+                }
+            }
+        });
+    }
 
     // --- AUDIO PRIMING LOGIC ---
     const primeAudio = () => {
-        // This is a data URI for a tiny, silent WAV file.
-        // It's a standard technique to unlock browser audio.
         const silentSound = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
         const audio = new Audio(silentSound);
         audio.play().then(() => {
             console.log("Audio context primed successfully.");
-            // We only need to do this once, so the listener can be removed.
             document.body.removeEventListener('click', primeAudio);
         }).catch(error => {
-            // This might still fail in some very strict browser contexts, but it's our best shot.
             console.warn("Could not prime audio on first click:", error);
         });
     };
-    // Add the event listener that will run only once.
     document.body.addEventListener('click', primeAudio, { once: true });
 
+    // ... (the rest of the DOMContentLoaded listener remains exactly the same)
     const searchInput = document.getElementById('global-search-input');
     const searchOverlay = document.getElementById('search-results-overlay');
     const channelSidebar = document.querySelector('.channel-sidebar');
@@ -994,10 +850,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const selector = evt.detail.value;
         const targetMessage = document.querySelector(selector);
         if (targetMessage) {
-            targetMessage.scrollIntoView({
-                behavior: 'auto',
-                block: 'center'
-            });
+            targetMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
             targetMessage.classList.add('mentioned-message');
             setTimeout(() => {
                 targetMessage.classList.remove('mentioned-message');
@@ -1032,22 +885,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
-        const targetSelector = evt.detail.target; // The CSS selector of the target
-
-        // Handle events where the target is undefined.
+        const targetSelector = evt.detail.target;
         if (!targetSelector) {
             console.log("Ignoring harmless OOB update for an undefined target.");
             return;
         }
-
-        // Check if the target *selector* starts with one of our known ignorable patterns.
-        // This is the correct way to identify the intended target of the OOB swap.
         if (targetSelector.startsWith('#status-dot-') || targetSelector.startsWith('#sidebar-presence-indicator-') || targetSelector.startsWith('#thread-replies-list-') || targetSelector.startsWith('#reactions-container-')) {
             console.log(`Ignoring harmless OOB update for non-visible target: ${targetSelector}`);
-            return; // This is an expected "error", so we stop here.
+            return;
         }
-
-        // If it's not one of our ignored targets, then it's a real problem we should show to the user.
         const errorMessage = `A UI update failed because the target '${targetSelector}' could not be found.`;
         ToastManager.show('UI Sync Error', errorMessage, 'warning');
     });
@@ -1121,52 +967,33 @@ document.addEventListener('DOMContentLoaded', () => {
             pill.classList.toggle('user-reacted', hasReacted);
         });
     };
-
     const initializeReactionPopovers = (container) => {
         const popoverTriggerList = container.querySelectorAll('[data-bs-toggle="popover"]');
         popoverTriggerList.forEach(popoverTriggerEl => {
             if (popoverTriggerEl.dataset.popoverInitialized) return;
             const messageId = popoverTriggerEl.dataset.messageId;
             if (!messageId) return;
-
-            const popoverOptions = {
-                html: true,
-                sanitize: false,
-                content: `<emoji-picker class="light"></emoji-picker>`,
-                placement: 'top', // Changed to 'top' for better visibility in the panel
-                customClass: 'emoji-popover'
-            };
-
-            // If the trigger element is inside our slide-out panel, constrain the popover to that panel.
-            // This prevents it from being hidden behind the offcanvas backdrop.
+            const popoverOptions = { html: true, sanitize: false, content: `<emoji-picker class="light"></emoji-picker>`, placement: 'top', customClass: 'emoji-popover' };
             if (popoverTriggerEl.closest('#right-panel-offcanvas')) {
                 popoverOptions.container = '#right-panel-offcanvas';
             }
-
             const popover = new bootstrap.Popover(popoverTriggerEl, popoverOptions);
-
             popoverTriggerEl.addEventListener('shown.bs.popover', () => {
                 const picker = document.querySelector(`.popover[role="tooltip"] emoji-picker`);
                 if (picker) {
                     const pickerListener = event => {
                         htmx.ajax('POST', `/chat/message/${messageId}/react`, {
-                            values: {
-                                emoji: event.detail.unicode
-                            },
-                            swap: 'none'
+                            values: { emoji: event.detail.unicode }, swap: 'none'
                         });
                         popover.hide();
                     };
                     picker.removeEventListener('emoji-click', pickerListener);
-                    picker.addEventListener('emoji-click', pickerListener, {
-                        once: true
-                    });
+                    picker.addEventListener('emoji-click', pickerListener, { once: true });
                 }
             });
             popoverTriggerEl.dataset.popoverInitialized = 'true';
         });
     };
-
     const processCodeBlocks = (container) => {
         const MAX_HEIGHT = 300;
         const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');
@@ -1191,12 +1018,8 @@ document.addEventListener('DOMContentLoaded', () => {
         let latestMentionId = 0;
         mentions.forEach(mentionEl => {
             const messageId = parseInt(mentionEl.id.split('-')[1]);
-            if (messageId > latestMentionId) {
-                latestMentionId = messageId;
-            }
-            setTimeout(() => {
-                mentionEl.classList.remove('mentioned-message');
-            }, 3000);
+            if (messageId > latestMentionId) { latestMentionId = messageId; }
+            setTimeout(() => { mentionEl.classList.remove('mentioned-message'); }, 3000);
         });
         if (latestMentionId > 0 && conversationId) {
             const updateUrl = `/chat/conversation/${conversationId}/seen_mentions`;
@@ -1209,14 +1032,11 @@ document.addEventListener('DOMContentLoaded', () => {
             setTimeout(() => document.body.removeChild(triggerEl), 100);
         }
     };
-
-    /** Main Event Listeners **/
     document.body.addEventListener('focus-chat-input', () => {
         if (window.mainEditor && typeof window.mainEditor.focusActiveInput === 'function') {
             window.mainEditor.focusActiveInput();
         }
     });
-
     document.body.addEventListener('update-sound-preference', (evt) => {
         const newSound = evt.detail['update-sound-preference'];
         if (newSound && NotificationManager) {
@@ -1224,38 +1044,21 @@ document.addEventListener('DOMContentLoaded', () => {
             NotificationManager.soundFile = newSound;
         }
     });
-
     document.addEventListener('click', (e) => {
-        // If the click is on any emoji button, do nothing, as the button's own handler will manage it.
-        if (e.target.closest('[id^="emoji-btn"]')) {
-            return;
-        }
-
-        // If the click is inside any open emoji picker, do nothing.
+        if (e.target.closest('[id^="emoji-btn"]')) { return; }
         const openPicker = document.querySelector('[id^="emoji-picker-container"][style*="block"]');
-        if (openPicker && openPicker.contains(e.target)) {
-            return;
-        }
-
-        // Otherwise, the click was outside all pickers and buttons, so close all pickers.
+        if (openPicker && openPicker.contains(e.target)) { return; }
         document.querySelectorAll('[id^="emoji-picker-container"]').forEach(picker => {
             picker.style.display = 'none';
         });
     });
-
-    // This function will be responsible for updating the typing indicator UI.
     const updateTypingIndicator = (typists = []) => {
-        // Find the indicator in the main chat input AND in the thread view, if it's open.
         const indicators = document.querySelectorAll('[id^="typing-indicator"]');
         if (!indicators.length) return;
-
-        // Filter out the current user's own username from the list.
         const currentUsername = document.querySelector('main.main-content')?.dataset.currentUserUsername;
         const otherTypists = typists.filter(username => username !== currentUsername);
-
         let message = '';
         const count = otherTypists.length;
-
         if (count === 1) {
             message = `${otherTypists[0]} is typing...`;
         } else if (count === 2) {
@@ -1263,13 +1066,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (count > 2) {
             message = 'Several people are typing...';
         }
-
-        // Update all visible typing indicators.
-        indicators.forEach(indicator => {
-            indicator.textContent = message;
-        });
+        indicators.forEach(indicator => { indicator.textContent = message; });
     };
-
     let userWasNearBottom = false;
     document.body.addEventListener('htmx:wsBeforeMessage', function() {
         userWasNearBottom = isUserNearBottom();
@@ -1305,20 +1103,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-
     document.body.addEventListener('htmx:oobAfterSwap', function(evt) {
-        // This event fires after an Out-Of-Band swap, which is how our WebSocket delivers thread messages.
-        // evt.detail.target is the element that received the swapped content (e.g., #thread-replies-list-60)
         const targetList = evt.detail.target;
-
         if (targetList && targetList.id.startsWith('thread-replies-list-')) {
             const scrollableContainer = targetList.closest('.flex-grow-1[style*="overflow-y: auto"]');
             if (scrollableContainer) {
-                // Check if the user is already near the bottom before the new message was added.
-                // We give a little buffer (150px) so they don't have to be perfectly at the bottom.
                 const isNearBottom = scrollableContainer.scrollHeight - scrollableContainer.clientHeight - scrollableContainer.scrollTop < 150;
-
-                // Only auto-scroll if the user isn't actively reading older messages.
                 if (isNearBottom) {
                     scrollableContainer.scrollTo({
                         top: scrollableContainer.scrollHeight,
@@ -1328,24 +1118,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
         try {
             const data = JSON.parse(event.detail.message);
             if (typeof data === 'object' && data.type) {
-                if (data.type === 'typing_update') {
-                    updateTypingIndicator(data.typists);
-                    return; // Stop processing, this was just a typing event.
-                }
+                if (data.type === 'typing_update') { updateTypingIndicator(data.typists); return; }
                 if (data.type === 'avatar_update') {
-                    const {
-                        user_id,
-                        avatar_url
-                    } = data;
+                    const { user_id, avatar_url } = data;
                     const avatarImages = document.querySelectorAll(`.avatar-image[data-user-id="${user_id}"]`);
-                    avatarImages.forEach(img => {
-                        img.src = avatar_url;
-                    });
+                    avatarImages.forEach(img => { img.src = avatar_url; });
                     return;
                 }
                 if (data.type === 'notification') NotificationManager.showNotification(data);
@@ -1357,11 +1138,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const mainContent = document.querySelector('main.main-content');
         const currentUserId = mainContent.dataset.currentUserId;
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
-
         if (lastMessage && messagesContainer) {
             const messageAuthorId = lastMessage.dataset.userId;
-
-            // This part handles auto-scrolling, it can remain focused on the last message.
             if (messageAuthorId === currentUserId) {
                 setTimeout(scrollLastMessageIntoView, 0);
             } else {
@@ -1371,12 +1149,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
                 }
             }
-
-            // Process highlights and popovers for the entire container now
             initializeReactionPopovers(messagesContainer);
             processCodeBlocks(messagesContainer);
-
-            // And call the highlight handler on the container, providing the conversation context
             const conversationDiv = messagesContainer.querySelector('[data-conversation-db-id]');
             if (conversationDiv) {
                 const conversationId = conversationDiv.dataset.conversationDbId;
@@ -1403,9 +1177,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.addEventListener('close-modal', () => htmxModal.hide());
         htmxModalEl.addEventListener('shown.bs.modal', () => {
             const autofocusEl = htmxModalEl.querySelector('[autofocus]');
-            if (autofocusEl) {
-                autofocusEl.focus();
-            }
+            if (autofocusEl) { autofocusEl.focus(); }
         });
         htmxModalEl.addEventListener('hidden.bs.modal', () => {
             if (window.focusChatInputAfterModalClose) {
@@ -1423,20 +1195,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const rightPanelOffcanvas = new bootstrap.Offcanvas(rightPanelOffcanvasEl);
         document.body.addEventListener('close-offcanvas', () => rightPanelOffcanvas.hide());
         document.body.addEventListener('open-offcanvas', () => rightPanelOffcanvas.show());
-
         rightPanelOffcanvasEl.addEventListener('shown.bs.offcanvas', event => {
-            // When the panel is fully visible, check if it contains a thread view
             const threadRepliesList = rightPanelOffcanvasEl.querySelector('[id^="thread-replies-list-"]');
             if (threadRepliesList) {
-                // Find the actual scrollable container within the offcanvas body
                 const scrollableContainer = threadRepliesList.closest('.flex-grow-1[style*="overflow-y: auto"]');
                 if (scrollableContainer) {
-                    // Scroll to the very bottom to show the latest message or the input box
                     scrollableContainer.scrollTop = scrollableContainer.scrollHeight;
                 }
             }
         });
-
         rightPanelOffcanvasEl.addEventListener('hidden.bs.offcanvas', event => {
             const panelBody = rightPanelOffcanvasEl.querySelector('#right-panel-body');
             if (panelBody) {
@@ -1458,9 +1225,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const triggerEl = document.querySelector(`[aria-describedby="${visiblePopover.id}"]`);
                 if (triggerEl) {
                     const popoverInstance = bootstrap.Popover.getInstance(triggerEl);
-                    if (popoverInstance) {
-                        popoverInstance.hide();
-                    }
+                    if (popoverInstance) { popoverInstance.hide(); }
                 }
                 return;
             }
@@ -1484,8 +1249,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-
-    // Initializations on page load
     processCodeBlocks(document.body);
     initializeReactionPopovers(document.body);
     updateReactionHighlights(document.body);
