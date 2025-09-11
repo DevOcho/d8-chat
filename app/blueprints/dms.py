@@ -140,18 +140,13 @@ def get_dm_chat(other_user_id):
     )
 
     # When a DM is viewed, update the timestamp for BOTH users involved.
-    # This ensures the "read" status is synced for the sender and receiver.
-
-    # First, ensure status records exist for both users.
     status, created = UserConversationStatus.get_or_create(
         user=g.user, conversation=conversation
     )
     UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
 
-    # Get the current user's last read time *before* we update it, so we know where to put the "NEW" separator.
     last_read_timestamp = status.last_read_timestamp
 
-    # Now, execute a single query to update both records to the current time.
     now = datetime.datetime.now()
     UserConversationStatus.update(last_read_timestamp=now).where(
         UserConversationStatus.conversation == conversation
@@ -172,7 +167,6 @@ def get_dm_chat(other_user_id):
     )
     header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
 
-    # This is the main content
     messages_html = render_template(
         "partials/dm_messages.html",
         messages=messages,
@@ -184,7 +178,6 @@ def get_dm_chat(other_user_id):
         Message=Message,
     )
 
-    # If the DM already existed for this user, send command to clear the badge.
     if not created and other_user.id != g.user.id:
         clear_badge_html = render_template(
             "partials/clear_badge.html",
@@ -192,8 +185,8 @@ def get_dm_chat(other_user_id):
             hx_get_url=url_for("dms.get_dm_chat", other_user_id=other_user.id),
             link_text=other_user.display_name or other_user.username,
         )
-    # If this is the first time this user is opening this DM, send command to add it to the sidebar.
     elif created and other_user.id != g.user.id:
+        # [THE FIX] This block now renders the correct partial for the initiator
         add_to_sidebar_html = render_template(
             "partials/dm_list_item_oob.html",
             user=other_user,
@@ -203,8 +196,8 @@ def get_dm_chat(other_user_id):
 
         if other_user.id in chat_manager.all_clients:
             try:
-                # The "user" in this context is the person starting the DM (g.user)
                 recipient_ws = chat_manager.all_clients[other_user.id]
+                # And this renders the correct partial for the recipient
                 new_contact_html = render_template(
                     "partials/dm_list_item_oob.html",
                     user=g.user,
@@ -215,14 +208,11 @@ def get_dm_chat(other_user_id):
             except Exception as e:
                 print(f"Could not send real-time DM add to user {other_user.id}: {e}")
 
-    # Also render the default chat input to ensure it's present.
     chat_input_html = render_template("partials/chat_input_default.html")
     chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
 
-    # Check for other unreads and add the result to the response
     read_state_oob_html = check_and_get_read_state_oob(g.user, conversation)
 
-    # Send everything we have
     full_response = (
         messages_html
         + header_html
@@ -234,6 +224,7 @@ def get_dm_chat(other_user_id):
     response = make_response(full_response)
     response.headers["HX-Trigger"] = "load-chat-history"
     return response
+
 
 
 @dms_bp.route("/chat/dm/<int:other_user_id>/details", methods=["GET"])

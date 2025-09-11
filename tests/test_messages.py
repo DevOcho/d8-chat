@@ -321,7 +321,7 @@ def test_jump_to_message_in_channel(logged_in_client, setup_conversation):
     Covers: The main success path of `jump_to_message` for a channel message.
     """
     message = setup_conversation["message"]
-    # [THE FIX] Get the correct channel directly from the message's conversation,
+    # Get the correct channel directly from the message's conversation,
     # not by randomly selecting the first one from the database.
     channel_id = int(message.conversation.conversation_id_str.split("_")[1])
     channel = Channel.get_by_id(channel_id)

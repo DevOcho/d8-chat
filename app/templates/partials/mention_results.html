@@ -1,5 +1,5 @@
 <div class="list-group list-group-flush">
-    {# [THE FIX] Render special mentions first #}
+    {# Render special mentions first #}
     {% for mention in special_mentions %}
         <button type="button"
                 class="list-group-item list-group-item-action mention-suggestion-item p-2 {% if loop.first and not users %}active{% endif %}"

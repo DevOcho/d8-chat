@@ -1,6 +1,5 @@
 <!-- This partial renders a list of user results and a "Load More" button -->
 {% for user in users %}
-    {# [THE FIX] Use a DIV instead of an A tag to prevent default browser navigation #}
     <div class="text-decoration-none text-body search-result-item d-flex align-items-center py-2"
          style="cursor: pointer"
          hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"

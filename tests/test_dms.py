@@ -64,7 +64,7 @@ def test_search_users_for_dm(logged_in_client, setup_dm_search_users):
 
     assert response.status_code == 200
     assert b"search_user_15" in response.data
-    # [THE FIX] Check for a user that definitely does not match the query.
+    # Check for a user that definitely does not match the query.
     assert b"search_user_07" not in response.data
     assert (
         b"Load More" not in response.data

@@ -99,9 +99,6 @@ def test_view_all_unreads_clears_badges(logged_in_client):
     assert response.status_code == 200
     assert b"Unread DM for you" in response_data
 
-    # --- [THE FIX] ---
-    # These assertions are more robust and check for the essential parts of the OOB swaps.
-
     # 1. Check that the OOB swap for the DM's badge is present.
     assert (
         f'id="unread-badge-{conv.conversation_id_str}" hx-swap-oob="outerHTML"'.encode()

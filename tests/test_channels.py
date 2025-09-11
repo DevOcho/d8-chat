@@ -434,7 +434,7 @@ def test_leave_nonexistent_channel(logged_in_client):
     Covers: `leave_channel` error path for a channel that does not exist.
     """
     response = logged_in_client.post("/chat/channel/9999/leave")
-    # [THE FIX] HTMX-driven redirects return 200 with a special header.
+    # HTMX-driven redirects return 200 with a special header.
     assert response.status_code == 200
     assert response.headers["HX-Redirect"] == "/chat"
 

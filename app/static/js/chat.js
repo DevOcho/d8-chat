@@ -83,7 +83,7 @@ const NotificationManager = {
  * Creates an independent attachment handler for one editor instance.
  * @param {object} editorState - A reference to the parent editor's state.
  */
-// [THE FIX] Pass in the editorState so we can attach paste listeners to the inputs.
+// Pass in the editorState so we can attach paste listeners to the inputs.
 const createAttachmentManager = function(editorState) {
     // State is scoped to this specific manager instance
     const state = {
@@ -109,7 +109,7 @@ const createAttachmentManager = function(editorState) {
             }
         });
 
-        // [THE FIX] Add the paste event listeners to both the rich and markdown editors.
+        // Add the paste event listeners to both the rich and markdown editors.
         if (editorState.editor) {
             editorState.editor.addEventListener('paste', handlePaste);
         }
@@ -118,7 +118,7 @@ const createAttachmentManager = function(editorState) {
         }
     };
 
-    // [THE FIX] New function to handle the paste event.
+    // New function to handle the paste event.
     const handlePaste = function(e) {
         const items = (e.clipboardData || e.originalEvent.clipboardData).items;
         let foundImage = false;
@@ -145,7 +145,7 @@ const createAttachmentManager = function(editorState) {
         state.fileInput.value = '';
     };
 
-    // [THE FIX] Refactored logic into a reusable function.
+    // Refactored logic into a reusable function.
     const processAndUploadFiles = function(files) {
         // Limit to 30 files
         if ((state.uploads.size + files.length) > 30) {

@@ -78,7 +78,6 @@ def search_setup(test_db, logged_in_client):
         user=user2, conversation=dm_conv2, content="A secret message about oranges."
     )  # Inaccessible
 
-    # <<< FIX: Create UserConversationStatus records to make DMs searchable >>>
     UserConversationStatus.create(user=user1, conversation=dm_conv1)
     UserConversationStatus.create(user=user2, conversation=dm_conv1)
     UserConversationStatus.create(user=user2, conversation=dm_conv2)
@@ -102,7 +101,7 @@ def test_search_for_accessible_messages(logged_in_client, search_setup):
     # Test searching for a message in a public channel
     res1 = logged_in_client.get("/chat/search?q=apples")
     assert res1.status_code == 200
-    # FIX: The template uses curly quotes, so we check for that in the response.
+    # The template uses curly quotes, so we check for that in the response.
     assert b"Search results for \xe2\x80\x9capples\xe2\x80\x9d" in res1.data
     assert b"# public-searchable" in res1.data  # Check context
 
@@ -140,7 +139,7 @@ def test_search_for_channels(logged_in_client, search_setup):
     )
     # This will be loaded via HTMX, so we check the paginated endpoint directly
     paginated_res = logged_in_client.get("/chat/search/channels?q=searchable")
-    # FIX: Check for the highlighted HTML, not plain text.
+    # Check for the highlighted HTML, not plain text.
     assert b"#public-<mark>searchable</mark>" in paginated_res.data
 
     response_private = logged_in_client.get("/chat/search?q=private-visible")
@@ -217,8 +216,6 @@ def test_search_messages_pagination(logged_in_client, search_setup):
     assert res2.status_code == 200
     # The response will contain the highlighted search term.
     assert b"<mark>PAGINATION_TEST</mark> message 0" in res2.data
-    # [THE FIX] On the last page, the 'Load More' button pointing to page 3 should NOT be present.
-    # This is more specific and avoids the issue with the comment.
     assert (
         b'hx-get="/chat/search/messages?q=PAGINATION_TEST&amp;page=3"' not in res2.data
     )

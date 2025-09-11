@@ -73,7 +73,7 @@ def handle_auth_callback():
             # No user found by SSO ID. Check if one exists with this email but no SSO ID.
             user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
 
-            if user:  # [THE FIX] User exists, link the account
+            if user:  # User exists, link the account
                 print(f"Linking existing user '{user.username}' via SSO.")
                 user.sso_id = sso_id
                 user.sso_provider = "authentik"

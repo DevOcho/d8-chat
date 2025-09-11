@@ -220,7 +220,7 @@ def test_chat_interface_loads_data_correctly(logged_in_client):
     assert f'<span id="{dm_badge_id}">'.encode() in response.data
     assert b'<span class="badge rounded-pill bg-danger">1</span>' in response.data
 
-    # [THE FIX] For the channel, we now expect NO badge, but the link should be bold.
+    # For the channel, we now expect NO badge, but the link should be bold.
     channel_link_id = f"link-channel_{channel.id}"
     
     # Assert the badge itself is NOT present

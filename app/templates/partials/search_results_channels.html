@@ -1,6 +1,6 @@
 <!-- This partial renders a list of channel results and a "Load More" button -->
 {% for channel in channels %}
-    {# [THE FIX] Use a DIV instead of an A tag to prevent default browser navigation #}
+    {# Use a DIV instead of an A tag to prevent default browser navigation #}
     <div class="text-decoration-none text-body search-result-item d-block py-2"
          style="cursor: pointer"
          hx-get="{{ url_for('channels.get_channel_chat', channel_id=channel.id) }}"

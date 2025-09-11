@@ -59,7 +59,7 @@ def create_app(config_class=Config):
         if not text:
             return False
 
-        # [THE FIX] First, convert any shortcodes (like :sob:) to unicode emojis.
+        # First, convert any shortcodes (like :sob:) to unicode emojis.
         emojized_text = emoji.emojize(text, language="alias")
         stripped_text = emojized_text.strip()
         if not stripped_text:

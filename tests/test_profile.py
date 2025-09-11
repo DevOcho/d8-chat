@@ -127,9 +127,6 @@ def test_get_address_form_partial(logged_in_client):
     response = logged_in_client.get("/profile/address/edit")
     assert response.status_code == 200
 
-    # --- THIS IS THE FIX ---
-    # We create the expected HTML string and the response HTML string,
-    # removing newlines and extra spaces from both to make the comparison robust.
     expected_html = b'<input type="text" class="form-control" id="country" name="country" value="Testland">'
     # Replace newlines and carriage returns, then replace multiple spaces with a single space
     response_html_flat = (

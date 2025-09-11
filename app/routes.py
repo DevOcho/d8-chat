@@ -1,3 +1,5 @@
+# app/routes.py
+
 import datetime
 import functools
 from functools import reduce
@@ -241,7 +243,7 @@ def get_attachments_for_messages(messages):
 
     message_ids = [m.id for m in messages]
 
-    # [THE FIX] Query the MessageAttachment table directly and join the file data to it.
+    # Query the MessageAttachment table directly and join the file data to it.
     # This is a more direct and reliable way to get the data.
     all_links = (
         MessageAttachment.select(MessageAttachment, UploadedFile)
@@ -1157,8 +1159,9 @@ def jump_to_message(message_id):
         members_count = (
             ChannelMember.select().where(ChannelMember.channel == channel).count()
         )
+        current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
         header_html_content = render_template(
-            "partials/channel_header.html", channel=channel, members_count=members_count
+            "partials/channel_header.html", channel=channel, members_count=members_count, current_user_membership=current_user_membership
         )
         messages_html = render_template(
             "partials/channel_messages.html",
@@ -1348,18 +1351,6 @@ def chat(ws):
                     all_participant_ids.add(reply.user_id)
 
                 unread_link_html = render_template("partials/threads_link_unread.html")
-                for user_id in all_participant_ids:
-                    if user_id != ws.user.id and user_id in chat_manager.all_clients:
-                        chat_manager.send_to_user(user_id, unread_link_html)
-
-                all_participant_ids = {parent_message.user_id}
-                replies = Message.select(Message.user_id).where(
-                    Message.parent_message == parent_message
-                )
-                for reply in replies:
-                    all_participant_ids.add(reply.user_id)
-
-                unread_link_html = render_template("partials/threads_link_unread.html")
                 now = datetime.datetime.now()
 
                 for user_id in all_participant_ids:
@@ -1420,8 +1411,7 @@ def chat(ws):
                     message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
                 ws.send(message_for_sender)
 
-            # --- Notification logic for users NOT viewing the channel remains the same ---
-            # (The existing notification logic from line 976 onwards is fine)
+            # --- Notification logic for users NOT viewing the channel ---
             if conversation.type == "channel":
                 channel_id = conversation.conversation_id_str.split("_")[1]
                 channel = Channel.get_by_id(channel_id)
@@ -1435,10 +1425,20 @@ def chat(ws):
                 members = User.select().where(User.id.in_(user_ids))
 
             for member in members:
+                # Condition 1: Don't notify the sender or offline users
                 if member.id == ws.user.id or member.id not in chat_manager.all_clients:
                     continue
 
                 member_ws = chat_manager.all_clients[member.id]
+
+                # Condition 2: Don't notify users actively viewing this conversation
+                is_viewing_conversation = False
+                if conv_id_str in chat_manager.active_connections:
+                    if member_ws in chat_manager.active_connections[conv_id_str]:
+                        is_viewing_conversation = True
+                
+                if is_viewing_conversation:
+                    continue
 
                 status, _ = UserConversationStatus.get_or_create(
                     user=member, conversation=conversation

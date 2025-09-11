@@ -1,16 +1,10 @@
 Current issues with the slack_clone:
 
 Testing Party:
-  - Something strange is happening when people send a message in the channel and you are
-    watching it.  It will still go bold for you and then switch back and forth.
-  - code fencing not working
   - There is an issue with the new message indicator in the channels (maybe other places). after a refresh it seems to start showing up but not before a refresh.
-
-Style bug when you start a new chat with a user (the avatars are squished together)
+  - if someone uploads and image file without an extension it fails sliently.  It should probably give an error message.
 
 Small extra box on the top of the chat inputs that exist solely for image uploads.  These shouldn't be visible until someone actually uploads an image.
-
-Natalie: pasting doesn't work
 
 Sagrario: She doesn't like that Hash tags are being formatted as headers in markdown
 
@@ -29,7 +23,11 @@ If the server disconnects, it will reconnect for users at different times.  Mess
 
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
+I'd like to detect passwords in messages and auto-redact them. (and give the user a toaster or some message that tells them they can send a password if they wrap it in a tag like <password>asdf</password>)
+
 ========
+
+Robert wants double click reply.  Where you double click on a message and you can reply to it.
 
 UX Complaint: Profile panel opens on the other side of the screen.
 
