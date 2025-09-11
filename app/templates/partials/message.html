@@ -12,7 +12,11 @@
          data-user-id="{{ message.user.id }}"
          data-raw-content="{{ message.content | e }}"
          data-attachments='[ {%- for att in image_attachments -%} { "url": "{{ att.url }}", "filename": "{{ att.original_filename | e }}" } {{- ", " if not loop.last else "" -}} {%- endfor -%} ]'>
-        <div class="flex-shrink-0">
+        <div class="flex-shrink-0"
+             style="cursor: pointer"
+             hx-get="{{ url_for('dms.get_dm_details', other_user_id=message.user.id, context='channel') }}"
+             hx-target="#right-panel-offcanvas"
+             title="View user details">
             {% with user=message.user, size=40 %}
                 {% include 'partials/_avatar_display.html' %}
             {% endwith %}

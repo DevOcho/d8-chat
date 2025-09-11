@@ -1,7 +1,6 @@
 Current issues with the slack_clone:
 
 Testing Party
-  - Make the username/display name clickable in channels so people can jump to DMs
   - When you @mention someone you should highilght their name as a link to a DM with them
   - Something strange is happening when people send a message in the channel and you are
     watching it.  It will still go bold for you and then switch back and forth.

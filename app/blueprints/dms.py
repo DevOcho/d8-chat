@@ -244,8 +244,11 @@ def get_dm_details(other_user_id):
     if not other_user:
         return "User not found", 404
 
+    # Get the context, defaulting to 'dm' if not provided
+    context = request.args.get('context', 'dm')
+
     response = make_response(
-        render_template("partials/dm_details.html", other_user=other_user)
+        render_template("partials/dm_details.html", other_user=other_user, context=context)
     )
     response.headers["HX-Trigger"] = "open-offcanvas"
     return response
