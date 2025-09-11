@@ -34,7 +34,7 @@
                     <p class="mb-0 text-muted">{{ message_to_quote.content | emojize | truncate(100) }}</p>
                 </div>
             {% endif %}
-            <div class="message-content" style="overflow-x: auto;">{{ message.content | markdown }}</div>
+            <div class="message-content {% if message.content | is_jumboable %}jumbo-emoji{% endif %}">{{ message.content | markdown }}</div>
             {# Thread reply indicator #}
             {% if not is_in_thread_view %}
                 {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}

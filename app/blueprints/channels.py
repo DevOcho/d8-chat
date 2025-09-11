@@ -87,6 +87,9 @@ def get_channel_chat(channel_id):
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
 
+    # Get the current user's membership role for this channel
+    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+
     # Process mentions
     mention_messages_query = (
         Message.select(Message.id)
@@ -101,7 +104,10 @@ def get_channel_chat(channel_id):
     mention_message_ids = {m.id for m in mention_messages_query}
 
     header_html_content = render_template(
-        "partials/channel_header.html", channel=channel, members_count=members_count
+        "partials/channel_header.html",
+        channel=channel, 
+        members_count=members_count,
+        current_user_membership=current_user_membership,
     )
     header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
 
@@ -182,6 +188,9 @@ def get_channel_details(channel_id):
     if not current_user_membership:
         return "You are not a member of this channel.", 403
 
+    # Get the action from the request arguments
+    action = request.args.get('action')
+
     admins = list(
         ChannelMember.select().where(
             (ChannelMember.channel == channel) & (ChannelMember.role == "admin")
@@ -198,6 +207,7 @@ def get_channel_details(channel_id):
             admins=admins,
             members_count=members_count,
             current_user_membership=current_user_membership,
+            action=action,  # Pass the action to the template
         )
     )
     response.headers["HX-Trigger"] = "open-offcanvas"

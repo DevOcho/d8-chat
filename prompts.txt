@@ -6,6 +6,7 @@ I'd like you to follow a few rules when helping me code:
     * If we are fixing a bug, ask me if the fix worked. Don't tell me it worked, and don't ask me to move on to the next thing until I confirm it's actually fixed.
     * Don't remove existing comments from the code when you ask me to replace large sections.  Those comments are helpful.  When you replace a large section, please leave the comments in place or update them to reflect new behavior.  My personal rule is that I comment if I press enter twice.
     * Never minify CSS or JavaScript.  I can't read it if you minify it.  Follow the popular linter's style here.
+   * don't give me entire replacements for app/routes.py or app/static/js/chat.js.  We've had to many issues where you forget sections.
 
 Here is the code for context as well as a `tree` command to show you what I left out:
 

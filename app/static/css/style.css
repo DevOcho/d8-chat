@@ -66,6 +66,8 @@ form[id^="message-form"] {
 
 .message-content {
     word-wrap: break-word;
+    overflow-x: auto; /* For code blocks */
+    overflow-y: hidden; /* Prevents vertical scrollbar bug with mentions */
 }
 
 .message-toolbar {
@@ -832,4 +834,55 @@ body.admin-page {
 
 [data-bs-theme="dark"] body.admin-page {
     background-color: #343a40; /* Match the main content background */
+}
+
+/* --- Mention Styles --- */
+a.mention-link {
+    color: #ec729c; /* Theme pink */
+    text-decoration: none;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease-in-out;
+}
+
+a.mention-link:hover {
+    background-color: #fbe4ed; /* A slightly darker pink on hover */
+    color: #d8487b;
+}
+
+.mention-special {
+    color: #0d6efd; /* Bootstrap primary blue */
+    font-weight: 600;
+    background-color: #cfe2ff;
+    padding: 2px 4px;
+    border-radius: 4px;
+}
+
+/* Dark Mode Overrides for Mentions */
+[data-bs-theme="dark"] a.mention-link {
+    color: #ec729c; /* Use the theme pink for the text color */
+    background-color: transparent; /* Remove the background */
+    padding: 0; /* Remove padding when there's no background */
+}
+
+[data-bs-theme="dark"] a.mention-link:hover {
+    background-color: transparent; /* Ensure no background on hover either */
+    color: #f0d8e1; /* Lighter pink on hover */
+    text-decoration: underline; /* Add underline for better affordance */
+}
+
+[data-bs-theme="dark"] .mention-special {
+    color: #80bfff;
+    background-color: #0d6efd40; /* Blue with alpha */
+}
+
+/* --- Jumbo Emoji Styles --- */
+.message-content.jumbo-emoji {
+    font-size: 3rem; /* Makes the emoji about 3x bigger */
+    line-height: 1.2;
+}
+
+/* The markdown filter wraps content in a <p> tag. Remove its margin. */
+.message-content.jumbo-emoji p {
+    margin-bottom: 0;
 }

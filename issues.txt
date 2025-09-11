@@ -1,12 +1,8 @@
 Current issues with the slack_clone:
 
-Testing Party
-  - When you @mention someone you should highilght their name as a link to a DM with them
+Testing Party:
   - Something strange is happening when people send a message in the channel and you are
     watching it.  It will still go bold for you and then switch back and forth.
-  - Empty topics show "None".  Should be a nicer message.
-  - Single emoji should be larger (like whatsapp)
-  - Profile panel opens on the other side of the screen.
   - code fencing not working
   - There is an issue with the new message indicator in the channels (maybe other places). after a refresh it seems to start showing up but not before a refresh.
 
@@ -34,6 +30,8 @@ If the server disconnects, it will reconnect for users at different times.  Mess
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
 ========
+
+UX Complaint: Profile panel opens on the other side of the screen.
 
 We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
 

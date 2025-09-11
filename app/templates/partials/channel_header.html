@@ -14,7 +14,23 @@
             <span id="member-count" class="me-3" title="View members">
                 <i class="bi bi-people-fill me-1"></i>{{ members_count }} members
             </span>
-            <span>{{ channel.topic }}</span>
+
+            {# If there's a topic, display it to everyone #}
+            {% if channel.topic %}
+                <span>|</span>
+                <span class="ms-1">{{ channel.topic }}</span>
+            {# If there's NO topic AND the user is an admin, show the link #}
+            {% elif not channel.topic and current_user_membership and current_user_membership.role == 'admin' %}
+                <span>|</span>
+                <a href="#"
+                   class="text-muted ms-1"
+                   hx-get="{{ url_for('channels.get_channel_details', channel_id=channel.id, action='edit_about') }}"
+                   hx-target="#right-panel-offcanvas"
+                   title="Set a channel topic">
+                    Set a topic
+                </a>
+            {% endif %}
+            {# A non-admin will see nothing if the topic is not set #}
         </small>
     </div>
 </div>

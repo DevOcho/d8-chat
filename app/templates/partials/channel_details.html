@@ -49,8 +49,15 @@
         <!-- Tab Content -->
         <div class="tab-content" id="myTabContent">
             <div class="tab-pane fade show active" id="about-tab-pane" role="tabpanel">
-                <!-- The 'About' content is loaded by default with the shell -->
-                {% include 'partials/channel_details_tab_about.html' %}
+                {# If the action is 'edit_about', show the form directly #}
+                {% if action == 'edit_about' and current_user_membership.role == 'admin' %}
+                    <div class="p-3">
+                        {% include 'partials/channel_details_about_form.html' %}
+                    </div>
+                {# Otherwise, show the default display view #}
+                {% else %}
+                    {% include 'partials/channel_details_tab_about.html' %}
+                {% endif %}
             </div>
             <div class="tab-pane fade" id="members-tab-pane" role="tabpanel">
                 <!-- Content will be loaded by HTMX -->
