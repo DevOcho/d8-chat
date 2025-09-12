@@ -344,7 +344,6 @@ const createEditor = function(idSuffix = '') {
     let mentionManager = null;
 
     const initialize = function() {
-        // ... (initialize function remains exactly the same) ...
         const messageForm = document.getElementById(`message-form${idSuffix}`);
         if (!messageForm) return;
 
@@ -371,13 +370,28 @@ const createEditor = function(idSuffix = '') {
 
         const isMarkdownMode = !!(elements.markdownView && elements.markdownView.style.display !== 'none');
 
-        const turndownService = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced', br: '\n' });
-        turndownService.addRule('strikethrough', { filter: ['del', 's', 'strike'], replacement: c => `~~${c}~~` });
+        const turndownService = new TurndownService({
+            headingStyle: 'atx',
+            codeBlockStyle: 'fenced',
+            br: '\n'
+        });
+        turndownService.addRule('strikethrough', {
+            filter: ['del', 's', 'strike'],
+            replacement: c => `~~${c}~~`
+        });
 
-        Object.assign(state, { idSuffix, ...elements, turndownService, isMarkdownMode, typingTimer: null });
-        
+        Object.assign(state, {
+            idSuffix,
+            ...elements,
+            turndownService,
+            isMarkdownMode,
+            typingTimer: null
+        });
+
+        // Pass the editor's state object to the attachment manager.
         attachmentManager = createAttachmentManager(state);
         attachmentManager.initialize();
+        state.attachmentManager = attachmentManager;
 
         mentionManager = createMentionManager(state);
         mentionManager.initialize();
@@ -387,9 +401,13 @@ const createEditor = function(idSuffix = '') {
             mentionButton.addEventListener('click', () => {
                 insertText('@');
                 const activeInput = state.isMarkdownMode ? state.markdownView : state.editor;
-                activeInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+                activeInput.dispatchEvent(new Event('input', {
+                    bubbles: true,
+                    cancelable: true
+                }));
             });
         }
+
         setupEmojiPickerListeners();
         setupToolbarListener();
         setupInputListeners();
@@ -399,7 +417,6 @@ const createEditor = function(idSuffix = '') {
         updateView();
     };
 
-    // ... (all helper functions like insertText, focusActiveInput, etc. remain the same) ...
     const preprocessMarkdown = function(text) {
         const lines = text.split('\n');
         const processedLines = [];
@@ -413,7 +430,11 @@ const createEditor = function(idSuffix = '') {
         return processedLines.join('\n');
     };
     const insertText = function(text) {
-        const { editor, markdownView, isMarkdownMode } = state;
+        const {
+            editor,
+            markdownView,
+            isMarkdownMode
+        } = state;
         if (isMarkdownMode) {
             const start = markdownView.selectionStart;
             const end = markdownView.selectionEnd;
@@ -426,17 +447,29 @@ const createEditor = function(idSuffix = '') {
             document.execCommand('insertText', false, text);
         }
         const activeInput = isMarkdownMode ? markdownView : editor;
-        activeInput.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+        activeInput.dispatchEvent(new Event('input', {
+            bubbles: true,
+            cancelable: true
+        }));
     };
     const focusActiveInput = function() {
-        const { editor, markdownView, isMarkdownMode } = state;
+        const {
+            editor,
+            markdownView,
+            isMarkdownMode
+        } = state;
         const activeInput = isMarkdownMode ? markdownView : editor;
         if (activeInput && typeof activeInput.focus === 'function') {
             setTimeout(() => activeInput.focus(), 0);
         }
     };
     const updateView = function() {
-        const { editor, markdownView, topToolbar, isMarkdownMode } = state;
+        const {
+            editor,
+            markdownView,
+            topToolbar,
+            isMarkdownMode
+        } = state;
         if (isMarkdownMode) {
             editor.style.display = 'none';
             markdownView.style.display = 'block';
@@ -452,7 +485,11 @@ const createEditor = function(idSuffix = '') {
         updateSendButton();
     };
     const updateSendButton = function() {
-        const { sendButton, isMarkdownMode, messageForm } = state;
+        const {
+            sendButton,
+            isMarkdownMode,
+            messageForm
+        } = state;
         const replyTypeInput = messageForm.querySelector('input[name="reply_type"]');
         const isQuoteReply = replyTypeInput && replyTypeInput.value === 'quote';
         const sendText = isQuoteReply ? "Reply" : "Send";
@@ -465,7 +502,11 @@ const createEditor = function(idSuffix = '') {
         }
     };
     const resizeActiveInput = function() {
-        const { editor, markdownView, isMarkdownMode } = state;
+        const {
+            editor,
+            markdownView,
+            isMarkdownMode
+        } = state;
         const activeInput = isMarkdownMode ? markdownView : editor;
         setTimeout(() => {
             if (activeInput) {
@@ -475,7 +516,13 @@ const createEditor = function(idSuffix = '') {
         }, 0);
     };
     const updateStateAndButtons = function() {
-        const { editor, hiddenInput, turndownService, blockquoteButton, topToolbar } = state;
+        const {
+            editor,
+            hiddenInput,
+            turndownService,
+            blockquoteButton,
+            topToolbar
+        } = state;
         if (!editor || !hiddenInput || !turndownService) return;
         const htmlContent = editor.innerHTML;
         const markdownContent = turndownService.turndown(htmlContent).trim();
@@ -503,16 +550,25 @@ const createEditor = function(idSuffix = '') {
         return false;
     };
     const sendTypingStatus = function(isTyping) {
-        const { typingSender } = state;
+        const {
+            typingSender
+        } = state;
         const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
         if (activeConv) {
-            const payload = { type: isTyping ? 'typing_start' : 'typing_stop', conversation_id: activeConv.dataset.conversationId };
+            const payload = {
+                type: isTyping ? 'typing_start' : 'typing_stop',
+                conversation_id: activeConv.dataset.conversationId
+            };
             typingSender.setAttribute('hx-vals', JSON.stringify(payload));
             htmx.trigger(typingSender, 'typing-event');
         }
     };
     const setupEmojiPickerListeners = function() {
-        const { emojiButton, emojiPicker, emojiPickerContainer } = state;
+        const {
+            emojiButton,
+            emojiPicker,
+            emojiPickerContainer
+        } = state;
         if (!emojiButton || !emojiPicker || !emojiPickerContainer) return;
         emojiButton.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -539,7 +595,10 @@ const createEditor = function(idSuffix = '') {
                 const format = isSelectionInBlockquote() ? 'div' : 'blockquote';
                 document.execCommand('formatBlock', false, format);
             } else {
-                const { command, value } = button.dataset;
+                const {
+                    command,
+                    value
+                } = button.dataset;
                 document.execCommand(command, false, value);
             }
             state.editor.focus();
@@ -569,7 +628,9 @@ const createEditor = function(idSuffix = '') {
     const setupKeydownListeners = function() {
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const keydownHandler = (e) => {
-            if (mentionManager && mentionManager.state.active) { return; }
+            if (mentionManager && mentionManager.state.active) {
+                return;
+            }
             if (!state.isMarkdownMode && e.key === 'Enter' && !e.shiftKey) {
                 const selection = window.getSelection();
                 if (selection.rangeCount) {
@@ -615,19 +676,29 @@ const createEditor = function(idSuffix = '') {
             }
             const hasText = state.hiddenInput.value.trim() !== '';
             const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
-            if (!hasText && !hasAttachment) { e.preventDefault(); return; }
+            if (!hasText && !hasAttachment) {
+                e.preventDefault();
+                return;
+            }
             clearTimeout(state.typingTimer);
             sendTypingStatus(false);
         });
         state.messageForm.addEventListener('htmx:wsAfterSend', () => {
             const isThread = idSuffix.startsWith('-thread-');
+
             if (isThread) {
                 const parentMessageId = idSuffix.split('-').pop();
-                htmx.ajax('GET', `/chat/input/thread/${parentMessageId}`, { target: `#thread-input-container-${parentMessageId}`, swap: 'outerHTML' });
+                htmx.ajax('GET', `/chat/input/thread/${parentMessageId}`, {
+                    target: `#thread-input-container-${parentMessageId}`,
+                    swap: 'outerHTML'
+                });
             } else {
                 const isQuoteReply = state.messageForm.querySelector('input[name="reply_type"]') && state.messageForm.querySelector('input[name="reply_type"]').value === 'quote';
                 if (isQuoteReply) {
-                    htmx.ajax('GET', '/chat/input/default', { target: '#chat-input-container', swap: 'outerHTML' });
+                    htmx.ajax('GET', '/chat/input/default', {
+                        target: '#chat-input-container',
+                        swap: 'outerHTML'
+                    });
                 } else {
                     const { editor, markdownView, hiddenInput } = state;
                     editor.innerHTML = '';
@@ -645,11 +716,22 @@ const createEditor = function(idSuffix = '') {
     };
     const setupToggleButtonListener = function() {
         state.formatToggleButton.addEventListener('click', () => {
-            const { editor, markdownView, isMarkdownMode, turndownService } = state;
+            const {
+                editor,
+                markdownView,
+                isMarkdownMode,
+                turndownService
+            } = state;
             if (isMarkdownMode) {
                 const markdownContent = markdownView.value;
                 if (markdownContent.trim() !== '') {
-                    htmx.ajax('POST', '/chat/utility/markdown-to-html', { values: { text: markdownContent }, target: editor, swap: 'innerHTML' }).then(() => {
+                    htmx.ajax('POST', '/chat/utility/markdown-to-html', {
+                        values: {
+                            text: markdownContent
+                        },
+                        target: editor,
+                        swap: 'innerHTML'
+                    }).then(() => {
                         updateStateAndButtons();
                     });
                 } else {
@@ -667,12 +749,17 @@ const createEditor = function(idSuffix = '') {
             updateView();
             if (idSuffix === '') {
                 const wysiwygIsEnabled = !state.isMarkdownMode;
-                htmx.ajax('PUT', '/chat/user/preference/wysiwyg', { values: { 'wysiwyg_enabled': wysiwygIsEnabled }, swap: 'none' });
+                htmx.ajax('PUT', '/chat/user/preference/wysiwyg', {
+                    values: {
+                        'wysiwyg_enabled': wysiwygIsEnabled
+                    },
+                    swap: 'none'
+                });
             }
         });
     };
 
-    // [THE FIX] Expose the attachmentManager instance so we can access it globally.
+    // This is the crucial change. We now return the manager instance.
     return {
         initialize,
         focusActiveInput,
@@ -681,6 +768,7 @@ const createEditor = function(idSuffix = '') {
         attachmentManager
     };
 };
+
 
 // --- Event Listeners to initialize editors ---
 const emojiPickerReady = customElements.whenDefined('emoji-picker');
@@ -691,11 +779,53 @@ document.body.addEventListener('initializeEditor', (event) => {
         const editorInstance = createEditor(idSuffix);
         editorInstance.initialize();
 
-        // [THE FIX] If this is the main chat input, store its attachment manager globally.
+        // If this is the main chat input, store its manager and set up drag/drop listeners.
         if (idSuffix === '') {
-            window.mainAttachmentManager = editorInstance.attachmentManager;
+            console.log('DEBUG: Initializing main editor (idSuffix="").');
+            window.mainAttachmentManager = editorInstance.state.attachmentManager;
+            console.log('DEBUG: window.mainAttachmentManager is now:', window.mainAttachmentManager);
+
+            // Attach drag-drop listeners only AFTER the main editor is ready.
+            // Use a guard to ensure this only runs once.
+            if (!window.dragDropInitialized) {
+                const mainContent = document.querySelector('main.main-content');
+                if (mainContent) {
+                    mainContent.addEventListener('dragenter', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        mainContent.classList.add('drag-over');
+                    });
+                    mainContent.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    });
+                    mainContent.addEventListener('dragleave', (e) => {
+                        if (e.relatedTarget && mainContent.contains(e.relatedTarget)) {
+                            return;
+                        }
+                        e.preventDefault();
+                        e.stopPropagation();
+                        mainContent.classList.remove('drag-over');
+                    });
+                    mainContent.addEventListener('drop', (e) => {
+                        console.log('DEBUG: Drop event fired. Checking for manager:', window.mainAttachmentManager);
+                        e.preventDefault();
+                        e.stopPropagation();
+                        mainContent.classList.remove('drag-over');
+                        const files = e.dataTransfer.files;
+                        if (files.length > 0 && window.mainAttachmentManager) {
+                            window.mainAttachmentManager.processAndUploadFiles(files);
+                        } else if (!window.mainAttachmentManager) {
+                             console.error("Main attachment manager is not available on drop.");
+                             ToastManager.show('Error', 'Could not process dropped files.', 'danger');
+                        }
+                    });
+                    window.dragDropInitialized = true;
+                }
+            }
         }
 
+        // Only auto-focus if it's a thread input.
         if (idSuffix && idSuffix.startsWith('-thread-')) {
             editorInstance.focusActiveInput();
         }
@@ -703,7 +833,6 @@ document.body.addEventListener('initializeEditor', (event) => {
 });
 
 // --- Image Carousel Manager ---
-// ... (This object remains the same)
 const ImageCarouselManager = { /* ... */ };
 (function() {
     const mgr = ImageCarouselManager;
@@ -766,48 +895,6 @@ document.addEventListener('DOMContentLoaded', () => {
     NotificationManager.initialize();
     ToastManager.initialize();
 
-    // --- [THE FIX] New Drag and Drop Logic ---
-    const mainContent = document.querySelector('main.main-content');
-    if (mainContent) {
-        mainContent.addEventListener('dragenter', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            mainContent.classList.add('drag-over');
-        });
-
-        mainContent.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-        });
-
-        mainContent.addEventListener('dragleave', (e) => {
-            // This prevents the overlay from flickering when moving over child elements
-            if (e.relatedTarget && mainContent.contains(e.relatedTarget)) {
-                return;
-            }
-            e.preventDefault();
-            e.stopPropagation();
-            mainContent.classList.remove('drag-over');
-        });
-
-        mainContent.addEventListener('drop', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            mainContent.classList.remove('drag-over');
-
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                // Use the globally exposed attachment manager for the main input
-                if (window.mainAttachmentManager && typeof window.mainAttachmentManager.processAndUploadFiles === 'function') {
-                    window.mainAttachmentManager.processAndUploadFiles(files);
-                } else {
-                    console.error("Main attachment manager is not available.");
-                    ToastManager.show('Error', 'Could not process dropped files.', 'danger');
-                }
-            }
-        });
-    }
-
     // --- AUDIO PRIMING LOGIC ---
     const primeAudio = () => {
         const silentSound = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
@@ -821,7 +908,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     document.body.addEventListener('click', primeAudio, { once: true });
 
-    // ... (the rest of the DOMContentLoaded listener remains exactly the same)
     const searchInput = document.getElementById('global-search-input');
     const searchOverlay = document.getElementById('search-results-overlay');
     const channelSidebar = document.querySelector('.channel-sidebar');

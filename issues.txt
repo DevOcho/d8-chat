@@ -2,6 +2,11 @@ Current issues with the slack_clone:
 
 Testing Party:
   - There is an issue with the new message indicator in the channels (maybe other places). after a refresh it seems to start showing up but not before a refresh.
+  - Avatar on the DMs isn't updating when it's changed but it does on a refresh.
+  - when you create a new channel it doesn't offer the "Set a topic" link until you leave and come back
+  - The updated topic is not set until you leave and return to a channel
+  - The reactions hover shows the username and not the display name
+  - There is a security issue with the way sessions are handled. If a user has a stale session and I delete the database and the user reloads their browser, they will be given access to a different user with the same user Id.  This isn't good.
 
 Small extra box on the top of the chat inputs that exist solely for image uploads.  These shouldn't be visible until someone actually uploads an image.
 
@@ -11,10 +16,15 @@ We need to be able to upload files.
 
 We need a way to search and add gifs
 
+Need to scale images that are uploaded to make them not crazy big.  Especially for avatars.
+
+Need a data retention policy that auto deletes things over a certain age and cleans up the database and minio
+
 We need to update the administration section with HTMX and set it up to handle more users.
   - Users Management
   - Channel Management
   - Audit Log (feature that logs all chats and channel changes)
+  - Set the chart to be a bar chart and have it cover the last 24 hours instead of the last 7 days
 
 i18n
 
