@@ -876,6 +876,28 @@ a.mention-link:hover {
     background-color: #0d6efd40; /* Blue with alpha */
 }
 
+/* --- Channel mentions --- */
+a.channel-link {
+    color: #ec729c; /* Bootstrap primary blue */
+    text-decoration: none;
+    font-weight: 500;
+    transition: text-decoration 0.2s ease-in-out;
+}
+
+a.channel-link:hover {
+    text-decoration: underline;
+}
+
+[data-bs-theme="dark"] a.channel-link {
+    color: #ec729c;
+}
+
+[data-bs-theme="dark"] a.channel-link:hover {
+    background-color: transparent; /* Ensure no background on hover either */
+    color: #f0d8e1; /* Lighter pink on hover */
+    text-decoration: underline; /* Add underline for better affordance */
+}
+
 /* --- Jumbo Emoji Styles --- */
 .message-content.jumbo-emoji {
     font-size: 3rem; /* Makes the emoji about 3x bigger */
