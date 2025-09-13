@@ -9,7 +9,7 @@
             hx-post="{{ url_for('main.toggle_reaction', message_id=message.id) }}"
             hx-vals='{"emoji": "{{ emoji }}"}'
             hx-swap="innerHTML"
-            title="Reacted by: {{ reaction.usernames|join(", ") }}">
+            title="Reacted by: {{ reaction.reactor_names|join(", ") }}">
         <span>{{ emoji }}</span>
         <span class="reaction-count">{{ count }}</span>
     </button>

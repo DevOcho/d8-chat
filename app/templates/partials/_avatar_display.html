@@ -11,7 +11,8 @@
                 height: {{ size_px }};
                 object-fit: cover">
 {% else %}
-    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center"
+    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center avatar-image"
+         data-user-id="{{ user.id }}"
          style="width: {{ size_px }};
                 height: {{ size_px }};
                 font-size: {{ font_size_rem }}">{{ (user.display_name or user.username)[0]|upper }}</div>

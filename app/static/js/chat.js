@@ -1204,6 +1204,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
         try {
             const data = JSON.parse(event.detail.message);
@@ -1212,7 +1213,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (data.type === 'avatar_update') {
                     const { user_id, avatar_url } = data;
                     const avatarImages = document.querySelectorAll(`.avatar-image[data-user-id="${user_id}"]`);
-                    avatarImages.forEach(img => { img.src = avatar_url; });
+                    avatarImages.forEach(el => {
+                        // If it's already an image, just update the source. This is fast.
+                        if (el.tagName === 'IMG') {
+                            el.src = avatar_url;
+                        } else {
+                            // If it's the DIV fallback, we must replace it with a new IMG tag.
+                            const newImg = document.createElement('img');
+                            newImg.src = avatar_url;
+                            newImg.alt = `${el.textContent.trim()}'s avatar`;
+                            // Set the correct classes for an image element
+                            newImg.className = 'rounded-circle avatar-image';
+                            // Copy the inline styles to preserve the size (width/height)
+                            newImg.style.cssText = el.style.cssText;
+                            newImg.style.objectFit = 'cover'; // Add this for consistency with the original img
+                            newImg.dataset.userId = user_id; // Re-apply the data-user-id for future updates
+
+                            // Replace the old div with our newly created img element.
+                            el.replaceWith(newImg);
+                        }
+                    });
                     return;
                 }
                 if (data.type === 'notification') NotificationManager.showNotification(data);
@@ -1244,6 +1264,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+
     if (messagesContainer) {
         messagesContainer.addEventListener('scroll', () => {
             if (isUserNearBottom() && jumpToBottomBtn) {

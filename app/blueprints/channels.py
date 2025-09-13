@@ -105,7 +105,7 @@ def get_channel_chat(channel_id):
 
     header_html_content = render_template(
         "partials/channel_header.html",
-        channel=channel, 
+        channel=channel,
         members_count=members_count,
         current_user_membership=current_user_membership,
     )
@@ -189,7 +189,7 @@ def get_channel_details(channel_id):
         return "You are not a member of this channel.", 403
 
     # Get the action from the request arguments
-    action = request.args.get('action')
+    action = request.args.get("action")
 
     admins = list(
         ChannelMember.select().where(
@@ -601,7 +601,10 @@ def create_channel():
                 is_private=is_private,
                 created_by=g.user,
             )
-            ChannelMember.create(user=g.user, channel=new_channel, role="admin")
+            # Get the membership object we just created.
+            current_user_membership = ChannelMember.create(
+                user=g.user, channel=new_channel, role="admin"
+            )
 
             Conversation.get_or_create(
                 conversation_id_str=f"channel_{new_channel.id}",
@@ -633,7 +636,10 @@ def create_channel():
     messages = []
 
     header_html = render_template(
-        "partials/channel_header.html", channel=new_channel, members_count=members_count
+        "partials/channel_header.html",
+        channel=new_channel,
+        members_count=members_count,
+        current_user_membership=current_user_membership,
     )
     messages_html = render_template(
         "partials/channel_messages.html",

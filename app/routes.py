@@ -134,13 +134,15 @@ def get_reactions_for_messages(messages):
                 "emoji": r.emoji,
                 "count": 0,
                 "users": [],
-                "usernames": [],
+                "reactor_names": [],
             }
 
         group = reactions_by_message[mid][r.emoji]
         group["count"] += 1
         group["users"].append(r.user.id)
-        group["usernames"].append(r.user.username)
+        # Prioritize display_name, fallback to username
+        reactor_name = r.user.display_name or r.user.username
+        group["reactor_names"].append(reactor_name)
 
     # Convert the inner emoji dictionary to a list for easier template iteration
     for mid, emoji_groups in reactions_by_message.items():
@@ -802,12 +804,7 @@ def upload_avatar():
                 "user_id": g.user.id,
                 "avatar_url": g.user.avatar_url,
             }
-            chat_manager.broadcast(
-                None,
-                avatar_update_payload,
-                sender_ws=chat_manager.all_clients.get(g.user.id),
-                is_event=True,
-            )
+            chat_manager.broadcast_to_all(avatar_update_payload)
 
             # Prepare a multi-part HTTP response for the UPLOADER.
             #  - The main response updates the profile header (the hx-target).
@@ -1159,9 +1156,14 @@ def jump_to_message(message_id):
         members_count = (
             ChannelMember.select().where(ChannelMember.channel == channel).count()
         )
-        current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+        current_user_membership = ChannelMember.get_or_none(
+            user=g.user, channel=channel
+        )
         header_html_content = render_template(
-            "partials/channel_header.html", channel=channel, members_count=members_count, current_user_membership=current_user_membership
+            "partials/channel_header.html",
+            channel=channel,
+            members_count=members_count,
+            current_user_membership=current_user_membership,
         )
         messages_html = render_template(
             "partials/channel_messages.html",
@@ -1436,7 +1438,7 @@ def chat(ws):
                 if conv_id_str in chat_manager.active_connections:
                     if member_ws in chat_manager.active_connections[conv_id_str]:
                         is_viewing_conversation = True
-                
+
                 if is_viewing_conversation:
                     continue
 
