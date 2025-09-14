@@ -1,19 +1,20 @@
 # app/__init__.py
 
 import re
-import markdown
 
-from config import Config
 import bleach
 import emoji
+import markdown
 from flask import Flask, g, url_for
 from flask_login import LoginManager
 from flask_sock import Sock
 from markupsafe import Markup
 
-from .models import initialize_db, User
-from .sso import init_sso
+from config import Config
+
+from .models import User, initialize_db
 from .services import minio_service
+from .sso import init_sso
 
 sock = Sock()  # Create a Sock instance
 
@@ -75,7 +76,7 @@ def create_app(config_class=Config):
 
     # --- Register custom template filter for Markdown ---
     @app.template_filter("markdown")
-    def markdown_filter(content):
+    def markdown_filter(content, context="display"):
         """
         Converts Markdown content to sanitized HTML.
 
@@ -234,6 +235,15 @@ def create_app(config_class=Config):
         code_blocks = []
 
         def extract_and_process_code_block(m):
+            # If the context is 'edit', we generate a simple <pre> tag.
+            if context == 'edit':
+                from markupsafe import escape
+
+                # This regex strips the fences and the language identifier.
+                code_content = re.sub(r'^```(\w*\n)?|```$', '', m.group(0)).strip()
+                # We wrap the escaped raw code in a simple <pre> tag.
+                block_html = f'<pre>{escape(code_content)}</pre>'
+            # For the default 'display' context, we use the full syntax highlighter.
             # Process the code block with the 'codehilite' extension.
             block_html = markdown.markdown(
                 m.group(0),
@@ -330,13 +340,13 @@ def create_app(config_class=Config):
         return f"{size:.2f} {power_labels[n]}B"
 
     # Import blueprints
-    from .routes import main_bp
+    from .blueprints.activity import activity_bp
     from .blueprints.admin import admin_bp
-    from .blueprints.search import search_bp
     from .blueprints.channels import channels_bp
     from .blueprints.dms import dms_bp
     from .blueprints.files import files_bp
-    from .blueprints.activity import activity_bp
+    from .blueprints.search import search_bp
+    from .routes import main_bp
 
     # Register blueprints
     app.register_blueprint(main_bp)

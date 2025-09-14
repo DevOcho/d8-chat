@@ -380,6 +380,13 @@ const createEditor = function(idSuffix = '') {
             replacement: c => `~~${c}~~`
         });
 
+        turndownService.addRule('pre', {
+            filter: 'pre',
+            replacement: function(content) {
+                return '```\n' + content + '\n```';
+            }
+        });
+
         Object.assign(state, {
             idSuffix,
             ...elements,
@@ -415,6 +422,27 @@ const createEditor = function(idSuffix = '') {
         setupFormListeners();
         setupToggleButtonListener();
         updateView();
+
+        if (!state.isMarkdownMode) {
+            const markdownContent = state.markdownView.value;
+            if (markdownContent.trim() !== '') {
+                // We use the same markdown-to-html utility as the toggle button.
+                // This ensures consistent rendering and properly handles all content,
+                // including mixed text and code blocks.
+                htmx.ajax('POST', '/chat/utility/markdown-to-html', {
+                    values: {
+                        text: markdownContent
+                    },
+                    target: state.editor,
+                    swap: 'innerHTML'
+                }).then(() => {
+                    // After the content is loaded, sync the hidden input and button states.
+                    updateStateAndButtons();
+                    // And ensure the input resizes to fit the loaded content.
+                    resizeActiveInput();
+                });
+            }
+        }
     };
 
     const preprocessMarkdown = function(text) {
@@ -781,9 +809,7 @@ document.body.addEventListener('initializeEditor', (event) => {
 
         // If this is the main chat input, store its manager and set up drag/drop listeners.
         if (idSuffix === '') {
-            console.log('DEBUG: Initializing main editor (idSuffix="").');
             window.mainAttachmentManager = editorInstance.state.attachmentManager;
-            console.log('DEBUG: window.mainAttachmentManager is now:', window.mainAttachmentManager);
 
             // Attach drag-drop listeners only AFTER the main editor is ready.
             // Use a guard to ensure this only runs once.
@@ -808,7 +834,6 @@ document.body.addEventListener('initializeEditor', (event) => {
                         mainContent.classList.remove('drag-over');
                     });
                     mainContent.addEventListener('drop', (e) => {
-                        console.log('DEBUG: Drop event fired. Checking for manager:', window.mainAttachmentManager);
                         e.preventDefault();
                         e.stopPropagation();
                         mainContent.classList.remove('drag-over');
