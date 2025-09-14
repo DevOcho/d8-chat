@@ -22,6 +22,7 @@ from flask import (
 )
 from flask_login import login_user, logout_user
 from peewee import fn
+from PIL import Image
 from werkzeug.utils import secure_filename
 
 from . import sock
@@ -46,6 +47,9 @@ main_bp = Blueprint("main", __name__)
 
 # Number of messages per "page" meaning how many we will load at a time if they scroll back up
 PAGE_SIZE = 30
+
+# Define the standard size for all user avatars
+AVATAR_SIZE = (256, 256)
 
 # A central map for presence status to Bootstrap CSS classes.
 STATUS_CLASS_MAP = {
@@ -728,19 +732,32 @@ def upload_avatar():
 
     old_avatar_file = g.user.avatar
     original_filename = secure_filename(file.filename)
-    file_ext = original_filename.rsplit(".", 1)[1].lower()
-    stored_filename = f"{uuid.uuid4()}.{file_ext}"
+
+    # We will standardize all avatars to the .png format for consistency.
+    stored_filename = f"{uuid.uuid4()}.png"
 
     temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
     os.makedirs(temp_dir, exist_ok=True)
     temp_path = os.path.join(temp_dir, stored_filename)
 
     try:
+        # Save the original uploaded file temporarily
         file.save(temp_path)
+
+        # --- Image Resizing Logic ---
+        with Image.open(temp_path) as img:
+            # The thumbnail() method resizes the image in-place while maintaining aspect ratio.
+            # It ensures the image fits WITHIN the bounds of AVATAR_SIZE.
+            img.thumbnail(AVATAR_SIZE)
+            # Save the resized image back to the temporary path in PNG format.
+            img.save(temp_path, format="PNG")
+
+        # Get the file size of the NEW, resized image.
         file_size = os.path.getsize(temp_path)
 
+        # Upload the resized file to Minio, ensuring the content type is image/png.
         success = minio_service.upload_file(
-            object_name=stored_filename, file_path=temp_path, content_type=file.mimetype
+            object_name=stored_filename, file_path=temp_path, content_type="image/png"
         )
 
         if success:
@@ -748,25 +765,19 @@ def upload_avatar():
                 uploader=g.user,
                 original_filename=original_filename,
                 stored_filename=stored_filename,
-                mime_type=file.mimetype,
+                mime_type="image/png",  # <-- Standardized mime type
                 file_size_bytes=file_size,
             )
             g.user.avatar = new_file
             g.user.save()
 
-            # If an old avatar existed, delete it now.
             if old_avatar_file:
                 try:
-                    # Delete from Minio
                     minio_service.delete_file(old_avatar_file.stored_filename)
-                    # Delete from our database
                     old_avatar_file.delete_instance()
                 except Exception as e:
-                    # If cleanup fails, log it but don't fail the whole request.
-                    # The user's avatar has been successfully updated.
                     print(f"Error during old avatar cleanup: {e}")
 
-            # Broadcast a JSON event for EVERYONE ELSE to update their views.
             avatar_update_payload = {
                 "type": "avatar_update",
                 "user_id": g.user.id,
@@ -774,9 +785,6 @@ def upload_avatar():
             }
             chat_manager.broadcast_to_all(avatar_update_payload)
 
-            # Prepare a multi-part HTTP response for the UPLOADER.
-            #  - The main response updates the profile header (the hx-target).
-            #  - The OOB swap updates the uploader's own sidebar button.
             profile_header_html = render_template(
                 "partials/profile_header.html", user=g.user
             )
@@ -784,14 +792,11 @@ def upload_avatar():
                 "partials/_sidebar_profile_button.html"
             )
             sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
-
             return make_response(profile_header_html + sidebar_oob_swap)
-
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
-    # Fallback in case of upload failure
     return render_template("partials/profile_header.html", user=g.user)
 
 

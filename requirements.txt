@@ -12,6 +12,7 @@ gunicorn
 Markdown
 minio
 peewee==3.18.2
+Pillow
 psycopg2-binary
 pydantic
 Pygments
