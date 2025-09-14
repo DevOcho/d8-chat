@@ -569,10 +569,10 @@ def create_channel():
     if not channel_name or len(channel_name) < 3:
         error = "Name must be at least 3 characters long and contain only letters, numbers, underscores, or hyphens."
         return render_template(
-                "partials/create_channel_form.html",
-                error=error,
-                name=channel_name,
-                is_private=is_private,
+            "partials/create_channel_form.html",
+            error=error,
+            name=channel_name,
+            is_private=is_private,
         )
 
     workspace_member = WorkspaceMember.get_or_none(user=g.user)
@@ -615,10 +615,10 @@ def create_channel():
     except IntegrityError:
         error = f"A channel named '#{channel_name}' already exists."
         return render_template(
-                "partials/create_channel_form.html",
-                error=error,
-                name=channel_name,
-                is_private=is_private,
+            "partials/create_channel_form.html",
+            error=error,
+            name=channel_name,
+            is_private=is_private,
         )
 
     new_sidebar_item_html = render_template(

@@ -32,7 +32,7 @@ def init_app(app):
 
     # 2. Configure the PUBLIC client for generating user-facing URLs
     public_endpoint_url = app.config.get("MINIO_PUBLIC_URL")
-    public_endpoint_host = internal_endpoint # Default to internal
+    public_endpoint_host = internal_endpoint  # Default to internal
 
     if public_endpoint_url:
         # The Minio client constructor requires just the 'hostname:port' part (netloc).
@@ -41,10 +41,15 @@ def init_app(app):
         if parsed_url.netloc:
             public_endpoint_host = parsed_url.netloc
         else:
-            print(f"WARNING: MINIO_PUBLIC_URL ('{public_endpoint_url}') seems to be invalid. Falling back to internal endpoint for URL generation.")
+            print(
+                f"WARNING: MINIO_PUBLIC_URL ('{public_endpoint_url}') seems to be invalid. Falling back to internal endpoint for URL generation."
+            )
 
     minio_client_public = Minio(
-        public_endpoint_host, access_key=access_key, secret_key=secret_key, secure=secure
+        public_endpoint_host,
+        access_key=access_key,
+        secret_key=secret_key,
+        secure=secure,
     )
 
     # Bucket existence check is an internal operation

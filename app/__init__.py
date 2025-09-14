@@ -236,13 +236,13 @@ def create_app(config_class=Config):
 
         def extract_and_process_code_block(m):
             # If the context is 'edit', we generate a simple <pre> tag.
-            if context == 'edit':
+            if context == "edit":
                 from markupsafe import escape
 
                 # This regex strips the fences and the language identifier.
-                code_content = re.sub(r'^```(\w*\n)?|```$', '', m.group(0)).strip()
+                code_content = re.sub(r"^```(\w*\n)?|```$", "", m.group(0)).strip()
                 # We wrap the escaped raw code in a simple <pre> tag.
-                block_html = f'<pre>{escape(code_content)}</pre>'
+                block_html = f"<pre>{escape(code_content)}</pre>"
             # For the default 'display' context, we use the full syntax highlighter.
             # Process the code block with the 'codehilite' extension.
             block_html = markdown.markdown(
@@ -258,7 +258,7 @@ def create_app(config_class=Config):
             )
             # Store the processed HTML and return a safe placeholder.
             code_blocks.append(block_html)
-            return f"D8CHATCODEBLOCKPLACEHOLDER{len(code_blocks)-1}"
+            return f"D8CHATCODEBLOCKPLACEHOLDER{len(code_blocks) - 1}"
 
         # Run the extraction on our content that already has mentions and channel links.
         content_without_code = re.sub(

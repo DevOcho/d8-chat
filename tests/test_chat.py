@@ -228,7 +228,10 @@ def test_chat_interface_loads_data_correctly(logged_in_client):
     # Assert the badge itself is NOT present
     assert b'<span class="badge rounded-pill bg-danger float-end">' not in response.data
     # Assert the link IS bold and white
-    assert f'<a href="#"\n                           id="{channel_link_id}"\n                           class="text-decoration-none fw-bold text-white"'.encode() in response.data
+    assert (
+        f'<a href="#"\n                           id="{channel_link_id}"\n                           class="text-decoration-none fw-bold text-white"'.encode()
+        in response.data
+    )
 
 
 def test_admin_can_remove_member(logged_in_client, setup_admin_and_member):
@@ -369,12 +372,14 @@ def test_admin_cannot_demote_last_admin(logged_in_client, setup_admin_and_member
     However, if we try to demote the sole remaining admin, it should fail.
     """
     channel = setup_admin_and_member["channel"]
-    original_admin = setup_admin_and_member["admin"] # user 1
+    original_admin = setup_admin_and_member["admin"]  # user 1
 
     # At this point, the channel has one admin. The business logic states that
     # to demote an admin, the admin_count must be > 1.
     # Let's create a second admin to perform the action.
-    second_admin = User.create(id=3, username="second_admin", email="admin2@example.com")
+    second_admin = User.create(
+        id=3, username="second_admin", email="admin2@example.com"
+    )
     WorkspaceMember.create(user=second_admin, workspace=channel.workspace)
     ChannelMember.create(user=second_admin, channel=channel, role="admin")
 
@@ -407,31 +412,37 @@ def test_admin_cannot_demote_last_admin(logged_in_client, setup_admin_and_member
     # To do this, we'll manually delete one admin from the DB to set up the state
     with db.atomic():
         ChannelMember.delete().where(
-            (ChannelMember.user == second_admin) &
-            (ChannelMember.channel == channel)
+            (ChannelMember.user == second_admin) & (ChannelMember.channel == channel)
         ).execute()
 
     # Get the state right: 2 admins in channel.
     admin1 = original_admin
-    admin2 = second_admin # from above
+    admin2 = second_admin  # from above
 
     # Log in as admin1
     with logged_in_client.session_transaction() as sess:
         sess["user_id"] = admin1.id
 
     # Demote admin2. This works, admin_count is 2.
-    response = logged_in_client.put(f"/chat/channel/{channel.id}/members/{admin2.id}/role", data={'role': 'member'})
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/members/{admin2.id}/role", data={"role": "member"}
+    )
     assert response.status_code == 200
 
     # Now admin1 is the sole admin. Re-promote admin2.
-    response = logged_in_client.put(f"/chat/channel/{channel.id}/members/{admin2.id}/role", data={'role': 'admin'})
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/members/{admin2.id}/role", data={"role": "admin"}
+    )
     assert response.status_code == 200
 
     # This test asserts that the application correctly prevents a non-admin from changing roles.
     member_user = setup_admin_and_member["member"]
     with logged_in_client.session_transaction() as sess:
-        sess["user_id"] = member_user.id # Log in as a non-admin
+        sess["user_id"] = member_user.id  # Log in as a non-admin
 
-    response = logged_in_client.put(f"/chat/channel/{channel.id}/members/{original_admin.id}/role", data={'role': 'member'})
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/members/{original_admin.id}/role",
+        data={"role": "member"},
+    )
     assert response.status_code == 403
-    assert b'You do not have permission to change roles.' in response.data
+    assert b"You do not have permission to change roles." in response.data

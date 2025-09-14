@@ -1,11 +1,13 @@
 # app/blueprints/files.py
-from flask import Blueprint, request, jsonify, g, current_app
-from app.routes import login_required
-from app.models import UploadedFile
-from app.services import minio_service
-from werkzeug.utils import secure_filename
 import os
 import uuid
+
+from flask import Blueprint, current_app, g, jsonify, request
+from werkzeug.utils import secure_filename
+
+from app.models import UploadedFile
+from app.routes import login_required
+from app.services import minio_service
 
 files_bp = Blueprint("files", __name__)
 
@@ -82,4 +84,6 @@ def upload_file():
         else:
             return jsonify(error="Failed to upload file to storage"), 500
 
-    return jsonify(error="Invalid filename. Files must have an extension (e.g., .png, .jpg)."), 400
+    return jsonify(
+        error="Invalid filename. Files must have an extension (e.g., .png, .jpg)."
+    ), 400

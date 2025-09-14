@@ -1,28 +1,18 @@
 # app/blueprints/dms.py
 
-from flask import (
-    Blueprint,
-    render_template,
-    request,
-    url_for,
-    g,
-    make_response,
-)
-from app.models import (
-    User,
-    Message,
-    Conversation,
-    UserConversationStatus,
-)
-from app.routes import (
-    login_required,
-    PAGE_SIZE,
-    get_reactions_for_messages,
-    get_attachments_for_messages,
-    check_and_get_read_state_oob,
-)
-from app.chat_manager import chat_manager
 import datetime
+
+from flask import Blueprint, g, make_response, render_template, request, url_for
+
+from app.chat_manager import chat_manager
+from app.models import Conversation, Message, User, UserConversationStatus
+from app.routes import (
+    PAGE_SIZE,
+    check_and_get_read_state_oob,
+    get_attachments_for_messages,
+    get_reactions_for_messages,
+    login_required,
+)
 
 # A smaller page size for the user search modal
 DM_SEARCH_PAGE_SIZE = 20
@@ -122,7 +112,6 @@ def search_users_for_dm():
 @dms_bp.route("/chat/dm/<int:other_user_id>")
 @login_required
 def get_dm_chat(other_user_id):
-
     # Local Vars
     clear_badge_html = ""
     add_to_sidebar_html = ""
@@ -226,7 +215,6 @@ def get_dm_chat(other_user_id):
     return response
 
 
-
 @dms_bp.route("/chat/dm/<int:other_user_id>/details", methods=["GET"])
 @login_required
 def get_dm_details(other_user_id):
@@ -236,10 +224,12 @@ def get_dm_details(other_user_id):
         return "User not found", 404
 
     # Get the context, defaulting to 'dm' if not provided
-    context = request.args.get('context', 'dm')
+    context = request.args.get("context", "dm")
 
     response = make_response(
-        render_template("partials/dm_details.html", other_user=other_user, context=context)
+        render_template(
+            "partials/dm_details.html", other_user=other_user, context=context
+        )
     )
     response.headers["HX-Trigger"] = "open-offcanvas"
     return response

@@ -494,7 +494,6 @@ def update_message(message_id):
 
     new_content = request.form.get("content")
     if new_content:
-
         with db.atomic():
             # First, delete all old hashtag links for this message
             from app.models import Channel, Hashtag, MessageHashtag

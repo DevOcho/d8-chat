@@ -82,9 +82,9 @@ def _get_message_context(messages, current_user):
         conv_str = msg.conversation.conversation_id_str
         if msg.conversation.type == "channel":
             channel_id = int(conv_str.split("_")[1])
-            context_map[
-                msg.id
-            ] = f"# {channel_lookup.get(channel_id, 'unknown-channel')}"
+            context_map[msg.id] = (
+                f"# {channel_lookup.get(channel_id, 'unknown-channel')}"
+            )
         elif msg.conversation.type == "dm":
             user_ids = [int(uid) for uid in conv_str.split("_")[1:]]
             partner_id = next(

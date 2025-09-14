@@ -1,7 +1,6 @@
 # tests/test_auth.py
 
 
-
 def test_login_redirect(client):
     """
     GIVEN a Flask application configured for testing
