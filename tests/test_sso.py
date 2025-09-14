@@ -1,7 +1,6 @@
 # tests/test_sso.py
 
-from app.models import User, WorkspaceMember, ChannelMember, Channel, Workspace
-from flask import request
+from app.models import Channel, ChannelMember, User, Workspace, WorkspaceMember
 
 
 def test_sso_callback_creates_new_user(client, mocker):

@@ -1,7 +1,5 @@
 # tests/test_auth.py
 
-from flask import session
-from app.models import User
 
 
 def test_login_redirect(client):

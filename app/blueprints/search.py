@@ -1,15 +1,16 @@
 # app/blueprints/search.py
 
-from flask import Blueprint, render_template, request, g
+from flask import Blueprint, g, render_template, request
 from peewee import fn
+
 from ..models import (
-    Message,
-    User,
     Channel,
     ChannelMember,
     Conversation,
     Hashtag,
+    Message,
     MessageHashtag,
+    User,
     UserConversationStatus,
 )
 from ..routes import login_required
@@ -148,12 +149,12 @@ def search():
         user_private_channels_subquery = (
             Channel.select(Channel.id)
             .join(ChannelMember)
-            .where((ChannelMember.user == g.user) & (Channel.is_private == True))
+            .where((ChannelMember.user == g.user) & (Channel.is_private == True))  # noqa
         )
         channel_query = Channel.select().where(
             (Channel.name.ilike(f"%{query}%"))
             & (
-                (Channel.is_private == False)
+                (Channel.is_private == False)  # noqa
                 | (Channel.id.in_(user_private_channels_subquery))
             )
         )
@@ -248,14 +249,14 @@ def search_channels_paginated():
     user_private_channels_subquery = (
         Channel.select(Channel.id)
         .join(ChannelMember)
-        .where((ChannelMember.user == g.user) & (Channel.is_private == True))
+        .where((ChannelMember.user == g.user) & (Channel.is_private == True))  # noqa
     )
     channel_query = (
         Channel.select()
         .where(
             (Channel.name.ilike(f"%{query}%"))
             & (
-                (Channel.is_private == False)
+                (Channel.is_private == False)  # noqa
                 | (Channel.id.in_(user_private_channels_subquery))
             )
         )

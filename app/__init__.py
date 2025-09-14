@@ -5,7 +5,7 @@ import re
 import bleach
 import emoji
 import markdown
-from flask import Flask, g, url_for
+from flask import Flask, url_for
 from flask_login import LoginManager
 from flask_sock import Sock
 from markupsafe import Markup

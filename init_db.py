@@ -2,13 +2,15 @@
 
 import datetime
 import secrets
+from urllib.parse import urlparse
+
+from playhouse.db_url import connect
 
 from app import create_app
 from app.models import (
     Channel,
     ChannelMember,
     Conversation,
-    db,
     Hashtag,
     Mention,
     Message,
@@ -20,10 +22,9 @@ from app.models import (
     UserConversationStatus,
     Workspace,
     WorkspaceMember,
+    db,
 )
 from config import Config
-from playhouse.db_url import connect
-from urllib.parse import urlparse
 
 ALL_MODELS = [
     User,
@@ -63,7 +64,7 @@ def ensure_postgres_db_exists():
         conn = connect(maintenance_conn_url)
         conn.autocommit = True
         cursor = conn.cursor()
-        cursor.execute(f"SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
+        cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
         if not cursor.fetchone():
             print(f"Creating database {db_name}...")
             cursor.execute(f"CREATE DATABASE {db_name}")

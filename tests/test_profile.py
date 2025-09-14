@@ -168,7 +168,7 @@ def test_set_wysiwyg_preference(logged_in_client):
     assert user_turned_off.wysiwyg_enabled is False
 
 
-def test_update_theme_invalid(logged_in_client):
+def test_update_theme_invalid_two(logged_in_client):
     """
     Covers: `update_theme` error path for invalid theme value.
     """

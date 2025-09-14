@@ -2,31 +2,22 @@ import datetime
 import functools
 import re
 
-from flask import (
-    Blueprint,
-    render_template,
-    request,
-    redirect,
-    url_for,
-    g,
-    flash,
-    jsonify,
-)
-from peewee import fn, IntegrityError, JOIN
+from flask import Blueprint, flash, g, redirect, render_template, request, url_for
+from peewee import JOIN, IntegrityError, fn
 
 from ..models import (
-    User,
-    Workspace,
-    WorkspaceMember,
     Channel,
     ChannelMember,
     Conversation,
-    UserConversationStatus,
-    Message,
-    UploadedFile,
-    db,
     Hashtag,
+    Message,
     MessageHashtag,
+    UploadedFile,
+    User,
+    UserConversationStatus,
+    Workspace,
+    WorkspaceMember,
+    db,
 )
 
 admin_bp = Blueprint("admin", __name__, template_folder="../templates/admin")
@@ -206,7 +197,7 @@ def edit_user(user_id):
                 workspace_member.save()
             flash(f"User '{user.username}' updated successfully.", "success")
         except IntegrityError:
-            flash(f"Username or email already exists.", "danger")
+            flash("Username or email already exists.", "danger")
             # Don't redirect, so the admin can fix the error
             return render_template(
                 "edit_user.html", user=user, workspace_member=workspace_member
@@ -323,7 +314,7 @@ def edit_channel(channel_id):
             flash(f"Channel '#{channel.name}' updated successfully.", "success")
             return redirect(url_for("admin.list_channels"))
         except IntegrityError:
-            flash(f"A channel with that name already exists.", "danger")
+            flash("A channel with that name already exists.", "danger")
             return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
     # GET Request

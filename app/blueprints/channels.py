@@ -3,15 +3,7 @@ import datetime
 import json
 import re
 
-from flask import (
-    Blueprint,
-    g,
-    make_response,
-    redirect,
-    render_template,
-    request,
-    url_for,
-)
+from flask import Blueprint, g, make_response, render_template, request, url_for
 from peewee import JOIN, IntegrityError
 
 from app.chat_manager import chat_manager
@@ -23,10 +15,8 @@ from app.models import (
     Mention,
     Message,
     MessageHashtag,
-    Reaction,
     User,
     UserConversationStatus,
-    Workspace,
     WorkspaceMember,
     db,
 )
@@ -884,7 +874,7 @@ def get_browse_channels_modal():
             attr="created_by",
         )
         .where(
-            (Channel.is_private == False)
+            (Channel.is_private == False)  # noqa
             & (Channel.id.not_in(member_of_channels_subquery))
         )
         .order_by(Channel.name)
@@ -925,7 +915,7 @@ def search_channels():
             attr="created_by",
         )
         .where(
-            (Channel.is_private == False)
+            (Channel.is_private == False)  # noqa
             & (Channel.id.not_in(member_of_channels_subquery))
         )
     )

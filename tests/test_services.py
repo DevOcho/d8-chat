@@ -1,23 +1,21 @@
 # tests/test_services.py
 
-import io
-import os
 import pytest
-from app.models import (
-    User,
-    Conversation,
-    Channel,
-    ChannelMember,
-    WorkspaceMember,
-    UploadedFile,
-    Message,
-    MessageAttachment,
-)
-from app.services import minio_service, chat_service
 from minio.error import S3Error
 
+from app.models import (
+    Channel,
+    ChannelMember,
+    Conversation,
+    Message,
+    MessageAttachment,
+    UploadedFile,
+    User,
+    WorkspaceMember,
+)
+from app.services import chat_service, minio_service
+
 # We use this to simulate a file upload in our tests
-from werkzeug.datastructures import FileStorage
 
 
 @pytest.fixture

@@ -1,13 +1,7 @@
 import pytest
-from app.models import (
-    User,
-    Channel,
-    ChannelMember,
-    WorkspaceMember,
-    Conversation,
-    Message,
-)
+
 from app.chat_manager import chat_manager
+from app.models import Channel, ChannelMember, Conversation, User, WorkspaceMember
 
 
 @pytest.fixture

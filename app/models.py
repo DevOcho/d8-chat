@@ -6,24 +6,22 @@ import os
 import bcrypt
 from flask_login import UserMixin
 from peewee import (
-    fn,
+    SQL,
+    AutoField,
+    BigIntegerField,
+    BooleanField,
+    CharField,
+    CompositeKey,
+    DateTimeField,
+    DeferredForeignKey,
+    ForeignKeyField,
+    IdentityField,
     Model,
     Proxy,
     TextField,
-    CharField,
-    BooleanField,
-    DateTimeField,
-    ForeignKeyField,
-    BigIntegerField,
-    IdentityField,
-    AutoField,
-    SQL,
-    CompositeKey,
-    DeferredForeignKey,
+    fn,
 )
 from playhouse.db_url import connect
-from urllib.parse import urlparse
-from config import Config
 
 from app.services import minio_service
 

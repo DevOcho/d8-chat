@@ -1,19 +1,9 @@
 import datetime
 
 from authlib.integrations.flask_client import OAuth
-from flask import url_for, session, redirect, render_template, current_app
-from .models import (
-    User,
-    db,
-    Workspace,
-    Channel,
-    ChannelMember,
-    WorkspaceMember,
-    Conversation,
-    UserConversationStatus,
-    Mention,
-)
-from .chat_manager import chat_manager
+from flask import current_app, redirect, session, url_for
+
+from .models import Channel, ChannelMember, User, Workspace, WorkspaceMember, db
 
 oauth = OAuth()
 

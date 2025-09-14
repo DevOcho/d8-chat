@@ -2,49 +2,44 @@
 
 import datetime
 import functools
-from functools import reduce
 import json
-import markdown
-import operator
 import os
 import re
 import secrets
 import uuid
 
+import markdown
 from flask import (
     Blueprint,
-    render_template,
-    request,
-    redirect,
-    url_for,
-    session,
+    current_app,
     g,
     make_response,
-    current_app,
-    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
 )
-from flask_login import login_user, logout_user, current_user
+from flask_login import login_user, logout_user
 from peewee import fn
 from werkzeug.utils import secure_filename
 
-from .models import (
-    User,
-    Channel,
-    ChannelMember,
-    Message,
-    Conversation,
-    Workspace,
-    WorkspaceMember,
-    db,
-    UserConversationStatus,
-    Mention,
-    Reaction,
-    UploadedFile,
-)
-from .sso import oauth  # Import the oauth object
 from . import sock
 from .chat_manager import chat_manager
+from .models import (
+    Channel,
+    ChannelMember,
+    Conversation,
+    Mention,
+    Message,
+    Reaction,
+    UploadedFile,
+    User,
+    UserConversationStatus,
+    db,
+)
 from .services import chat_service, minio_service
+from .sso import oauth  # Import the oauth object
 
 # Main blueprint for general app routes
 main_bp = Blueprint("main", __name__)
@@ -223,54 +218,6 @@ def check_and_get_read_state_oob(current_user, just_read_conversation):
         return render_template("partials/unreads_link_read.html")
 
     return ""
-
-
-def get_attachments_for_messages(messages):
-    """
-    Efficiently fetches and groups attachment data for a given list of messages.
-
-    Args:
-        messages: A list of Peewee Message model instances.
-
-    Returns:
-        A dictionary mapping message IDs to a list of their attachments.
-        Example: { 123: [ {'url': '...', 'filename': '...'}, ... ] }
-    """
-    attachments_map = {}
-    if not messages:
-        return attachments_map
-
-    # We need these models for the query
-    from .models import MessageAttachment, UploadedFile
-
-    message_ids = [m.id for m in messages]
-
-    # Query the MessageAttachment table directly and join the file data to it.
-    # This is a more direct and reliable way to get the data.
-    all_links = (
-        MessageAttachment.select(MessageAttachment, UploadedFile)
-        .join(UploadedFile)
-        .where(MessageAttachment.message_id.in_(message_ids))
-    )
-
-    for link in all_links:
-        # `link.message_id` is the ID of the message this attachment belongs to.
-        mid = link.message_id
-        # `link.attachment` is the full UploadedFile object.
-        att = link.attachment
-
-        if mid not in attachments_map:
-            attachments_map[mid] = []
-
-        attachments_map[mid].append(
-            {
-                "url": att.url,
-                "filename": att.original_filename,
-                "mime_type": att.mime_type,
-            }
-        )
-
-    return attachments_map
 
 
 # --- Routes ---
@@ -550,7 +497,7 @@ def update_message(message_id):
 
         with db.atomic():
             # First, delete all old hashtag links for this message
-            from app.models import MessageHashtag, Hashtag, Channel
+            from app.models import Channel, Hashtag, MessageHashtag
 
             MessageHashtag.delete().where(MessageHashtag.message == message).execute()
 

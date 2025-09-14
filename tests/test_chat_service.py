@@ -1,15 +1,16 @@
 import pytest
-from app.services import chat_service
+
+from app.chat_manager import chat_manager
 from app.models import (
-    User,
     Channel,
     ChannelMember,
-    WorkspaceMember,
     Conversation,
-    Message,
     Mention,
+    Message,
+    User,
+    WorkspaceMember,
 )
-from app.chat_manager import chat_manager
+from app.services import chat_service
 
 
 @pytest.fixture
@@ -109,7 +110,6 @@ def test_handle_new_message_creates_here_mentions_for_online_users(
     """
     sender = setup_channel_and_users["sender"]
     user2 = setup_channel_and_users["user2"]
-    user3 = setup_channel_and_users["user3"]  # This user will be "offline"
     conversation = setup_channel_and_users["conversation"]
 
     # Mock the chat_manager to simulate only sender and user2 being online

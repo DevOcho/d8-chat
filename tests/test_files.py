@@ -1,11 +1,10 @@
 # tests/test_files.py
 
 import io
-import pytest
+
 from app.models import UploadedFile
 
 # We use this to simulate a file upload in our tests
-from werkzeug.datastructures import FileStorage
 
 
 def test_upload_file_success(logged_in_client, mocker):
@@ -109,13 +108,7 @@ def test_upload_minio_failure(logged_in_client, mocker):
     WHEN the file is valid but the Minio service fails to save it
     THEN the server should return a 500 Internal Server Error.
     """
-    # Arrange:
-    # 1. Mock the Minio service to simulate a failure by returning `False`.
-    minio_mock = mocker.patch(
-        "app.blueprints.files.minio_service.upload_file", return_value=False
-    )
-
-    # 2. Prepare a valid file.
+    # Prepare a valid file.
     file_data = {"file": (io.BytesIO(b"this is a test file"), "test.pdf")}
 
     # Act & Assert:
