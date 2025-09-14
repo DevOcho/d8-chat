@@ -25,6 +25,8 @@ from ..models import (
     Message,
     UploadedFile,
     db,
+    Hashtag,
+    MessageHashtag,
 )
 
 admin_bp = Blueprint("admin", __name__, template_folder="../templates/admin")
@@ -57,7 +59,9 @@ def dashboard():
     total_messages = Message.select().count()
     total_files = UploadedFile.select().count()
     total_channels = Channel.select().count()
-    total_storage_bytes = UploadedFile.select(fn.SUM(UploadedFile.file_size_bytes)).scalar() or 0
+    total_storage_bytes = (
+        UploadedFile.select(fn.SUM(UploadedFile.file_size_bytes)).scalar() or 0
+    )
 
     # Calculate average messages per second over the last 7 days
     seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
@@ -74,15 +78,14 @@ def dashboard():
     # --- Prepare data for the messages per day chart ---
     # 1. Create a dictionary to hold counts for the last 7 days, initialized to 0.
     today = datetime.date.today()
-    chart_data = {
-        (today - datetime.timedelta(days=i)): 0 for i in range(7)
-    }
+    chart_data = {(today - datetime.timedelta(days=i)): 0 for i in range(7)}
 
     # 2. Query the database to get message counts grouped by day.
     # This works for both SQLite and PostgreSQL.
     query = (
         Message.select(
-            fn.DATE(Message.created_at).alias("date"), fn.COUNT(Message.id).alias("count")
+            fn.DATE(Message.created_at).alias("date"),
+            fn.COUNT(Message.id).alias("count"),
         )
         .where(Message.created_at >= seven_days_ago)
         .group_by(fn.DATE(Message.created_at))
@@ -110,7 +113,6 @@ def dashboard():
         chart_labels=chart_labels,
         chart_values=chart_values,
     )
-
 
 
 @admin_bp.route("/users")
@@ -213,10 +215,13 @@ def edit_user(user_id):
         return redirect(url_for("admin.list_users"))
 
     # For a GET request, just show the form
-    return render_template("edit_user.html", user=user, workspace_member=workspace_member)
+    return render_template(
+        "edit_user.html", user=user, workspace_member=workspace_member
+    )
 
 
 # --- Channel Management Routes ---
+
 
 @admin_bp.route("/channels")
 @admin_required
@@ -225,12 +230,14 @@ def list_channels():
     # This query joins Channel with ChannelMember and groups by the channel
     # to calculate the number of members for each one.
     channels_with_counts = (
-        Channel.select(
-            Channel, User, fn.COUNT(ChannelMember.id).alias("member_count")
-        )
+        Channel.select(Channel, User, fn.COUNT(ChannelMember.id).alias("member_count"))
         .join(User, on=(Channel.created_by == User.id), join_type=JOIN.LEFT_OUTER)
         .switch(Channel)
-        .join(ChannelMember, on=(Channel.id == ChannelMember.channel), join_type=JOIN.LEFT_OUTER)
+        .join(
+            ChannelMember,
+            on=(Channel.id == ChannelMember.channel),
+            join_type=JOIN.LEFT_OUTER,
+        )
         .group_by(Channel.id, User.id)
         .order_by(Channel.name)
     )
@@ -243,7 +250,7 @@ def create_channel():
     """Handles the creation of a new channel from the admin panel."""
     if request.method == "POST":
         name = request.form.get("name", "").strip().lower()
-        name = re.sub(r"[^a-zA-Z0-9_-]", "", name) # Sanitize the name
+        name = re.sub(r"[^a-zA-Z0-9_-]", "", name)  # Sanitize the name
         topic = request.form.get("topic", "").strip()
         description = request.form.get("description", "").strip()
         is_private = request.form.get("is_private") == "on"
@@ -256,15 +263,25 @@ def create_channel():
             return redirect(url_for("admin.create_channel"))
 
         try:
-            workspace = Workspace.get(id=1) # Assuming a single workspace
-            Channel.create(
-                workspace=workspace,
-                name=name,
-                topic=topic,
-                description=description,
-                is_private=is_private,
-                created_by=g.user,
-            )
+            with db.atomic():
+                workspace = Workspace.get(id=1)  # Assuming a single workspace
+                Channel.create(
+                    workspace=workspace,
+                    name=name,
+                    topic=topic,
+                    description=description,
+                    is_private=is_private,
+                    created_by=g.user,
+                )
+
+                # Clean up any existing hashtags that match the new channel name.
+                hashtag_to_delete = Hashtag.get_or_none(name=name)
+                if hashtag_to_delete:
+                    MessageHashtag.delete().where(
+                        MessageHashtag.hashtag == hashtag_to_delete
+                    ).execute()
+                    hashtag_to_delete.delete_instance()
+
             flash(f"Channel '#{name}' created successfully.", "success")
             return redirect(url_for("admin.list_channels"))
         except IntegrityError:
@@ -290,10 +307,13 @@ def edit_channel(channel_id):
             name = request.form.get("name", "").strip().lower()
             name = re.sub(r"[^a-zA-Z0-9_-]", "", name)
             if not name or len(name) < 3:
-                 flash("Name must be at least 3 characters and contain only letters, numbers, underscores, or hyphens.", "danger")
-                 return redirect(url_for("admin.edit_channel", channel_id=channel_id))
+                flash(
+                    "Name must be at least 3 characters and contain only letters, numbers, underscores, or hyphens.",
+                    "danger",
+                )
+                return redirect(url_for("admin.edit_channel", channel_id=channel_id))
             channel.name = name
-        
+
         channel.topic = request.form.get("topic", "").strip()
         channel.description = request.form.get("description", "").strip()
         channel.is_private = request.form.get("is_private") == "on"
@@ -352,17 +372,23 @@ def admin_add_channel_member(channel_id):
         return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
     # Check if the user is already a member
-    is_member = ChannelMember.select().where(
-        (ChannelMember.channel == channel) & (ChannelMember.user == user_id_to_add)
-    ).exists()
+    is_member = (
+        ChannelMember.select()
+        .where(
+            (ChannelMember.channel == channel) & (ChannelMember.user == user_id_to_add)
+        )
+        .exists()
+    )
 
     if not is_member:
         # Also ensure we create the conversation status so the user sees the channel in the app
         conversation, _ = Conversation.get_or_create(
             conversation_id_str=f"channel_{channel.id}", defaults={"type": "channel"}
         )
-        UserConversationStatus.get_or_create(user_id=user_id_to_add, conversation=conversation)
-        
+        UserConversationStatus.get_or_create(
+            user_id=user_id_to_add, conversation=conversation
+        )
+
         ChannelMember.create(user=user_id_to_add, channel=channel)
         flash("User added to channel successfully.", "success")
     else:
@@ -371,7 +397,9 @@ def admin_add_channel_member(channel_id):
     return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
 
-@admin_bp.route("/channels/<int:channel_id>/members/<int:user_id>/remove", methods=["POST"])
+@admin_bp.route(
+    "/channels/<int:channel_id>/members/<int:user_id>/remove", methods=["POST"]
+)
 @admin_required
 def remove_channel_member(channel_id, user_id):
     """Removes a user from a channel."""
@@ -388,7 +416,9 @@ def remove_channel_member(channel_id, user_id):
         return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
     # Safety check: Prevent removing the last admin if there are other members
-    member_count = ChannelMember.select().where(ChannelMember.channel == channel).count()
+    member_count = (
+        ChannelMember.select().where(ChannelMember.channel == channel).count()
+    )
     if membership.role == "admin" and member_count > 1:
         admin_count = (
             ChannelMember.select()
@@ -396,7 +426,10 @@ def remove_channel_member(channel_id, user_id):
             .count()
         )
         if admin_count <= 1:
-            flash("You cannot remove the last admin from a channel with other members.", "danger")
+            flash(
+                "You cannot remove the last admin from a channel with other members.",
+                "danger",
+            )
             return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
     membership.delete_instance()
@@ -404,7 +437,9 @@ def remove_channel_member(channel_id, user_id):
     return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
 
-@admin_bp.route("/channels/<int:channel_id>/members/<int:user_id>/role", methods=["POST"])
+@admin_bp.route(
+    "/channels/<int:channel_id>/members/<int:user_id>/role", methods=["POST"]
+)
 @admin_required
 def update_member_role(channel_id, user_id):
     """Updates a user's role within a channel."""
@@ -423,14 +458,18 @@ def update_member_role(channel_id, user_id):
 
     # Safety check: Prevent demoting the last admin if other members exist
     if membership.role == "admin" and new_role == "member":
-        member_count = ChannelMember.select().where(ChannelMember.channel == channel).count()
+        member_count = (
+            ChannelMember.select().where(ChannelMember.channel == channel).count()
+        )
         admin_count = (
             ChannelMember.select()
             .where((ChannelMember.channel == channel) & (ChannelMember.role == "admin"))
             .count()
         )
         if admin_count <= 1 and member_count > 1:
-            flash("Cannot demote the last admin when other members are present.", "danger")
+            flash(
+                "Cannot demote the last admin when other members are present.", "danger"
+            )
             return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
     membership.role = new_role

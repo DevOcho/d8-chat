@@ -183,8 +183,10 @@ def create_app(config_class=Config):
                 )
                 return f'<a href="#" class="channel-link" hx-get="{channel_url}" hx-target="#chat-messages-container">#{channel_name}</a>'
             else:
-                # If not a valid channel, return the original text.
-                return match.group(0)
+                # This is not a real channel, so render it as a searchable hashtag.
+                # The search query will include the '#' character.
+                search_url = url_for("search.search", q=f"#{channel_name}")
+                return f'<a href="#" class="hashtag-link" hx-get="{search_url}" hx-target="#search-results-overlay" hx-swap="innerHTML">#{channel_name}</a>'
 
         content_with_channels = re.sub(
             channel_pattern, replace_channel_tag, content_preprocessed
@@ -224,7 +226,7 @@ def create_app(config_class=Config):
         ]
         allowed_attrs = {
             "*": ["class"],
-            "a": ["href", "rel", "target", "hx-get", "hx-target"],
+            "a": ["href", "rel", "target", "hx-get", "hx-target", "hx-swap"],
         }
 
         # --- Pass 1: Extract and process code blocks separately ---

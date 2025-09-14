@@ -5,19 +5,21 @@ import secrets
 
 from app import create_app
 from app.models import (
-    db,
-    User,
-    Workspace,
-    WorkspaceMember,
     Channel,
     ChannelMember,
-    Message,
     Conversation,
-    UploadedFile,
-    UserConversationStatus,
+    db,
+    Hashtag,
     Mention,
+    Message,
     MessageAttachment,
+    MessageHashtag,
     Reaction,
+    UploadedFile,
+    User,
+    UserConversationStatus,
+    Workspace,
+    WorkspaceMember,
 )
 from config import Config
 from playhouse.db_url import connect
@@ -36,6 +38,8 @@ ALL_MODELS = [
     MessageAttachment,
     Reaction,
     UploadedFile,
+    Hashtag,
+    MessageHashtag,
 ]
 
 

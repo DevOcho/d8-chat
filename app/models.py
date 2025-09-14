@@ -204,6 +204,23 @@ class Mention(BaseModel):
         primary_key = CompositeKey("user", "message")
 
 
+class Hashtag(BaseModel):
+    """Stores a unique hashtag name."""
+
+    id = PrimaryKeyField()
+    name = CharField(unique=True, index=True)  # e.g., "devocho-life"
+
+
+class MessageHashtag(BaseModel):
+    """A through model to link Messages and Hashtags (many-to-many)."""
+
+    message = ForeignKeyField(Message, backref="hashtag_links", on_delete="CASCADE")
+    hashtag = ForeignKeyField(Hashtag, backref="message_links", on_delete="CASCADE")
+
+    class Meta:
+        primary_key = CompositeKey("message", "hashtag")
+
+
 class UserConversationStatus(BaseModel):
     user = ForeignKeyField(User, backref="conversation_statuses")
     conversation = ForeignKeyField(Conversation, backref="user_statuses")

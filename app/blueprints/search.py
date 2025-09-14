@@ -8,6 +8,8 @@ from ..models import (
     Channel,
     ChannelMember,
     Conversation,
+    Hashtag,
+    MessageHashtag,
     UserConversationStatus,
 )
 from ..routes import login_required
@@ -110,41 +112,64 @@ def search():
 
     accessible_convs_query = _get_accessible_conversations(g.user)
 
-    message_query = (
-        Message.select(Message, User, Conversation)
-        .join(User)
-        .switch(Message)
-        .join(Conversation)  # Eager load the conversation
-        .where(
-            Message.content.ilike(f"%{query}%"),
-            Message.conversation.in_(accessible_convs_query),
+    # Check if this is a hashtag search
+    if query.startswith("#"):
+        hashtag_name = query[1:]
+        message_query = (
+            Message.select(Message, User, Conversation)
+            .join(User)
+            .switch(Message)
+            .join(Conversation)
+            .switch(Message)
+            .join(MessageHashtag)
+            .join(Hashtag)
+            .where(
+                (Hashtag.name == hashtag_name)
+                & (Message.conversation.in_(accessible_convs_query))
+            )
+            .order_by(Message.created_at.desc())
         )
-        .order_by(Message.created_at.desc())
-    )
+        # For hashtag searches, we don't need to search channels or users
+        channel_count = 0
+        user_count = 0
+    else:
+        # This is the original logic for general text search
+        message_query = (
+            Message.select(Message, User, Conversation)
+            .join(User)
+            .switch(Message)
+            .join(Conversation)
+            .where(
+                Message.content.ilike(f"%{query}%"),
+                Message.conversation.in_(accessible_convs_query),
+            )
+            .order_by(Message.created_at.desc())
+        )
+        user_private_channels_subquery = (
+            Channel.select(Channel.id)
+            .join(ChannelMember)
+            .where((ChannelMember.user == g.user) & (Channel.is_private == True))
+        )
+        channel_query = Channel.select().where(
+            (Channel.name.ilike(f"%{query}%"))
+            & (
+                (Channel.is_private == False)
+                | (Channel.id.in_(user_private_channels_subquery))
+            )
+        )
+        channel_count = channel_query.count()
+
+        user_query = User.select().where(
+            (User.username.ilike(f"%{query}%"))
+            | (User.display_name.ilike(f"%{query}%"))
+        )
+        user_count = user_query.count()
+
     message_count = message_query.count()
     message_results = list(message_query.limit(SEARCH_PAGE_SIZE))
 
     # --- Get context for the message results ---
     message_context = _get_message_context(message_results, g.user)
-
-    user_private_channels_subquery = (
-        Channel.select(Channel.id)
-        .join(ChannelMember)
-        .where((ChannelMember.user == g.user) & (Channel.is_private == True))
-    )
-    channel_query = Channel.select().where(
-        (Channel.name.ilike(f"%{query}%"))
-        & (
-            (Channel.is_private == False)
-            | (Channel.id.in_(user_private_channels_subquery))
-        )
-    )
-    channel_count = channel_query.count()
-
-    user_query = User.select().where(
-        (User.username.ilike(f"%{query}%")) | (User.display_name.ilike(f"%{query}%"))
-    )
-    user_count = user_query.count()
 
     return render_template(
         "partials/search_results.html",
@@ -168,17 +193,35 @@ def search_messages_paginated():
 
     accessible_convs_query = _get_accessible_conversations(g.user)
 
-    message_query = (
-        Message.select(Message, User, Conversation)
-        .join(User)
-        .switch(Message)
-        .join(Conversation)  # Eager load the conversation
-        .where(
-            Message.content.ilike(f"%{query}%"),
-            Message.conversation.in_(accessible_convs_query),
+    if query.startswith("#"):
+        hashtag_name = query[1:]
+        message_query = (
+            Message.select(Message, User, Conversation)
+            .join(User)
+            .switch(Message)
+            .join(Conversation)
+            .switch(Message)
+            .join(MessageHashtag)
+            .join(Hashtag)
+            .where(
+                (Hashtag.name == hashtag_name)
+                & (Message.conversation.in_(accessible_convs_query))
+            )
+            .order_by(Message.created_at.desc())
         )
-        .order_by(Message.created_at.desc())
-    )
+    else:
+        message_query = (
+            Message.select(Message, User, Conversation)
+            .join(User)
+            .switch(Message)
+            .join(Conversation)
+            .where(
+                Message.content.ilike(f"%{query}%"),
+                Message.conversation.in_(accessible_convs_query),
+            )
+            .order_by(Message.created_at.desc())
+        )
+
     total_count = message_query.count()
     messages = list(message_query.paginate(page, SEARCH_PAGE_SIZE))
     has_more = total_count > (page * SEARCH_PAGE_SIZE)

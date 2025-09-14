@@ -547,10 +547,32 @@ def update_message(message_id):
 
     new_content = request.form.get("content")
     if new_content:
-        # Update the message in the database
-        message.content = new_content
-        message.is_edited = True
-        message.save()
+
+        with db.atomic():
+            # First, delete all old hashtag links for this message
+            from app.models import MessageHashtag, Hashtag, Channel
+
+            MessageHashtag.delete().where(MessageHashtag.message == message).execute()
+
+            # Update the message content in the database
+            message.content = new_content
+            message.is_edited = True
+            message.save()
+
+            # Now, parse and add the new hashtags
+            hashtag_pattern = r"(?<!#)#([a-zA-Z0-9_-]+)"
+            hashtag_names = set(re.findall(hashtag_pattern, new_content))
+            if hashtag_names:
+                existing_channels = {
+                    c.name
+                    for c in Channel.select().where(
+                        Channel.name.in_(list(hashtag_names))
+                    )
+                }
+                valid_hashtags = hashtag_names - existing_channels
+                for tag_name in valid_hashtags:
+                    hashtag, _ = Hashtag.get_or_create(name=tag_name)
+                    MessageHashtag.create(message=message, hashtag=hashtag)
 
         # Get the conversation ID string for the broadcast
         conv_id_str = message.conversation.conversation_id_str

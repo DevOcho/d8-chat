@@ -20,6 +20,8 @@ from app.models import (
     UserConversationStatus,
     Mention,
     Reaction,
+    Hashtag,
+    MessageHashtag,
 )
 from app.routes import (
     login_required,
@@ -610,6 +612,16 @@ def create_channel():
                 conversation_id_str=f"channel_{new_channel.id}",
                 defaults={"type": "channel"},
             )
+
+            # Clean up any existing hashtags that match the new channel name.
+            hashtag_to_delete = Hashtag.get_or_none(name=channel_name)
+            if hashtag_to_delete:
+                # First, delete all links between messages and this hashtag.
+                MessageHashtag.delete().where(
+                    MessageHashtag.hashtag == hashtag_to_delete
+                ).execute()
+                # Then, delete the hashtag itself.
+                hashtag_to_delete.delete_instance()
 
     except IntegrityError:
         error = f"A channel named '#{channel_name}' already exists."

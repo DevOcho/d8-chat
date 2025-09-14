@@ -9,6 +9,8 @@ from app.models import (
     ChannelMember,
     Conversation,
     MessageAttachment,
+    Hashtag,
+    MessageHashtag,
 )
 from app.chat_manager import chat_manager
 import re
@@ -24,7 +26,7 @@ def handle_new_message(
     quoted_message_id: int = None,
 ):
     """
-    Handles the business logic for creating a new message and its associated mentions.
+    Handles the business logic for creating a new message and its associated mentions and hashtags.
 
     Args:
         sender: The User object of the message sender.
@@ -32,6 +34,7 @@ def handle_new_message(
         chat_text: The raw content of the message.
         parent_id: The ID of the parent message, if it's a reply.
         attachment_file_ids: A comma-separated string of UploadedFile IDs.
+        quoted_message_id: The ID of a message being quoted.
 
     Returns:
         The newly created Message object.
@@ -63,7 +66,7 @@ def handle_new_message(
             for file_id in file_ids:
                 MessageAttachment.create(message=new_message, attachment=file_id)
 
-        # --- Mention handling logic remains the same ---
+        # --- Mention handling logic ---
         # 1. Handle regular @username mentions
         mentioned_usernames = set(re.findall(r"@(\w+)", chat_text))
         mentioned_usernames.discard("here")
@@ -113,5 +116,24 @@ def handle_new_message(
             for user_to_mention in target_users_for_mention:
                 if user_to_mention.id != sender.id:
                     Mention.get_or_create(user=user_to_mention, message=new_message)
+
+        # --- Hashtag handling logic ---
+        # 1. Find all potential hashtags in the message content.
+        hashtag_pattern = r"(?<!#)#([a-zA-Z0-9_-]+)"
+        hashtag_names = set(re.findall(hashtag_pattern, chat_text))
+
+        # 2. Loop through the found tags, get or create them, and link to the message.
+        if hashtag_names:
+            # Find which of these are actual channels to exclude them
+            existing_channels = {
+                c.name
+                for c in Channel.select().where(Channel.name.in_(list(hashtag_names)))
+            }
+
+            valid_hashtags = hashtag_names - existing_channels
+
+            for tag_name in valid_hashtags:
+                hashtag, _ = Hashtag.get_or_create(name=tag_name)
+                MessageHashtag.create(message=new_message, hashtag=hashtag)
 
     return new_message
