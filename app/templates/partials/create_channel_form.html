@@ -1,6 +1,8 @@
-<!-- app/templates/partials/create_channel_form.html -->
 <!-- This form replaces itself on submission. On success, the parent modal is closed. -->
-<form hx-post="{{ url_for('channels.create_channel') }}">
+<form id="create-channel-form"
+      hx-post="{{ url_for('channels.create_channel') }}"
+      hx-target="this"
+      hx-swap="outerHTML">
     <div class="modal-header">
         <h5 class="modal-title">Create a New Channel</h5>
         <button type="button"

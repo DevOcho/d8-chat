@@ -965,11 +965,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.body.addEventListener('htmx:responseError', function(evt) {
-        if (evt.detail.target.tagName === 'MAIN' && evt.detail.target.hasAttribute('ws-connect')) return;
+        // We only want to show a toast for unexpected errors, not for things
+        // like the websocket connection, which has its own handler.
+        if (evt.detail.target.tagName === 'MAIN' && evt.detail.target.hasAttribute('ws-connect')) {
+            return;
+        }
+
+        // If the server sent back an error with a message, show it in the toast.
         if (evt.detail.xhr.responseText) {
             ToastManager.show('An Error Occurred', evt.detail.xhr.responseText, 'danger');
         }
     });
+
     document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
         const targetSelector = evt.detail.target;
         if (!targetSelector) {

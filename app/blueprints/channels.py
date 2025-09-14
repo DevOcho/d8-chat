@@ -1,40 +1,42 @@
 # app/blueprints/channels.py
+import datetime
+import json
+import re
+
 from flask import (
     Blueprint,
-    render_template,
-    request,
-    redirect,
-    url_for,
     g,
     make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
 )
+from peewee import JOIN, IntegrityError
+
+from app.chat_manager import chat_manager
 from app.models import (
-    User,
     Channel,
     ChannelMember,
-    Message,
     Conversation,
+    Hashtag,
+    Mention,
+    Message,
+    MessageHashtag,
+    Reaction,
+    User,
+    UserConversationStatus,
     Workspace,
     WorkspaceMember,
     db,
-    UserConversationStatus,
-    Mention,
-    Reaction,
-    Hashtag,
-    MessageHashtag,
 )
 from app.routes import (
-    login_required,
     PAGE_SIZE,
-    get_reactions_for_messages,
-    get_attachments_for_messages,
     check_and_get_read_state_oob,
+    get_attachments_for_messages,
+    get_reactions_for_messages,
+    login_required,
 )
-from app.chat_manager import chat_manager
-import json
-from peewee import IntegrityError, JOIN
-import re
-import datetime
 
 channels_bp = Blueprint("channels", __name__)
 
@@ -576,14 +578,11 @@ def create_channel():
 
     if not channel_name or len(channel_name) < 3:
         error = "Name must be at least 3 characters long and contain only letters, numbers, underscores, or hyphens."
-        return (
-            render_template(
+        return render_template(
                 "partials/create_channel_form.html",
                 error=error,
                 name=channel_name,
                 is_private=is_private,
-            ),
-            400,
         )
 
     workspace_member = WorkspaceMember.get_or_none(user=g.user)
@@ -625,14 +624,11 @@ def create_channel():
 
     except IntegrityError:
         error = f"A channel named '#{channel_name}' already exists."
-        return (
-            render_template(
+        return render_template(
                 "partials/create_channel_form.html",
                 error=error,
                 name=channel_name,
                 is_private=is_private,
-            ),
-            409,
         )
 
     new_sidebar_item_html = render_template(

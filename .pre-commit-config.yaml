@@ -1,29 +1,40 @@
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
 repos:
--  repo: https://github.com/pre-commit/pre-commit-hooks
-   rev: v3.2.0
-   hooks:
-      - id: check-added-large-files
-      - id: check-ast
-      - id: check-yaml
-      - id: check-merge-conflict
-      - id: debug-statements
-      - id: end-of-file-fixer
-      - id: mixed-line-ending
-      - id: trailing-whitespace
-      - id: check-executables-have-shebangs
-      - id: check-symlinks
-      - id: requirements-txt-fixer
-   # djlint
--  repo: https://github.com/djlint/djLint
-   rev: v1.36.4
-   hooks:
-   -  id: djlint-reformat-jinja
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v3.2.0
+  hooks:
+     - id: check-added-large-files
+     - id: check-ast
+     - id: check-yaml
+     - id: check-merge-conflict
+     - id: debug-statements
+     - id: end-of-file-fixer
+     - id: mixed-line-ending
+     - id: trailing-whitespace
+     - id: check-executables-have-shebangs
+     - id: check-symlinks
+     - id: requirements-txt-fixer
+# djlint
+- repo: https://github.com/djlint/djLint
+  rev: v1.36.4
+  hooks:
+    - id: djlint-reformat-jinja
       files: "\\.html"
       types_or: ["html"]
-   # black
--  repo: https://github.com/psf/black
-   rev: 22.10.0
-   hooks:
-   -   id: black
+# Sort the includes to be alphabetical
+- repo: https://github.com/pycqa/isort
+  rev: 5.13.2
+  hooks:
+    - id: isort
+      name: isort (python)
+      args: ["--profile", "black"]
+#- repo: https://github.com/astral-sh/ruff-pre-commit
+#  # Ruff version.
+#  rev: v0.13.0
+#  hooks:
+#    # Run the linter.
+#    - id: ruff-check
+#      args: [ --fix ]
+#    # Run the formatter.
+#    - id: ruff-format
