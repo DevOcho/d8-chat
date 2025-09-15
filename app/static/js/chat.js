@@ -969,6 +969,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // --- Double-click to Edit Logic ---
+    document.body.addEventListener('dblclick', function(e) {
+        // Find the message container that was double-clicked.
+        const messageContainer = e.target.closest('.message-container');
+        if (!messageContainer) {
+            return; // Exit if the click wasn't on or inside a message.
+        }
+
+        // Get the author's ID from the message's data attribute.
+        const messageAuthorId = messageContainer.dataset.userId;
+        // Get the current logged-in user's ID.
+        const mainContent = document.querySelector('main.main-content');
+        const currentUserId = mainContent ? mainContent.dataset.currentUserId : null;
+
+        // Only proceed if the current user is the author of the message.
+        if (currentUserId && messageAuthorId === currentUserId) {
+            // Find the specific edit button for this message within its toolbar.
+            const editButton = messageContainer.querySelector('.message-toolbar button[data-action="edit"]');
+
+            if (editButton) {
+                // Prevent the default double-click behavior (which is to select text).
+                e.preventDefault();
+                // Programmatically trigger the HTMX 'click' event on the edit button.
+                // This reuses all our existing backend logic for loading the editor.
+                htmx.trigger(editButton, 'click');
+            }
+        }
+    });
+
     document.body.addEventListener('htmx:configRequest', function(evt) {
         const trigger = evt.detail.elt;
         if (!trigger) return;

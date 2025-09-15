@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% block html_theme %}data-bs-theme="{{ g.user.theme }}"{% endblock %}
-
 {% block body_class %}admin-page{% endblock %}
-
 {% block layout %}
     <div class="admin-layout">
         <nav class="admin-sidebar">
@@ -10,34 +8,41 @@
             <ul class="nav flex-column nav-pills">
                 <li class="nav-item mb-2">
                     <a class="nav-link {% if request.endpoint == 'admin.dashboard' %}active text-white{% endif %}"
+                       hx-get="{{ url_for('admin.dashboard') }}"
+                       hx-target="#admin-content"
                        href="{{ url_for('admin.dashboard') }}">
                         <i class="bi bi-grid-1x2-fill me-2"></i>Dashboard
                     </a>
                 </li>
                 <li class="nav-item mb-2">
                     <a class="nav-link {% if request.endpoint in ['admin.list_users', 'admin.edit_user', 'admin.create_user_form', 'admin.create_user'] %}active text-white{% endif %}"
+                       hx-get="{{ url_for('admin.list_users') }}"
+                       hx-target="#admin-content"
                        href="{{ url_for('admin.list_users') }}">
                         <i class="bi bi-people-fill me-2"></i>User Management
                     </a>
                 </li>
                 <li class="nav-item mb-2">
                     <a class="nav-link {% if request.endpoint in ['admin.list_channels'] %}active text-white{% endif %}"
+                       hx-get="{{ url_for('admin.list_channels') }}"
+                       hx-target="#admin-content"
                        href="{{ url_for('admin.list_channels') }}">
                         <i class="bi bi-hash me-2"></i>Channel Management
                     </a>
                 </li>
             </ul>
             <hr>
-            <a href="{{ url_for('main.chat_interface') }}" class="btn btn-outline-secondary w-100 mt-auto" target="_blank">
+            <a href="{{ url_for('main.chat_interface') }}"
+               class="btn btn-outline-secondary w-100 mt-auto"
+               target="_blank">
                 Return to App <i class="bi bi-box-arrow-up-right"></i>
             </a>
         </nav>
-        <main class="admin-main-content">
+        <main class="admin-main-content" id="admin-content">
             {% block content %}{% endblock %}
         </main>
     </div>
 {% endblock layout %}
-
 {% block scripts %}
     {% block admin_scripts %}{% endblock %}
 {% endblock %}

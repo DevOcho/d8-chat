@@ -10,8 +10,6 @@ We need to be able to upload files.
 
 We need a way to search and add gifs
 
-Need to scale images that are uploaded to make them not crazy big.  Especially for avatars.
-
 Need a data retention policy that auto deletes things over a certain age and cleans up the database and minio
 
 We need to update the administration section with HTMX and set it up to handle more users.
@@ -26,13 +24,9 @@ If the server disconnects, it will reconnect for users at different times.  Mess
 
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
-I'd like to detect passwords in messages and auto-redact them. (and give the user a toaster or some message that tells them they can send a password if they wrap it in a tag like <password>asdf</password>)
-
 ========
 
-Robert wants double click reply.  Where you double click on a message and you can reply to it.
-
-UX Complaint: Profile panel opens on the other side of the screen.
+I'd like to detect passwords in messages and auto-redact them. (and give the user a toaster or some message that tells them they can send a password if they wrap it in a tag like <password>asdf</password>)
 
 We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
 

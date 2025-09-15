@@ -1,0 +1,60 @@
+<h1>Create a New User</h1>
+<!-- Add this block to display flash messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }} mt-3" role="alert">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+<form action="{{ url_for('admin.create_user') }}"
+      method="POST"
+      class="mt-4"
+      hx-post="{{ url_for('admin.create_user') }}"
+      hx-target="#admin-content">
+    <!-- Username -->
+    <div class="mb-3">
+        <label for="username" class="form-label">Username</label>
+        <input type="text"
+               class="form-control"
+               id="username"
+               name="username"
+               required>
+    </div>
+    <!-- Email -->
+    <div class="mb-3">
+        <label for="email" class="form-label">Email address</label>
+        <input type="email" class="form-control" id="email" name="email" required>
+    </div>
+    <!-- Display Name -->
+    <div class="mb-3">
+        <label for="display_name" class="form-label">Display Name</label>
+        <input type="text"
+               class="form-control"
+               id="display_name"
+               name="display_name">
+        <div class="form-text">The user's full name, which will be displayed in the chat. Optional.</div>
+    </div>
+    <!-- Password Field -->
+    <div class="mb-3">
+        <label for="password" class="form-label">Password</label>
+        <input type="password"
+               class="form-control"
+               id="password"
+               name="password"
+               required>
+    </div>
+    <!-- Add Role Selector -->
+    <div class="mb-3">
+        <label for="role" class="form-label">Role</label>
+        <select class="form-select" id="role" name="role">
+            <option value="member" selected>Member</option>
+            <option value="admin">Admin</option>
+        </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Create User</button>
+    <button type="button"
+            class="btn btn-secondary"
+            hx-get="{{ url_for('admin.list_users') }}"
+            hx-target="#admin-content">Cancel</button>
+</form>

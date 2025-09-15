@@ -2,7 +2,16 @@ import datetime
 import functools
 import re
 
-from flask import Blueprint, flash, g, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    flash,
+    g,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from peewee import JOIN, IntegrityError, fn
 
 from ..models import (
@@ -46,6 +55,7 @@ def admin_required(view):
 @admin_required
 def dashboard():
     """Renders the main admin dashboard with statistics."""
+    # --- Stat card queries remain the same ---
     total_users = User.select().count()
     total_messages = Message.select().count()
     total_files = UploadedFile.select().count()
@@ -53,11 +63,9 @@ def dashboard():
     total_storage_bytes = (
         UploadedFile.select(fn.SUM(UploadedFile.file_size_bytes)).scalar() or 0
     )
-
-    # Calculate average messages per second over the last 7 days
-    seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+    seven_days_ago_for_avg = datetime.datetime.now() - datetime.timedelta(days=7)
     messages_last_7_days = (
-        Message.select().where(Message.created_at > seven_days_ago).count()
+        Message.select().where(Message.created_at > seven_days_ago_for_avg).count()
     )
     total_seconds_in_7_days = 7 * 24 * 60 * 60
     avg_mps = (
@@ -66,35 +74,64 @@ def dashboard():
         else 0
     )
 
-    # --- Prepare data for the messages per day chart ---
-    # 1. Create a dictionary to hold counts for the last 7 days, initialized to 0.
-    today = datetime.date.today()
-    chart_data = {(today - datetime.timedelta(days=i)): 0 for i in range(7)}
+    # --- [START OF NEW CHART LOGIC] ---
+    # 1. Define the time window for the chart.
+    now = datetime.datetime.now()
+    twenty_four_hours_ago = now - datetime.timedelta(hours=24)
 
-    # 2. Query the database to get message counts grouped by day.
-    # This works for both SQLite and PostgreSQL.
+    # 2. Initialize a dictionary to hold message counts for every hour in the last 24 hours.
+    #    We start with 0 for each hour to ensure all hours are represented on the chart.
+    chart_data = {}
+    for i in range(24):
+        # We go back in time hour by hour from the current hour.
+        hour_timestamp = (now - datetime.timedelta(hours=i)).replace(
+            minute=0, second=0, microsecond=0
+        )
+        chart_data[hour_timestamp] = 0
+
+    # 3. Query the database to get actual message counts grouped by hour.
+    #    This STRFTIME format is compatible with both PostgreSQL and SQLite.
     query = (
         Message.select(
-            fn.DATE(Message.created_at).alias("date"),
+            fn.date_trunc("hour", Message.created_at).alias("hour"),
             fn.COUNT(Message.id).alias("count"),
         )
-        .where(Message.created_at >= seven_days_ago)
-        .group_by(fn.DATE(Message.created_at))
+        .where(Message.created_at >= twenty_four_hours_ago)
+        .group_by(fn.date_trunc("hour", Message.created_at))
     )
 
-    # 3. Populate our dictionary with the actual counts from the database.
+    # 4. Populate our dictionary with the real data from the query.
     for result in query:
-        db_date = result.date
-        if db_date in chart_data:
-            chart_data[db_date] = result.count
+        # The result.hour will now be a proper datetime object, so no conversion is needed.
+        db_hour = result.hour
+        if db_hour in chart_data:
+            chart_data[db_hour] = result.count
 
-    # 4. Sort the data by date and split into labels and data points for Chart.js.
+    # 5. Sort the data by hour and prepare labels and values for Chart.js.
     sorted_chart_data = sorted(chart_data.items())
-    chart_labels = [day.strftime("%a, %b %d") for day, count in sorted_chart_data]
-    chart_values = [count for day, count in sorted_chart_data]
+
+    # Format the hour labels for readability (e.g., "11 PM", "12 AM", "Now")
+    chart_labels = []
+    for hour, count in sorted_chart_data:
+        if hour.hour == now.hour and hour.day == now.day:
+            chart_labels.append("Now")
+        else:
+            chart_labels.append(
+                hour.strftime("%-I %p").strip()
+            )  # Use '%#I' on Windows if this fails
+
+    chart_values = [count for hour, count in sorted_chart_data]
+    # --- [END OF NEW CHART LOGIC] ---
+
+    # Render the appropriate template based on the request type.
+    template_name = (
+        "admin/dashboard_content.html"
+        if "HX-Request" in request.headers
+        else "admin/dashboard.html"
+    )
 
     return render_template(
-        "dashboard.html",
+        template_name,
         total_users=total_users,
         total_messages=total_messages,
         total_files=total_files,
@@ -116,13 +153,18 @@ def list_users():
         .join(WorkspaceMember, on=(User.id == WorkspaceMember.user))
         .order_by(User.id)
     )
+
+    # handle the HTMX request
+    if "HX-Request" in request.headers:
+        return render_template("admin/user_list_content.html", users=users_with_roles)
+
     return render_template("user_list.html", users=users_with_roles)
 
 
 @admin_bp.route("/users/create", methods=["GET"])
 @admin_required
 def create_user_form():
-    return render_template("create_user.html")
+    return render_template("admin/create_user_content.html")
 
 
 @admin_bp.route("/users/create", methods=["POST"])
@@ -137,7 +179,7 @@ def create_user():
 
     if not all([username, email, password]):
         flash("Username, email, and password are required.", "danger")
-        return redirect(url_for("admin.create_user_form"))
+        return render_template("admin/create_user_content.html")
 
     try:
         with db.atomic():
@@ -164,9 +206,16 @@ def create_user():
             flash(f"User '{username}' created successfully.", "success")
     except IntegrityError:
         flash(f"Username or email '{username}' already exists.", "danger")
-        return redirect(url_for("admin.create_user_form"))
+        return render_template("admin/create_user_content.html")
 
-    return redirect(url_for("admin.list_users"))
+    # get the new users list so we can show them the current one
+    users_with_roles = (
+        User.select(User, WorkspaceMember.role)
+        .join(WorkspaceMember, on=(User.id == WorkspaceMember.user))
+        .order_by(User.id)
+    )
+    # The target is #admin-content, so we render the content partial.
+    return render_template("admin/user_list_content.html", users=users_with_roles)
 
 
 @admin_bp.route("/users/edit/<int:user_id>", methods=["GET", "POST"])
@@ -176,6 +225,10 @@ def edit_user(user_id):
     user = User.get_or_none(id=user_id)
     if not user:
         flash("User not found.", "danger")
+        if "HX-Request" in request.headers:
+            response = make_response()
+            response.headers["HX-Redirect"] = url_for("admin.list_users")
+            return response
         return redirect(url_for("admin.list_users"))
 
     workspace_member = WorkspaceMember.get(user=user)
@@ -200,20 +253,25 @@ def edit_user(user_id):
             flash("Username or email already exists.", "danger")
             # Don't redirect, so the admin can fix the error
             return render_template(
-                "edit_user.html", user=user, workspace_member=workspace_member
+                "admin/edit_user_content.html",
+                user=user,
+                workspace_member=workspace_member,
             )
 
-        return redirect(url_for("admin.list_users"))
+        response = make_response()
+        response.headers["HX-Redirect"] = url_for("admin.list_users")
+        return response
 
     # For a GET request, just show the form
-    return render_template(
-        "edit_user.html", user=user, workspace_member=workspace_member
+    template_name = (
+        "admin/edit_user_content.html"
+        if "HX-Request" in request.headers
+        else "admin/edit_user.html"
     )
+    return render_template(template_name, user=user, workspace_member=workspace_member)
 
 
 # --- Channel Management Routes ---
-
-
 @admin_bp.route("/channels")
 @admin_required
 def list_channels():
@@ -232,6 +290,13 @@ def list_channels():
         .group_by(Channel.id, User.id)
         .order_by(Channel.name)
     )
+
+    # Handle HTMX requests
+    if "HX-Request" in request.headers:
+        return render_template(
+            "admin/channel_list_content.html", channels=channels_with_counts
+        )
+
     return render_template("channel_list.html", channels=channels_with_counts)
 
 
