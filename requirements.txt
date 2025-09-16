@@ -24,4 +24,3 @@ pytest-mock
 python-dotenv
 requests
 simple-websocket
-uwsgi

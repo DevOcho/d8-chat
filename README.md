@@ -1,4 +1,7 @@
+![D8-Chat Logo](./app/static/img/d8-chat-logo.png)
+
 # d8-chat
+
 DevOcho Chat is a modern, real-time collaboration hub built with Python, Flask,
 Peewee, HTMX, and WebSockets. It is designed to be a self-hostable, open-source
 alternative to platforms like Microsoft Teams, Slack, Discord, RocketChat,
@@ -50,7 +53,6 @@ The application will be available at http://localhost:5001.
 Getting a local instance of D8-Chat running is simple with Docker and Docker Compose.
 
 ### Prerequisites
-- 
 - [Git](https://git-scm.com/downloads)
 - [Docker](https://www.docker.com/get-started)
 - [Docker Compose](https://docs.docker.com/compose/install/)
