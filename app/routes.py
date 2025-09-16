@@ -277,6 +277,9 @@ def sso_login():
     # Store the nonce in the session for later verification
     session["nonce"] = nonce
 
+    # What line needs added to the Authentik Redirect?
+    current_app.logger.info(f"Redirecting to Authentik with redirect_uri: {redirect_uri}")
+
     return oauth.authentik.authorize_redirect(redirect_uri, nonce=nonce)
 
 

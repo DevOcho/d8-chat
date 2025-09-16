@@ -9,9 +9,19 @@ class Config:
     """Base configuration."""
 
     SECRET_KEY = os.environ.get("SECRET_KEY", "a_default_secret_key")
+
+    # Check if a full URI is provided. If not, build it from components.
     DATABASE_URI = os.environ.get("DATABASE_URI")
     if not DATABASE_URI:
-        raise ValueError("No DATABASE_URI set for the database connection")
+        postgres_user = os.environ.get("POSTGRES_USER")
+        postgres_password = os.environ.get("POSTGRES_PASSWORD")
+        postgres_host = os.environ.get("POSTGRES_HOST")
+        postgres_db = os.environ.get("POSTGRES_DB")
+
+        if all([postgres_user, postgres_password, postgres_host, postgres_db]):
+            DATABASE_URI = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}:5432/{postgres_db}"
+        else:
+            raise ValueError("Database connection not configured. Set either DATABASE_URI or all POSTGRES_* variables.")
 
     # OIDC SSO Settings
     OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID")

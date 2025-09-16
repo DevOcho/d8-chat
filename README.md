@@ -178,7 +178,8 @@ docker compose up -d
 
 ## Development instructions
 
-If you are looking to contribute a Pull Request you can run the app locally with the following:
+If you are looking to contribute a Pull Request (thanks) you can run the app
+locally with the following:
 
 ```sh
 git clone https://github.com/DevOcho/d8-chat.git
@@ -187,16 +188,17 @@ virtualenv .
 pip3 install -r requirements.txt
 ```
 
-Create a .env file for development
+Create a .env file for development with the following content:
 
 ```
 # .env - For local development (running python run.py on your host)
 SECRET_KEY=your_super_secret_key_change_me
 DATABASE_URI=postgresql://d8chat:d8chat@localhost:5432/d8chat
 
-OIDC_CLIENT_ID=
-OIDC_CLIENT_SECRET=
-OIDC_ISSUER_URL=
+# Optional if you want to test OIDC
+#OIDC_CLIENT_ID=
+#OIDC_CLIENT_SECRET=
+#OIDC_ISSUER_URL=
 
 MINIO_ENDPOINT=localhost:9000
 MINIO_ROOT_USER=minioadmin

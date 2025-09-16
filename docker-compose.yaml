@@ -8,6 +8,8 @@ services:
       - "5001:5001" # Expose the app directly to the host
     env_file:
       - .env.docker
+    environment:
+      - POSTGRES_HOST=db
     volumes:
       # Mounts local code for hot-reloading during development
       - .:/app
