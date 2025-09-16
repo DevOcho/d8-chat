@@ -1,5 +1,15 @@
 # d8-chat
-DevOcho Chat is a modern, real-time collaboration hub built with Python, Flask, Peewee, HTMX, and WebSockets. It is designed to be a self-hostable, open-source alternative to platforms like Slack.
+DevOcho Chat is a modern, real-time collaboration hub built with Python, Flask,
+Peewee, HTMX, and WebSockets. It is designed to be a self-hostable, open-source
+alternative to platforms like Microsoft Teams, Slack, Discord, RocketChat,
+Google Chat, WhatsApp, etc.
+
+It was developed with ❤ by [DevOcho](https://www.devocho.com) as a showcase of
+our abilities.  Feel free to hire us if you need custom software.
+
+We use it in our company every day.
+
+There is a companion mobile app under development.
 
 ## Features
 - Real-time Messaging
