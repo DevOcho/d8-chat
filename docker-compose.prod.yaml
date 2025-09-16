@@ -1,0 +1,80 @@
+services:
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443" # Expose HTTPS port
+    volumes:
+      # This uses variable substitution to load the correct config
+      - ./nginx/nginx.conf:/etc/nginx/templates/default.conf.template
+      - static_files:/app/app/static
+      # Add volumes for Certbot to share
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    environment:
+      # Pass the hostname to Nginx so it can generate the final config
+      - D8CHAT_HOSTNAME=${D8CHAT_HOSTNAME}
+    command: /bin/bash -c "envsubst '$$D8CHAT_HOSTNAME' < /etc/nginx/templates/default.conf.template > /etc/nginx/conf.d/default.conf && nginx -g 'daemon off;'"
+    depends_on:
+      - app
+    restart: always
+
+  app:
+    build: .
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      - static_files:/app/app/static
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    entrypoint: ["/app/entrypoint.sh"]
+    command: ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "run:app"]
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+volumes:
+  postgres_data: {}
+  minio_data: {}
+  static_files: {}
+  certbot_conf: {}
+  certbot_www: {}

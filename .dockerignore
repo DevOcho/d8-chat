@@ -1,0 +1,6 @@
+.git
+.env
+.idea
+__pycache__
+postgres_data
+minio_data

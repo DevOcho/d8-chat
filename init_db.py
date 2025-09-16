@@ -87,6 +87,14 @@ def reset_tables():
     print("Tables created successfully.")
 
 
+def initialize_tables():
+    """Creates all application tables if they don't already exist."""
+    print("Creating tables if they don't exist...")
+    with db.atomic():
+        db.create_tables(ALL_MODELS, safe=True)
+    print("Tables created successfully.")
+
+
 def seed_initial_data():
     """Creates the default workspace and channels."""
     print("Seeding initial data...")
@@ -166,7 +174,8 @@ if __name__ == "__main__":
 
     # Step 3: All database operations must now happen within the app context.
     with app.app_context():
-        reset_tables()
+        # reset_tables()
+        initialize_tables()
         seed_initial_data()
 
     print("\nDatabase setup complete.")
