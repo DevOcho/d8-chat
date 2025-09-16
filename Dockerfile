@@ -11,6 +11,9 @@ COPY requirements.txt .
 # --no-cache-dir reduces image size
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install PostgreSQL client for pg_isready command
+RUN apt-get update && apt-get install -y postgresql-client && rm -rf /var/lib/apt/lists/*
+
 # Copy the rest of the application code into the container
 COPY . .
 

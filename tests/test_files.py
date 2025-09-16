@@ -75,7 +75,7 @@ def test_upload_disallowed_extension(logged_in_client):
         "/files/upload", data=file_data, content_type="multipart/form-data"
     )
     assert response.status_code == 400
-    assert response.json["error"] == "File type not allowed"
+    assert "File type not allowed" in response.json["error"]
 
 
 def test_upload_file_too_large(logged_in_client, mocker):
@@ -108,6 +108,9 @@ def test_upload_minio_failure(logged_in_client, mocker):
     WHEN the file is valid but the Minio service fails to save it
     THEN the server should return a 500 Internal Server Error.
     """
+    # Add this mock to simulate the upload service returning False
+    mocker.patch("app.blueprints.files.minio_service.upload_file", return_value=False)
+
     # Prepare a valid file.
     file_data = {"file": (io.BytesIO(b"this is a test file"), "test.pdf")}
 

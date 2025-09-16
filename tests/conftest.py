@@ -20,6 +20,8 @@ from app.models import (
     Reaction,
     UploadedFile,
     MessageAttachment,
+    Hashtag,
+    MessageHashtag,
 )
 
 
@@ -64,6 +66,8 @@ def test_db(app):
             Reaction,
             UploadedFile,
             MessageAttachment,
+            Hashtag,
+            MessageHashtag,
         ]
 
         db.create_tables(tables)

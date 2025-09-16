@@ -85,5 +85,5 @@ def upload_file():
             return jsonify(error="Failed to upload file to storage"), 500
 
     return jsonify(
-        error="Invalid filename. Files must have an extension (e.g., .png, .jpg)."
+        error="File type not allowed. Files must have an extension (e.g., .png, .jpg)."
     ), 400

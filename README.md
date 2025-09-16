@@ -29,6 +29,11 @@ There is a companion mobile app under development.
 
 ## Quick Start (Local Development or testing)
 
+### Prerequisites
+- [Git](https://git-scm.com/downloads)
+- [Docker](https://www.docker.com/get-started)
+- [Docker Compose](https://docs.docker.com/compose/install/)
+
 ### 1. Clone the Repository
 
 ```sh
@@ -47,6 +52,9 @@ docker compose -f docker-compose.dev.yaml up --build -d
 ```
 
 The application will be available at http://localhost:5001.
+
+The initialization script creates a default `admin` user. The password will be printed in the Docker logs the very first time you start the application. You can view the logs by running: `docker logs <container_name_or_id>` (e.g., `docker logs d8-chat-app-1`).
+
 
 ## Production-Ready deployment with Docker
 
@@ -115,7 +123,7 @@ After this script completes successfully, you can proceed to the main "Build and
 With your `.env` file configured, you can build and run all the services with a single command:
 
 ```sh
-docker compose up --build -d
+docker compose -f docker-compose.prod.yaml up --build -d
 ```
 
 * `--build`: This flag tells Docker Compose to build the application image from your local Dockerfile if it doesn't exist or if the code has changed.
@@ -125,6 +133,8 @@ The entrypoint.sh script will automatically wait for the database to be ready
 and run a non-destructive initialization script. It will create tables and
 the initial admin user only if they don't already exist. It is safe to
 stop and start the application without losing data.
+
+The initialization script creates a default `admin` user. The password will be printed in the Docker logs the very first time you start the application. You can view the logs by running: `docker logs <container_name_or_id>` (e.g., `docker logs d8-chat-app-1`).
 
 ### 4. Accessing the Services
 

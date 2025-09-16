@@ -39,3 +39,10 @@ class TestConfig(Config):
     SECRET_KEY = "my-test-secret-key"
     # Make login easier for tests
     LOGIN_DISABLED = False
+
+    # Provide dummy values for Minio so the app can initialize during tests.
+    # The actual service will be mocked in the tests themselves.
+    MINIO_ACCESS_KEY = "test-key"
+    MINIO_SECRET_KEY = "test-secret"
+    MINIO_ENDPOINT = "testhost:9000"
+    MINIO_PUBLIC_URL = "http://testhost:9000"
