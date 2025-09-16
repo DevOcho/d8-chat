@@ -5,8 +5,25 @@
     <div class="sidebar workspace-sidebar p-2 text-center text-white">
         <!-- Workspace Logo -->
         <div class="workspace-logo mb-3">D8</div>
-        <!-- user profile and status indicator -->
-        <div class="profile-button-container mt-auto">{% include 'partials/_sidebar_profile_button.html' %}</div>
+
+        <!-- Bottom actions container -->
+        <div class="mt-auto">
+            <!-- Admin Link (only shown to admins) -->
+            {% if workspace_member and workspace_member.role == 'admin' %}
+            <div class="mb-2">
+                <a href="{{ url_for('admin.dashboard') }}"
+                   class="admin-link"
+                   target="_blank"
+                   title="Admin Settings">
+                    <i class="bi bi-gear-fill"></i>
+                </a>
+            </div>
+            {% endif %}
+
+            <!-- user profile and status indicator -->
+            {% include 'partials/_sidebar_profile_button.html' %}
+        </div>
+
     </div>
     <!-- channels -->
     <div class="sidebar channel-sidebar p-3">

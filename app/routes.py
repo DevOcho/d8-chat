@@ -20,6 +20,8 @@ from flask import (
     session,
     url_for,
 )
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_login import login_user, logout_user
 from peewee import fn
 from PIL import Image
@@ -38,6 +40,7 @@ from .models import (
     User,
     UserConversationStatus,
     db,
+    WorkspaceMember,
 )
 from .services import chat_service, minio_service
 from .sso import oauth  # Import the oauth object
@@ -58,6 +61,13 @@ STATUS_CLASS_MAP = {
     "busy": "bg-warning",  # Bootstrap's yellow
 }
 
+limiter = Limiter(
+    get_remote_address,
+    app=current_app,
+    default_limits=["22 per minute", "1 per second"],
+    storage_uri="memory://",
+    strategy="fixed-window", # or "moving-window", or "sliding-window-counter"
+)
 
 # This function runs before every request to load the logged-in user
 @main_bp.before_app_request
@@ -440,6 +450,9 @@ def chat_interface():
             .exists()
         )
 
+    # Get the user's workspace role
+    workspace_member = WorkspaceMember.get_or_none(user=g.user)
+
     return render_template(
         "chat.html",
         channels=user_channels,
@@ -449,6 +462,7 @@ def chat_interface():
         has_unreads=has_unreads,
         has_unread_threads=has_unread_threads,
         theme=g.user.theme,
+        workspace_member=workspace_member,
     )
 
 
@@ -1201,6 +1215,7 @@ def jump_to_message(message_id):
 
 # --- WebSocket Handler ---
 @sock.route("/ws/chat")
+@limiter.limit("22 per minute")  # Limit to 22 messages per minute (that's a lot)
 def chat(ws):
     print("INFO: WebSocket client connected.")
     user = session.get("user_id") and User.get_or_none(id=session.get("user_id"))
@@ -1208,6 +1223,15 @@ def chat(ws):
         print("ERROR: Unauthenticated user tried to connect. Closing.")
         ws.close(reason=1008, message="Not authenticated")
         return
+
+    # Origin check to prevent CSWSH
+    origin = request.headers.get('Origin')
+    allowed_origin = request.url_root.rstrip('/') # e.g., 'https://your.d8chat.com'
+    if not origin or origin != allowed_origin:
+        print(f"ERROR: WebSocket connection from invalid origin '{origin}'. Closing.")
+        ws.close(reason=1008, message="Invalid origin")
+        return
+
     ws.user = user
 
     chat_manager.set_online(user.id, ws)

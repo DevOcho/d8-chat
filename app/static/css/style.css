@@ -889,7 +889,7 @@ a.mention-link:hover {
 
 /* --- Channel mentions --- */
 a.channel-link {
-    color: #ec729c; /* Bootstrap primary blue */
+    color: #ec729c;
     text-decoration: none;
     font-weight: 500;
     transition: text-decoration 0.2s ease-in-out;
@@ -970,4 +970,26 @@ a.hashtag-link:hover {
 
 #drop-zone-text i {
     font-size: 4rem;
+}
+
+/* --- Admin Link Styles --- */
+.admin-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background-color: #49274b;
+    border-radius: 8px; /* A squircle shape */
+    color: white;
+    font-size: 1.2rem;
+    margin: 0 auto;
+    transition: all 0.2s ease-in-out;
+    text-decoration: none;
+}
+
+.admin-link:hover {
+    background-color: #3f0e40;
+    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
+    color: white;
 }

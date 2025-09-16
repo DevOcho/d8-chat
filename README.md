@@ -27,7 +27,7 @@ There is a companion mobile app under development.
 - SSO support (OIDC)
 - And more...
 
-## Quick Start (Local Development or testing)
+## Quick Start (production instructions below)
 
 ### Prerequisites
 - [Git](https://git-scm.com/downloads)
@@ -43,12 +43,18 @@ cd d8-chat
 
 ### 2. Configure Your Environment
 
-Open `.env` and set `SECRET_KEY`, `POSTGRES_PASSWORD`, and `MINIO_ROOT_PASSWORD`.
+First, copy the example environment file to create your own local configuration.
+
+```sh
+cp example.env .env.docker
+```
+
+Open `.env.docker` and set `SECRET_KEY`, `POSTGRES_PASSWORD`, and `MINIO_ROOT_PASSWORD`.
 
 ### 3. Build and Run
 
 ```sh
-docker compose -f docker-compose.dev.yaml up --build -d
+docker compose up --build -d
 ```
 
 The application will be available at http://localhost:5001.
@@ -168,3 +174,50 @@ You can restart them with the followig:
 ```sh
 docker compose up -d
 ```
+
+
+## Development instructions
+
+If you are looking to contribute a Pull Request you can run the app locally with the following:
+
+```sh
+git clone https://github.com/DevOcho/d8-chat.git
+cd d8-chat
+virtualenv .
+pip3 install -r requirements.txt
+```
+
+Create a .env file for development
+
+```
+# .env - For local development (running python run.py on your host)
+SECRET_KEY=your_super_secret_key_change_me
+DATABASE_URI=postgresql://d8chat:d8chat@localhost:5432/d8chat
+
+OIDC_CLIENT_ID=
+OIDC_CLIENT_SECRET=
+OIDC_ISSUER_URL=
+
+MINIO_ENDPOINT=localhost:9000
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+MINIO_BUCKET_NAME=d8chat
+MINIO_SECURE=False
+MINIO_PUBLIC_URL=http://localhost:9000
+```
+
+Start the local minio and postgres servers
+
+```sh
+docker compose -f docker-compose.dev.yaml up --build -d
+```
+
+Initialize and Seed the database and then run the development server.
+
+```sh
+python3 init_db.py
+python3 seed.py
+python3 run.py
+```
+
+The site should be available at http://localhost:5001.

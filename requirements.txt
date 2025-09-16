@@ -5,6 +5,7 @@ boto3
 emoji
 Faker
 Flask
+Flask-Limiter==3.13
 flask-login
 flask-sock
 gevent
