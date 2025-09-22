@@ -1,25 +1,26 @@
 # init_db.py
 
+import argparse
 import datetime
 import secrets
 
 from app import create_app
 from app.models import (
-    db,
-    User,
-    Workspace,
-    WorkspaceMember,
     Channel,
     ChannelMember,
-    Message,
     Conversation,
-    UploadedFile,
-    UserConversationStatus,
-    Mention,
-    MessageAttachment,
-    Reaction,
     Hashtag,
+    Mention,
+    Message,
+    MessageAttachment,
     MessageHashtag,
+    Reaction,
+    UploadedFile,
+    User,
+    UserConversationStatus,
+    Workspace,
+    WorkspaceMember,
+    db,
 )
 
 ALL_MODELS = [
@@ -39,12 +40,21 @@ ALL_MODELS = [
     MessageHashtag,
 ]
 
+
 def initialize_tables():
     """Creates all application tables if they don't already exist."""
     print("Creating tables if they don't exist...")
     with db.atomic():
         db.create_tables(ALL_MODELS, safe=True)
     print("Tables created successfully.")
+
+
+def drop_all_tables():
+    """Drops all application tables from the database."""
+    print("Dropping all tables...")
+    with db.atomic():
+        db.drop_tables(ALL_MODELS)
+    print("Tables dropped successfully.")
 
 
 def seed_initial_data():
@@ -117,13 +127,31 @@ def seed_initial_data():
 
 
 if __name__ == "__main__":
-    # Step 1: Create a Flask app instance to get the application context.
-    # This will initialize our 'db' proxy to connect to the correct PostgreSQL DB.
+    # Set up argument parser
+    parser = argparse.ArgumentParser(
+        description="Initialize or reset the application database."
+    )
+    parser.add_argument(
+        "--reset-db",
+        action="store_true",
+        help="Drop all tables and recreate them from scratch before seeding.",
+    )
+    args = parser.parse_args()
+
+    # Create a Flask app to get the application context.
+    # This initializes our 'db' proxy to connect to the correct PostgreSQL DB.
     app = create_app()
 
-    # Step 2: All database operations must now happen within the app context.
     with app.app_context():
-        initialize_tables()
-        seed_initial_data()
+        with db.atomic():
+            # Are we starting over?
+            if args.reset_db:
+                drop_all_tables()
+
+            # setup the tables
+            initialize_tables()
+
+            # Add critical applications settings
+            seed_initial_data()
 
     print("\nDatabase setup complete.")

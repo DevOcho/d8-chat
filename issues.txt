@@ -34,8 +34,6 @@ We need to be able to archive a channel to some fun archive spot that is still s
 
 I want to add "Direct Messages", and "Mentions & Reactions" to the Activity area on the quick view.
 
-I'd love the chat input to turn into a file upload drop location when someone hovers an image over the chat window.
-
 Group DMs (talk with more than one person) and also the ability to promote a group conversation to a channel.
 
 We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).

@@ -1,6 +1,26 @@
 # docker-compose.dev.yaml
 # For local development and quick testing.
 services:
+  app:
+    build: .
+    restart: always
+    ports:
+      - "5001:5001" # Expose the app directly to the host
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_HOST=db
+    volumes:
+      # Mounts local code for hot-reloading during development
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    entrypoint: ["/app/entrypoint.sh"]
+    command: ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "run:app"]
+
   db:
     image: postgres:15
     restart: always
