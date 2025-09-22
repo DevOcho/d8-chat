@@ -85,6 +85,109 @@ const ToastManager = {
     }
 };
 
+
+const FaviconManager = {
+    faviconLink: null,
+    originalFaviconHref: null,
+    originalImage: null, // We'll store the loaded favicon image here
+    isInitialized: false,
+    currentUnreadCount: 0,
+
+    initialize: function() {
+        this.faviconLink = document.querySelector("link[rel='icon']");
+        if (!this.faviconLink) {
+            console.error("Favicon link tag not found.");
+            return;
+        }
+        this.originalFaviconHref = new URL(this.faviconLink.href).href;
+
+        // Pre-load the original favicon image so we can re-use it for drawing
+        const img = document.createElement('img');
+        img.src = this.originalFaviconHref;
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+            this.originalImage = img;
+            this.isInitialized = true;
+            // Run an initial check once the image is ready
+            this.updateFavicon();
+        };
+        img.onerror = () => {
+            console.error("Failed to pre-load original favicon.");
+        };
+    },
+
+    calculateUnreadCount: function() {
+        let total = 0;
+        // This selector finds all the visible red badges in the sidebar
+        const badges = document.querySelectorAll('#channel-list .badge, #dm-list .badge');
+        badges.forEach(badge => {
+            const count = parseInt(badge.textContent, 10);
+            if (!isNaN(count)) {
+                total += count;
+            }
+        });
+        return total;
+    },
+
+    drawFavicon: function(count) {
+        if (!this.originalImage) return; // Can't draw if the base image isn't loaded
+
+        const canvas = document.createElement('canvas');
+        const size = 32;
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+
+        // 1. Draw the original favicon
+        context.drawImage(this.originalImage, 0, 0, size, size);
+
+        if (count > 0) {
+            // 2. Draw a larger red dot without a border
+            const dotRadius = size * 0.4; // Increased size
+            const dotX = size - dotRadius;      // Simplified position
+            const dotY = dotRadius;
+
+            context.beginPath();
+            context.arc(dotX, dotY, dotRadius, 0, 2 * Math.PI, false);
+            context.fillStyle = '#d92626'; // Strong red
+            context.fill();
+
+            // 3. Draw the count text with a larger font
+            const text = count > 9 ? '9+' : count.toString();
+            context.fillStyle = '#ffffff'; // White text
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+            // Increased font sizes
+            const fontSize = text.length > 1 ? size * 0.5 : size * 0.6;
+            context.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`;
+            // Nudge the text slightly for better centering within the circle
+            context.fillText(text, dotX, dotY + 1);
+        }
+
+        // 4. Update the favicon link with the new canvas image
+        this.faviconLink.href = canvas.toDataURL('image/png');
+    },
+
+    updateFavicon: function() {
+        if (!this.isInitialized) return;
+
+        // Instead of a boolean, we now get the actual count
+        const newCount = this.calculateUnreadCount();
+
+        // Only redraw the favicon if the count has changed
+        if (newCount !== this.currentUnreadCount) {
+            this.currentUnreadCount = newCount;
+            if (newCount > 0) {
+                this.drawFavicon(newCount);
+            } else {
+                // If there are no unreads, revert to the original
+                this.faviconLink.href = this.originalFaviconHref;
+            }
+        }
+    }
+};
+
+
 /**
  * Factory function for the Attachment Manager.
  */
@@ -919,6 +1022,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ImageCarouselManager.initialize();
     NotificationManager.initialize();
     ToastManager.initialize();
+    FaviconManager.initialize();
 
     // --- AUDIO PRIMING LOGIC ---
     const primeAudio = () => {
@@ -1249,6 +1353,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleMentionHighlights(target, conversationId);
             }
         }
+        FaviconManager.updateFavicon();
     });
     document.body.addEventListener('htmx:oobAfterSwap', function(evt) {
         const targetList = evt.detail.target;
@@ -1324,6 +1429,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleMentionHighlights(messagesContainer, conversationId);
             }
         }
+        FaviconManager.updateFavicon();
     });
 
     if (messagesContainer) {
