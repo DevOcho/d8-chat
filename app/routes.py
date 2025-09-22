@@ -13,6 +13,7 @@ from flask import (
     Blueprint,
     current_app,
     g,
+    jsonify,
     make_response,
     redirect,
     render_template,
@@ -68,6 +69,12 @@ limiter = Limiter(
     storage_uri="memory://",
     strategy="fixed-window", # or "moving-window", or "sliding-window-counter"
 )
+
+@main_bp.route("/debug-headers")
+def debug_headers():
+    # Convert the headers object to a simple dictionary to make it JSON serializable
+    headers_dict = {key: value for key, value in request.headers}
+    return jsonify(headers_dict)
 
 # This function runs before every request to load the logged-in user
 @main_bp.before_app_request

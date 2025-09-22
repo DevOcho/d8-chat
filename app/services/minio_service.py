@@ -29,19 +29,24 @@ def init_app(app):
     # Explicitly set the region to prevent internal lookups
     region = "us-east-1"
 
-    # 1. Configure the INTERNAL client for server-to-server communication
+    # 1. Configure the INTERNAL client. It respects the MINIO_SECURE flag
+    #    because it's for server-to-server communication.
     internal_endpoint = app.config["MINIO_ENDPOINT"]
+    internal_secure = app.config["MINIO_SECURE"]
     minio_client_internal = Minio(
         internal_endpoint,
         access_key=access_key,
         secret_key=secret_key,
-        secure=secure,
+        secure=internal_secure,
         region=region
     )
 
-    # 2. Configure the PUBLIC client for generating user-facing URLs
-    public_endpoint_url = app.config.get("MINIO_PUBLIC_URL")
+    # 2. Configure the PUBLIC client. It determines security based on the
+    #    MINIO_PUBLIC_URL itself, ignoring the MINIO_SECURE flag.
+    public_endpoint_url = app.config.get("MINIO_PUBLIC_URL", "")
     public_endpoint_host = internal_endpoint # Default to internal
+    # Determine if the public URL is secure by checking its scheme.
+    public_secure = public_endpoint_url.lower().startswith("https://")
 
     if public_endpoint_url:
         parsed_url = urlparse(public_endpoint_url)
@@ -54,7 +59,7 @@ def init_app(app):
         public_endpoint_host,
         access_key=access_key,
         secret_key=secret_key,
-        secure=secure,
+        secure=public_secure, # Use the scheme-derived value here
         region=region
     )
 

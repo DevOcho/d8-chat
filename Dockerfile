@@ -28,4 +28,5 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 
 # The main command to run when the container starts.
 # This will be passed as arguments to the entrypoint script.
-CMD ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "run:app"]
+#CMD ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "run:app"]
+CMD ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "--access-logfile", "-", "--forwarded-allow-ips", "*", "run:app"]

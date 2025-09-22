@@ -1,6 +1,7 @@
 # app/__init__.py
 
 import re
+import os
 
 import bleach
 import emoji
@@ -9,6 +10,7 @@ from flask import Flask, url_for
 from flask_login import LoginManager
 from flask_sock import Sock
 from markupsafe import Markup
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 
@@ -35,6 +37,19 @@ def create_app(config_class=Config):
 
     # Load configuration from the config object
     app.config.from_object(config_class)
+
+    # Conditionally apply ProxyFix based on separate counts for different headers.
+    try:
+        x_for = int(os.environ.get("X_FOR_COUNT", 0))
+        x_proto = int(os.environ.get("X_PROTO_COUNT", 0))
+    except ValueError:
+        x_for = 0
+        x_proto = 0
+
+    if x_for > 0 or x_proto > 0:
+        # We only pass parameters if their count is greater than 0
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=x_for, x_proto=x_proto, x_host=0, x_port=0, x_prefix=0)
+        app.logger.info(f"Applying ProxyFix with x_for={x_for}, x_proto={x_proto}.")
 
     # Ensure SECRET_KEY is set for session management
     if not app.config["SECRET_KEY"]:

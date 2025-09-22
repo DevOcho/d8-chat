@@ -26,6 +26,7 @@ services:
       - .env
     environment:
       - POSTGRES_HOST=db
+      - TRUSTED_PROXY_COUNT=1
     volumes:
       - static_files:/app/app/static
     depends_on:

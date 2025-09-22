@@ -26,6 +26,8 @@ We need to develop an audit log for all chats so we can see if someone does some
 
 ========
 
+We need to add a poll so people can vote on things.
+
 I'd like to detect passwords in messages and auto-redact them. (and give the user a toaster or some message that tells them they can send a password if they wrap it in a tag like <password>asdf</password>)
 
 We need to be able to archive a channel to some fun archive spot that is still searchable but not active (can't message but you can see the messages if you were in the channel when it was archived).
