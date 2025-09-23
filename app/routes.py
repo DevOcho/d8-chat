@@ -1552,9 +1552,23 @@ def chat(ws):
                     should_notify = status.last_notified_timestamp is None or (
                         now - status.last_notified_timestamp
                     ) > datetime.timedelta(seconds=10)
+
                     if should_notify:
+                        # Send sound
                         sound_payload = {"type": "sound"}
                         chat_manager.send_to_user(member.id, sound_payload)
+
+                        # ALSO send desktop notification for the DM
+                        notification_payload = {
+                            "type": "notification",
+                            "title": f"New message from {new_message.user.display_name or new_message.user.username}",
+                            "body": new_message.content,
+                            "icon": url_for("static", filename="favicon.ico", _external=True),
+                            "tag": conv_id_str,
+                        }
+                        chat_manager.send_to_user(member.id, notification_payload)
+
+                        # Update the cooldown timestamp
                         status.last_notified_timestamp = now
                         status.save()
 

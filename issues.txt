@@ -2,11 +2,11 @@ Current issues with the slack_clone:
 
 Testing Party:
   - There is a security issue with the way sessions are handled. If a user has a stale session and I delete the database and the user reloads their browser, they will be given access to a different user with the same user Id.  This isn't good.
-  - Editing a codeblock is broken rich edit mode.
+  - Editing a codeblock is broken in rich edit mode.
 
 Small extra box on the top of the chat inputs that exist solely for image uploads.  These shouldn't be visible until someone actually uploads an image.
 
-We need to be able to upload files.
+We need to be able to upload files besides images.
 
 We need a way to search and add gifs
 
@@ -25,6 +25,8 @@ If the server disconnects, it will reconnect for users at different times.  Mess
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
 ========
+
+Drop the new message indicator once a message is sent.
 
 We need to add a poll so people can vote on things.
 

@@ -1372,6 +1372,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {
+        // 1. First, try to parse the message as JSON for special events.
         try {
             const data = JSON.parse(event.detail.message);
             if (typeof data === 'object' && data.type) {
@@ -1380,22 +1381,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     const { user_id, avatar_url } = data;
                     const avatarImages = document.querySelectorAll(`.avatar-image[data-user-id="${user_id}"]`);
                     avatarImages.forEach(el => {
-                        // If it's already an image, just update the source. This is fast.
                         if (el.tagName === 'IMG') {
                             el.src = avatar_url;
                         } else {
-                            // If it's the DIV fallback, we must replace it with a new IMG tag.
                             const newImg = document.createElement('img');
                             newImg.src = avatar_url;
                             newImg.alt = `${el.textContent.trim()}'s avatar`;
-                            // Set the correct classes for an image element
                             newImg.className = 'rounded-circle avatar-image';
-                            // Copy the inline styles to preserve the size (width/height)
                             newImg.style.cssText = el.style.cssText;
-                            newImg.style.objectFit = 'cover'; // Add this for consistency with the original img
-                            newImg.dataset.userId = user_id; // Re-apply the data-user-id for future updates
-
-                            // Replace the old div with our newly created img element.
+                            newImg.style.objectFit = 'cover';
+                            newImg.dataset.userId = user_id;
                             el.replaceWith(newImg);
                         }
                     });
@@ -1403,24 +1398,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (data.type === 'notification') NotificationManager.showNotification(data);
                 else if (data.type === 'sound') NotificationManager.playSound();
-                return;
+                return; // End processing for JSON events.
             }
-        } catch (e) {}
+        } catch (e) {
+            // Not a JSON message, so it's HTML. Proceed below.
+        }
+
+        // 2. If it's HTML, check if it's an OOB swap.
+        // If it is, we do nothing and let HTMX handle it automatically.
+        if (event.detail.message.includes('hx-swap-oob')) {
+             // HTMX will process this automatically. We just need to update the favicon.
+             FaviconManager.updateFavicon();
+             return;
+        }
+
+        // 3. If it's not JSON and not OOB, it must be a new message for the main chat window.
         const messagesContainer = document.getElementById('chat-messages-container');
         const mainContent = document.querySelector('main.main-content');
         const currentUserId = mainContent.dataset.currentUserId;
         const lastMessage = document.querySelector('#message-list > .message-container:last-child');
+
         if (lastMessage && messagesContainer) {
             const messageAuthorId = lastMessage.dataset.userId;
             if (messageAuthorId === currentUserId) {
-                setTimeout(scrollLastMessageIntoView, 0);
+                setTimeout(scrollLastMessageIntoView, 0); // Always scroll for our own messages
             } else {
                 if (userWasNearBottom) {
-                    setTimeout(scrollLastMessageIntoView, 0);
+                    setTimeout(scrollLastMessageIntoView, 0); // Scroll if we were already at the bottom
                 } else {
-                    if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
+                    if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block'; // Show the button if we were scrolled up
                 }
             }
+            // Process new elements in the message list
             initializeReactionPopovers(messagesContainer);
             processCodeBlocks(messagesContainer);
             const conversationDiv = messagesContainer.querySelector('[data-conversation-db-id]');
@@ -1429,6 +1438,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 handleMentionHighlights(messagesContainer, conversationId);
             }
         }
+        // A new message might affect the unread count if it contains a mention
         FaviconManager.updateFavicon();
     });
 
