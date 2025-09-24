@@ -142,7 +142,6 @@ def get_channel_chat(channel_id):
         + read_state_oob_html
     )
     response = make_response(full_response)
-    response.headers["HX-Trigger"] = "load-chat-history"
     return response
 
 

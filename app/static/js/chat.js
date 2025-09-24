@@ -1191,18 +1191,36 @@ document.addEventListener('DOMContentLoaded', () => {
         return messagesContainer.scrollHeight - messagesContainer.clientHeight - messagesContainer.scrollTop < 150;
     };
     const scrollLastMessageIntoView = () => {
-        const lastMessage = document.querySelector('#message-list > .message-container:last-child, #thread-replies-list > .message-container:last-child');
-        if (lastMessage) {
-            lastMessage.scrollIntoView({
+        const bottomAnchor = document.getElementById('message-list-bottom');
+        if (bottomAnchor) {
+            bottomAnchor.scrollIntoView({
                 behavior: "smooth",
                 block: "end"
             });
         }
     };
-    const scrollToBottomForce = () => {
-        if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
+    const scrollChatToPosition = () => {
+        // Use a tiny timeout to allow the browser's rendering engine to catch up
+        // with the new content from HTMX before we try to scroll.
+        setTimeout(() => {
+            const messagesContainer = document.getElementById('chat-messages-container');
+            if (!messagesContainer) return;
+
+            const separator = messagesContainer.querySelector('.new-message-separator');
+            if (separator) {
+                // Scroll to the "New Messages" line if it exists.
+                separator.scrollIntoView({
+                    behavior: 'auto',
+                    block: 'center'
+                });
+            } else {
+                // Otherwise, find our anchor and scroll to it. This is the most reliable way.
+                const bottomAnchor = messagesContainer.querySelector('#message-list-bottom');
+                if (bottomAnchor) {
+                    bottomAnchor.scrollIntoView({ behavior: 'auto', block: 'end' });
+                }
+            }
+        }, 1); // A 1ms delay is enough to push this to the next browser task.
     };
     const initializeTooltips = (container) => {
         const tooltipTriggerList = container.querySelectorAll('[data-bs-toggle="tooltip"]');
@@ -1324,34 +1342,32 @@ document.addEventListener('DOMContentLoaded', () => {
         userWasNearBottom = isUserNearBottom();
     });
 
-    document.body.addEventListener('htmx:afterSwap', (event) => {
-        try {
-            const data = JSON.parse(event.detail.message);
-            if (typeof data === 'object' && data.type) {
-                if (data.type === 'typing_update') { updateTypingIndicator(data.typists); }
-                if (data.type === 'avatar_update') {
-                    const { user_id, avatar_url } = data;
-                    const avatarImages = document.querySelectorAll(`.avatar-image[data-user-id="${user_id}"]`);
-                    avatarImages.forEach(el => {
-                        if (el.tagName === 'IMG') {
-                            el.src = avatar_url;
-                        } else {
-                            const newImg = document.createElement('img');
-                            newImg.src = avatar_url;
-                            newImg.alt = `${el.textContent.trim()}'s avatar`;
-                            newImg.className = 'rounded-circle avatar-image';
-                            newImg.style.cssText = el.style.cssText;
-                            newImg.style.objectFit = 'cover';
-                            newImg.dataset.userId = user_id;
-                            el.replaceWith(newImg);
-                        }
-                    });
+    document.body.addEventListener('htmx:afterSettle', (event) => {
+        const target = event.detail.target;
+
+        // --- Scrolling logic for new chat history ---
+        // This is the main fix for the issue.
+        if (target.id === 'chat-messages-container') {
+            scrollChatToPosition();
+        }
+
+        // Re-initialize dynamic components on the newly swapped content.
+        // This prevents things like tooltips and popovers from breaking after a swap.
+        if (target) {
+            initializeTooltips(target);
+            updateReactionHighlights(target);
+            initializeReactionPopovers(target);
+            processCodeBlocks(target);
+
+            // If the swapped content is the main chat container,
+            // also handle highlighting any new mentions.
+            if (target.id === 'chat-messages-container') {
+                const conversationDiv = target.querySelector('[data-conversation-db-id]');
+                if (conversationDiv) {
+                    const conversationId = conversationDiv.dataset.conversationDbId;
+                    handleMentionHighlights(target, conversationId);
                 }
-                if (data.type === 'notification') NotificationManager.showNotification(data);
-                else if (data.type === 'sound') NotificationManager.playSound();
             }
-        } catch (e) {
-            // This is an HTML message, do nothing and let HTMX handle it.
         }
     });
 

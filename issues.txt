@@ -1,7 +1,5 @@
 Current issues with the slack_clone:
 
-The chat window is no longer auto-scrolling while I type.
-
 Testing Party:
   - There is a security issue with the way sessions are handled. If a user has a stale session and I delete the database and the user reloads their browser, they will be given access to a different user with the same user Id.  This isn't good.
   - Editing a codeblock is broken in rich edit mode.

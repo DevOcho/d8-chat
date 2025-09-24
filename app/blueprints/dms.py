@@ -128,18 +128,18 @@ def get_dm_chat(other_user_id):
         conversation_id_str=conv_id_str, defaults={"type": "dm"}
     )
 
-    # When a DM is viewed, update the timestamp for BOTH users involved.
+    # Ensure a conversation status record exists for both users.
     status, created = UserConversationStatus.get_or_create(
         user=g.user, conversation=conversation
     )
     UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
 
+    # This is the timestamp of the last message the current user has seen.
     last_read_timestamp = status.last_read_timestamp
 
-    now = datetime.datetime.now()
-    UserConversationStatus.update(last_read_timestamp=now).where(
-        UserConversationStatus.conversation == conversation
-    ).execute()
+    # Now, update the timestamp for ONLY the current user to mark messages as read.
+    status.last_read_timestamp = datetime.datetime.now()
+    status.save()
 
     messages = list(
         Message.select()
@@ -211,7 +211,6 @@ def get_dm_chat(other_user_id):
         + read_state_oob_html
     )
     response = make_response(full_response)
-    response.headers["HX-Trigger"] = "load-chat-history"
     return response
 
 
