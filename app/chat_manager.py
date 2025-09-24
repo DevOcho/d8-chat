@@ -1,5 +1,7 @@
 # app/chat_manager.py
 import json
+import datetime
+from .models import Conversation, UserConversationStatus
 
 
 class ChatManager:
@@ -63,6 +65,28 @@ class ChatManager:
     def unsubscribe(self, ws):
         if hasattr(ws, "channel_id") and ws.channel_id:
             channel_id = ws.channel_id
+
+            # When a user leaves a channel, update their last read timestamp.
+            # This ensures that messages seen via WebSocket are marked as read.
+            if hasattr(ws, "user") and ws.user:
+                try:
+                    conversation = Conversation.get_or_none(
+                        conversation_id_str=channel_id
+                    )
+                    if conversation:
+                        (
+                            UserConversationStatus.update(
+                                last_read_timestamp=datetime.datetime.now()
+                            )
+                            .where(
+                                (UserConversationStatus.user == ws.user)
+                                & (UserConversationStatus.conversation == conversation)
+                            )
+                            .execute()
+                        )
+                except Exception as e:
+                    print(f"Error updating last_read_timestamp on unsubscribe: {e}")
+
             if channel_id in self.active_connections:
                 self.active_connections[channel_id].discard(ws)
                 print(f"Client {ws} unsubscribed from channel {channel_id}")
