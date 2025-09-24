@@ -1323,42 +1323,44 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.addEventListener('htmx:wsBeforeMessage', function() {
         userWasNearBottom = isUserNearBottom();
     });
+
     document.body.addEventListener('htmx:afterSwap', (event) => {
-        const target = event.detail.target;
-        if (target.id === 'search-results-overlay') {
-            if (!event.detail.xhr.responseText.trim()) {
-                hideSearch();
-                return;
+        try {
+            const data = JSON.parse(event.detail.message);
+            if (typeof data === 'object' && data.type) {
+                if (data.type === 'typing_update') { updateTypingIndicator(data.typists); }
+                if (data.type === 'avatar_update') {
+                    const { user_id, avatar_url } = data;
+                    const avatarImages = document.querySelectorAll(`.avatar-image[data-user-id="${user_id}"]`);
+                    avatarImages.forEach(el => {
+                        if (el.tagName === 'IMG') {
+                            el.src = avatar_url;
+                        } else {
+                            const newImg = document.createElement('img');
+                            newImg.src = avatar_url;
+                            newImg.alt = `${el.textContent.trim()}'s avatar`;
+                            newImg.className = 'rounded-circle avatar-image';
+                            newImg.style.cssText = el.style.cssText;
+                            newImg.style.objectFit = 'cover';
+                            newImg.dataset.userId = user_id;
+                            el.replaceWith(newImg);
+                        }
+                    });
+                }
+                if (data.type === 'notification') NotificationManager.showNotification(data);
+                else if (data.type === 'sound') NotificationManager.playSound();
             }
-            searchOverlay.style.display = 'flex';
-            const closeSearchBtn = document.getElementById('close-search-btn');
-            if (closeSearchBtn) {
-                closeSearchBtn.addEventListener('click', hideSearch);
-            }
-            return;
+        } catch (e) {
+            // This is an HTML message, do nothing and let HTMX handle it.
         }
-        processCodeBlocks(target);
-        initializeReactionPopovers(target);
-        updateReactionHighlights(target);
-        initializeTooltips(target);
-        if (target.id === 'chat-messages-container' && event.detail.requestConfig.verb === 'get') {
-            setTimeout(scrollToBottomForce, 50);
-            if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'none';
-            if (window.mainEditor) {
-                window.mainEditor.focusActiveInput();
-            }
-            const conversationDiv = target.querySelector('[data-conversation-db-id]');
-            if (conversationDiv) {
-                const conversationId = conversationDiv.dataset.conversationDbId;
-                handleMentionHighlights(target, conversationId);
-            }
-        }
-        FaviconManager.updateFavicon();
     });
+
     document.body.addEventListener('htmx:oobAfterSwap', function(evt) {
-        const targetList = evt.detail.target;
-        if (targetList && targetList.id.startsWith('thread-replies-list-')) {
-            const scrollableContainer = targetList.closest('.flex-grow-1[style*="overflow-y: auto"]');
+        const target = evt.detail.target; // The element that was swapped.
+
+        // --- Scrolling logic for new messages in a thread ---
+        if (target && target.id.startsWith('thread-replies-list-')) {
+            const scrollableContainer = target.closest('.flex-grow-1[style*="overflow-y: auto"]');
             if (scrollableContainer) {
                 const isNearBottom = scrollableContainer.scrollHeight - scrollableContainer.clientHeight - scrollableContainer.scrollTop < 150;
                 if (isNearBottom) {
@@ -1368,7 +1370,49 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                 }
             }
+            // Initialize dynamic elements on the newly added message
+            const lastMessageInThread = target.lastElementChild;
+            if(lastMessageInThread) {
+                initializeReactionPopovers(lastMessageInThread);
+                processCodeBlocks(lastMessageInThread);
+            }
         }
+
+        // --- Scrolling logic for new messages in the main chat view ---
+        if (target && target.id === 'message-list') {
+            const messagesContainer = document.getElementById('chat-messages-container');
+            const mainContent = document.querySelector('main.main-content');
+            const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
+            const currentUserId = mainContent.dataset.currentUserId;
+            // The OOB swap added content. The target IS the message-list.
+            const lastMessage = target.querySelector('.message-container:last-child, .system-message:last-child');
+
+            if (lastMessage && messagesContainer) {
+                const messageAuthorId = lastMessage.dataset.userId;
+
+                if (messageAuthorId === currentUserId) {
+                // Always scroll for our own messages
+                    setTimeout(scrollLastMessageIntoView, 0);
+                } else {
+                    // For messages from others (or system messages)
+                    if (userWasNearBottom) {
+                        setTimeout(scrollLastMessageIntoView, 0);
+                    } else {
+                        if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
+                    }
+                }
+
+                // Since a new message was added, initialize its dynamic elements.
+                if (lastMessage.matches('.message-container')) {
+                    initializeReactionPopovers(lastMessage);
+                    processCodeBlocks(lastMessage);
+                    updateReactionHighlights(lastMessage); // Ensure reactions are highlighted correctly
+                }
+            }
+        }
+
+        // After any OOB swap, it's possible the unread count changed.
+        FaviconManager.updateFavicon();
     });
 
     document.body.addEventListener('htmx:wsAfterMessage', (event) => {

@@ -1,5 +1,7 @@
 Current issues with the slack_clone:
 
+The chat window is no longer auto-scrolling while I type.
+
 Testing Party:
   - There is a security issue with the way sessions are handled. If a user has a stale session and I delete the database and the user reloads their browser, they will be given access to a different user with the same user Id.  This isn't good.
   - Editing a codeblock is broken in rich edit mode.
@@ -23,6 +25,8 @@ i18n
 If the server disconnects, it will reconnect for users at different times.  Messages sent while the other user is reconnecting are lost until a page refresh when they will show up for a user.  On the reconnect we probably need to reload the messages or do a full page refresh.
 
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
+
+We let the user set a timezone in their profile but we don't use it to calculate the time.
 
 ========
 
