@@ -406,7 +406,7 @@ emoji-picker {
 }
 
 /* --- Attachment Preview Styles --- */
-#attachment-previews.has-attachments {
+[id^="attachment-previews"].has-attachments {
     display: flex !important; /* Override the inline style to show the container */
     border-bottom: 1px solid #dee2e6;
 }
@@ -444,11 +444,11 @@ emoji-picker {
     justify-content: center;
 }
 
-[data-bs-theme="dark"] #attachment-previews.has-attachments {
+[data-bs-theme="dark"] [id^="attachment-previews"].has-attachments {
     border-bottom-color: #2f3136 !important;
 }
 
-[data-bs-theme="dark"] #attachment-previews {
+[data-bs-theme="dark"] [id^="attachment-previews"] {
     border-bottom-color: #2f3136 !important;
 }
 
