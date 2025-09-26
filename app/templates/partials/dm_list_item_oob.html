@@ -1,30 +1,33 @@
 <div hx-swap-oob="beforeend:#dm-list">
-    <li class="mt-2">
-        <div class="d-flex justify-content-between align-items-center">
-            <div class="d-flex align-items-center">
-                <div class="sidebar-avatar me-2">
-                    {% with user=user, size=24 %}
-                        {% include 'partials/_avatar_display.html' %}
-                    {% endwith %}
-                    <!-- Presence Indicator Dot -->
-                    {% set presence_class = "presence-away" %} {# Default offline #}
-                    {% if is_online %}
-                        {% if user.presence_status == 'busy' %}
-                            {% set presence_class = "presence-busy" %}
-                        {% else %}
-                            {% set presence_class = "presence-online" %}
+    <li class="mt-1">
+        <a href="#"
+           class="sidebar-item-link"
+           hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"
+           hx-target="#chat-messages-container">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    <div class="sidebar-avatar me-2">
+                        {% with user=user, size=24 %}
+                            {% include 'partials/_avatar_display.html' %}
+                        {% endwith %}
+                        <!-- Presence Indicator Dot -->
+                        {% set presence_class = "presence-away" %} {# Default offline #}
+                        {% if is_online %}
+                            {% if user.presence_status == 'busy' %}
+                                {% set presence_class = "presence-busy" %}
+                            {% else %}
+                                {% set presence_class = "presence-online" %}
+                            {% endif %}
                         {% endif %}
-                    {% endif %}
-                    <span id="status-dot-{{ user.id }}"
-                          class="presence-indicator {{ presence_class }}"></span>
+                        <span id="status-dot-{{ user.id }}"
+                              class="presence-indicator {{ presence_class }}"></span>
+                    </div>
+                    <span id="link-{{ conv_id_str }}" class="text-decoration-none text-light">
+                        {{ user.display_name or user.username }}
+                    </span>
                 </div>
-                <a href="#"
-                   id="link-{{ conv_id_str }}"
-                   class="text-decoration-none text-light"
-                   hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"
-                   hx-target="#chat-messages-container">{{ user.display_name or user.username }}</a>
+                <span id="unread-badge-{{ conv_id_str }}"></span>
             </div>
-            <span id="unread-badge-{{ conv_id_str }}"></span>
-        </div>
+        </a>
     </li>
 </div>

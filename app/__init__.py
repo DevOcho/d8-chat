@@ -1,7 +1,7 @@
 # app/__init__.py
 
-import re
 import os
+import re
 
 import bleach
 import emoji
@@ -48,7 +48,9 @@ def create_app(config_class=Config):
 
     if x_for > 0 or x_proto > 0:
         # We only pass parameters if their count is greater than 0
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=x_for, x_proto=x_proto, x_host=0, x_port=0, x_prefix=0)
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app, x_for=x_for, x_proto=x_proto, x_host=0, x_port=0, x_prefix=0
+        )
         app.logger.info(f"Applying ProxyFix with x_for={x_for}, x_proto={x_proto}.")
 
     # Ensure SECRET_KEY is set for session management
@@ -321,6 +323,15 @@ def create_app(config_class=Config):
         # Return the final HTML wrapped in a Markup object to prevent double-escaping by Jinja2.
         return Markup(safe_html)
 
+    # --- Register the helper function for rendering polls ---
+    @app.context_processor
+    def inject_poll_context_helper():
+        """Makes the get_poll_context function available to all templates."""
+        # We import here to avoid circular dependencies at startup.
+        from .blueprints.polls import get_poll_context
+
+        return dict(get_poll_context=get_poll_context)
+
     # --- Register custom template filter for just emojis ---
     @app.template_filter("emojize")
     def emojize_filter(content):
@@ -360,6 +371,7 @@ def create_app(config_class=Config):
     from .blueprints.channels import channels_bp
     from .blueprints.dms import dms_bp
     from .blueprints.files import files_bp
+    from .blueprints.polls import polls_bp
     from .blueprints.search import search_bp
     from .routes import main_bp
 
@@ -371,5 +383,6 @@ def create_app(config_class=Config):
     app.register_blueprint(dms_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(activity_bp)
+    app.register_blueprint(polls_bp)
 
     return app

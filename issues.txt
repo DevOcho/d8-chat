@@ -24,11 +24,9 @@ We need to develop an audit log for all chats so we can see if someone does some
 
 We let the user set a timezone in their profile but we don't use it to calculate the time.
 
+Remove all the silly ignoring this OOB message crap. It just clutters up the console and it looks like crap.
+
 ========
-
-Drop the new message indicator once a message is sent.
-
-We need to add a poll so people can vote on things.
 
 I'd like to detect passwords in messages and auto-redact them. (and give the user a toaster or some message that tells them they can send a password if they wrap it in a tag like <password>asdf</password>)
 

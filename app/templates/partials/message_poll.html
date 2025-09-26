@@ -1,0 +1,47 @@
+{# This partial renders the state of a poll and is swappable #}
+<div id="poll-{{ poll_context.poll.id }}">
+    <p class="mb-2">
+        <strong>{{ poll_context.poll.question }}</strong>
+        <br>
+        <small class="text-muted">
+            {# Only show total votes if the user has already voted #}
+            {% if poll_context.user_vote_option_id %}
+                <span id="poll-{{ poll_context.poll.id }}-total-votes">{{ poll_context.total_votes }} votes</span>
+            {% else %}
+                Select an option to see the results.
+            {% endif %}
+        </small>
+    </p>
+    <div class="d-grid gap-2">
+        {% for option in poll_context.options %}
+            {% set user_voted_for_this = (poll_context.user_vote_option_id == option.id) %}
+            {% set vote_percentage = (option.count / poll_context.total_votes * 100) if poll_context.total_votes > 0 else 0 %}
+            <div class="poll-option">
+                <button class="btn btn-outline-secondary w-100 text-start position-relative {% if user_voted_for_this %}user-voted-option{% endif %}"
+                        hx-post="{{ url_for('polls.vote_on_poll', option_id=option.id) }}"
+                        hx-target="#poll-{{ poll_context.poll.id }}"
+                        hx-swap="outerHTML">
+                    {# Conditionally render the progress bar #}
+                    {% if poll_context.user_vote_option_id %}
+                        <div id="poll-{{ poll_context.poll.id }}-option-{{ option.id }}-progress">
+                            <div class="poll-progress" style="width: {{ vote_percentage }}%;"></div>
+                        </div>
+                    {% endif %}
+                    <!-- Content on top of the progress bar -->
+                    <div class="poll-content d-flex justify-content-between align-items-center">
+                        <div>
+                            {% if user_voted_for_this %}<i class="bi bi-check-circle-fill me-2"></i>{% endif %}
+                            <span>{{ option.text }}</span>
+                        </div>
+                        {# Conditionally render the vote count badge #}
+                        {% if poll_context.user_vote_option_id %}
+                            <span class="badge rounded-pill bg-body-secondary">
+                                <span id="poll-{{ poll_context.poll.id }}-option-{{ option.id }}-count">{{ option.count }}</span>
+                            </span>
+                        {% endif %}
+                    </div>
+                </button>
+            </div>
+        {% endfor %}
+    </div>
+</div>

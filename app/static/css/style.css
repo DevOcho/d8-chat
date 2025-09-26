@@ -225,6 +225,57 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     margin: 0.5em 0;
 }
 
+/* --- Poll Styles --- */
+.poll-option .btn {
+    overflow: hidden; /* Keep progress bar contained */
+}
+
+.poll-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background-color: var(--bs-primary-bg-subtle); /* A light blue */
+    z-index: 1;
+    transition: width 0.3s ease-in-out;
+}
+
+.poll-content {
+    position: relative;
+    z-index: 2;
+}
+
+/* Set a more readable color for the vote count badge */
+.poll-option .badge {
+    color: var(--bs-emphasis-color);
+}
+
+/* Voted Option Styles (Light Mode) */
+.poll-option .btn.user-voted-option {
+    /* Use a standard Bootstrap variable for a nice blue that fits the theme */
+    border-color: var(--bs-primary);
+    border-width: 2px;
+}
+
+.poll-option .btn.user-voted-option i {
+    color: var(--bs-primary); /* Matching blue for the checkmark */
+}
+
+/* --- Dark Mode Overrides for Polls --- */
+[data-bs-theme="dark"] .poll-progress {
+    background-color: rgba(var(--bs-primary-rgb), 0.2);
+}
+
+[data-bs-theme="dark"] .poll-option .btn.user-voted-option {
+    /* Use a light gray/white border that stands out in dark mode */
+    border-color: var(--bs-gray-400);
+}
+
+[data-bs-theme="dark"] .poll-option .btn.user-voted-option i {
+    /* Make the checkmark match the border color */
+    color: var(--bs-gray-400);
+}
+
 /* --- Profile Button & Presence Styles --- */
 .workspace-logo { font-size: 1.2rem; font-weight: bold; padding: 0.5rem; background-color: #49274b; border-radius: 8px; width: 44px; height: 44px; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
 .profile-button-container { padding-bottom: 0.5rem; }
@@ -260,6 +311,24 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
 [data-bs-theme="dark"] .sidebar-avatar .presence-indicator {
     /* Match the dark mode channel sidebar background */
     border-color: #222529;
+}
+
+/* --- Sidebar Clickable Row Styles --- */
+.sidebar-item-link {
+    display: block; /* Make the link fill its container */
+    padding: 0.25rem 0.5rem;
+    margin: 0 -0.5rem; /* Offset the padding to align with other sidebar content */
+    border-radius: 4px;
+    text-decoration: none;
+    transition: background-color 0.15s ease-in-out;
+}
+
+.sidebar-item-link:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-bs-theme="dark"] .sidebar-item-link:hover {
+    background-color: #313a4a; /* A subtle dark gray for dark mode hover */
 }
 
 /* --- Dark Mode Overrides --- */

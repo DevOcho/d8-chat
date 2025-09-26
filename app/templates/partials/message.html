@@ -34,7 +34,16 @@
                     <p class="mb-0 text-muted">{{ message_to_quote.content | emojize | truncate(100) }}</p>
                 </div>
             {% endif %}
-            <div class="message-content {% if message.content | is_jumboable %}jumbo-emoji{% endif %}">{{ message.content | markdown }}</div>
+            {% if message.poll %}
+                {# The message has a poll, so we render our special partial. #}
+                {% set poll_context = get_poll_context(message.poll.get(), g.user) %}
+                {% include 'partials/message_poll.html' %}
+            {% else %}
+                {# This is a regular message, render it as before. #}
+                <div class="message-content {% if message.content | is_jumboable %}jumbo-emoji{% endif %}">
+                    {{ message.content | markdown }}
+                </div>
+            {% endif %}
             {# Thread reply indicator #}
             {% if not is_in_thread_view %}
                 {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}

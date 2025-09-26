@@ -254,3 +254,26 @@ class MessageAttachment(BaseModel):
 
     class Meta:
         primary_key = CompositeKey("message", "attachment")
+
+
+class Poll(BaseModel):
+    id = PrimaryKeyField()
+    # A poll is a special type of message. This links them.
+    message = ForeignKeyField(Message, backref="poll", unique=True)
+    question = TextField()
+    # We could add things here later, like multi-vote allowance or an expiry date.
+
+
+class PollOption(BaseModel):
+    id = PrimaryKeyField()
+    poll = ForeignKeyField(Poll, backref="options", on_delete="CASCADE")
+    text = TextField()
+
+
+class Vote(BaseModel):
+    # A user can only vote once per option in a given poll.
+    user = ForeignKeyField(User, backref="votes")
+    option = ForeignKeyField(PollOption, backref="votes", on_delete="CASCADE")
+
+    class Meta:
+        primary_key = CompositeKey("user", "option")

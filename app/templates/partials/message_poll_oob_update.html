@@ -1,0 +1,16 @@
+{# This partial contains ONLY the OOB swaps to update an existing poll view #}
+<!-- Update the total vote count -->
+<span id="poll-{{ poll_context.poll.id }}-total-votes"
+      hx-swap-oob="innerHTML">{{ poll_context.total_votes }} votes</span>
+<!-- Loop through options to update each progress bar and count -->
+{% for option in poll_context.options %}
+    {% set vote_percentage = (option.count / poll_context.total_votes * 100) if poll_context.total_votes > 0 else 0 %}
+    <!-- This replaces the entire progress bar div with a new one with the correct width -->
+    <div id="poll-{{ poll_context.poll.id }}-option-{{ option.id }}-progress"
+         hx-swap-oob="outerHTML">
+        <div class="poll-progress" style="width: {{ vote_percentage }}%;"></div>
+    </div>
+    <!-- This updates just the number inside the vote count badge -->
+    <span id="poll-{{ poll_context.poll.id }}-option-{{ option.id }}-count"
+          hx-swap-oob="innerHTML">{{ option.count }}</span>
+{% endfor %}

@@ -14,10 +14,13 @@ from app.models import (
     Message,
     MessageAttachment,
     MessageHashtag,
+    Poll,
+    PollOption,
     Reaction,
     UploadedFile,
     User,
     UserConversationStatus,
+    Vote,
     Workspace,
     WorkspaceMember,
     db,
@@ -38,6 +41,9 @@ ALL_MODELS = [
     UploadedFile,
     Hashtag,
     MessageHashtag,
+    Poll,
+    PollOption,
+    Vote,
 ]
 
 

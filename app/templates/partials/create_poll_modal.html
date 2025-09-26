@@ -1,0 +1,108 @@
+<form id="create-poll-form"
+      hx-post="{{ url_for('polls.create_poll') }}"
+      hx-target="this"
+      hx-swap="outerHTML">
+    <div class="modal-header">
+        <h5 class="modal-title">Create a Poll</h5>
+        <button type="button"
+                class="btn-close"
+                data-bs-dismiss="modal"
+                aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+        {% if error %}<div class="alert alert-danger" role="alert">{{ error }}</div>{% endif %}
+        <!--
+            This hidden input is crucial. It grabs the conversation ID from the
+            main page so the backend knows which channel to post the poll to.
+        -->
+        <input type="hidden"
+               name="conversation_id_str"
+               value=""
+               id="poll-conversation-id-input">
+        <div class="mb-3">
+            <label for="poll-question" class="form-label">
+                <strong>Question</strong>
+            </label>
+            <input type="text"
+                   class="form-control"
+                   id="poll-question"
+                   name="question"
+                   placeholder="e.g., Where should we go for lunch?"
+                   value="{{ question or '' }}"
+                   required>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">
+                <strong>Options</strong>
+            </label>
+            <div id="poll-options-container">
+                <!-- Options will be added here by JS -->
+            </div>
+            <button type="button"
+                    id="add-poll-option-btn"
+                    class="btn btn-sm btn-secondary mt-2">
+                <i class="bi bi-plus-circle"></i> Add Option
+            </button>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Create Poll</button>
+    </div>
+</form>
+<script>
+  (function() {
+    const container = document.getElementById('poll-options-container');
+    const addButton = document.getElementById('add-poll-option-btn');
+    const existingOptions = {{ options | tojson | safe if options else '[]' }};
+    const maxOptions = 10;
+    let optionCount = 0;
+
+    // Set the hidden conversation ID input
+    const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+    if (activeConv) {
+        document.getElementById('poll-conversation-id-input').value = activeConv.dataset.conversationId;
+    }
+
+    const addOption = (value = '') => {
+      if (optionCount >= maxOptions) {
+        addButton.style.display = 'none';
+        return;
+      }
+      optionCount++;
+      const div = document.createElement('div');
+      div.className = 'input-group mb-2';
+      div.innerHTML = `
+        <input type="text" class="form-control" name="options[]" placeholder="Option ${optionCount}" value="${value}" required>
+        <button class="btn btn-outline-danger remove-poll-option-btn" type="button" title="Remove option">
+            <i class="bi bi-x-lg"></i>
+        </button>
+      `;
+      container.appendChild(div);
+      if (optionCount >= maxOptions) {
+        addButton.style.display = 'none';
+      }
+    };
+
+    container.addEventListener('click', e => {
+      const removeButton = e.target.closest('.remove-poll-option-btn');
+      if (removeButton) {
+        removeButton.parentElement.remove();
+        optionCount--;
+        if (optionCount < maxOptions) {
+          addButton.style.display = 'inline-block';
+        }
+      }
+    });
+
+    addButton.addEventListener('click', () => addOption());
+
+    // Initialize with existing options (if form fails validation) or with 2 blank options
+    if (existingOptions.length > 0) {
+        existingOptions.forEach(opt => addOption(opt));
+    } else {
+        addOption();
+        addOption();
+    }
+  })();
+</script>

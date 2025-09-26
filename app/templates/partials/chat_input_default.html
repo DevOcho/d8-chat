@@ -67,6 +67,15 @@
                 <button type="button" id="emoji-btn" title="Add Emoji">
                     <i class="bi bi-emoji-smile"></i>
                 </button>
+                <button type="button"
+                        id="poll-btn"
+                        title="Create a Poll"
+                        data-bs-toggle="modal"
+                        data-bs-target="#htmx-modal"
+                        hx-get="/chat/poll/create_form"
+                        hx-target="#htmx-modal-content">
+                    <i class="bi bi-bar-chart-steps"></i>
+                </button>
                 <div class="ms-auto d-flex align-items-center">
                     <button id="send-button"
                             type="submit"

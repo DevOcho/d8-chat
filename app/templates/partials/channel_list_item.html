@@ -3,15 +3,17 @@
     It appends the new, correctly-structured <li> to the #channel-list.
 -->
 <div hx-swap-oob="beforeend:#channel-list">
-    <li id="channel-item-{{ channel.id }}">
-        <div class="d-flex justify-content-between align-items-center">
-            <a href="#"
-               id="link-channel_{{ channel.id }}"
-               class="text-decoration-none text-light"
-               hx-get="/chat/channel/{{ channel.id }}"
-               hx-target="#chat-messages-container"># {{ channel.name }}</a>
-            {# The badge will be empty initially, but the container must exist #}
-            <span id="unread-badge-channel_{{ channel.id }}"></span>
-        </div>
+    <li id="channel-item-{{ channel.id }}" class="mt-1">
+        <a href="#"
+           class="sidebar-item-link"
+           hx-get="/chat/channel/{{ channel.id }}"
+           hx-target="#chat-messages-container">
+            <div class="d-flex justify-content-between align-items-center">
+                <span id="link-channel_{{ channel.id }}"
+                      class="text-decoration-none text-light"># {{ channel.name }}</span>
+                {# The badge will be empty initially, but the container must exist #}
+                <span id="unread-badge-channel_{{ channel.id }}"></span>
+            </div>
+        </a>
     </li>
 </div>
