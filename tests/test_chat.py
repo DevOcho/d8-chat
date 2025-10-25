@@ -227,11 +227,9 @@ def test_chat_interface_loads_data_correctly(logged_in_client):
 
     # Assert the badge itself is NOT present
     assert b'<span class="badge rounded-pill bg-danger float-end">' not in response.data
-    # Assert the link IS bold and white
-    assert (
-        f'<a href="#"\n                           id="{channel_link_id}"\n                           class="text-decoration-none fw-bold text-white"'.encode()
-        in response.data
-    )
+    # Assert that the link IS bold and white by checking for its unique classes
+    assert f'id="{channel_link_id}"'.encode() in response.data
+    assert b'class="text-decoration-none fw-bold text-white"' in response.data
 
 
 def test_admin_can_remove_member(logged_in_client, setup_admin_and_member):

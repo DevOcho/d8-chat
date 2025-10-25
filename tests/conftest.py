@@ -16,10 +16,13 @@ from app.models import (
     Message,
     MessageAttachment,
     MessageHashtag,
+    Poll,
+    PollOption,
     Reaction,
     UploadedFile,
     User,
     UserConversationStatus,
+    Vote,
     Workspace,
     WorkspaceMember,
     db,
@@ -69,6 +72,9 @@ def test_db(app):
             MessageAttachment,
             Hashtag,
             MessageHashtag,
+            Poll,
+            PollOption,
+            Vote,
         ]
 
         db.create_tables(tables)

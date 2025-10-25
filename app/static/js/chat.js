@@ -1138,11 +1138,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
         const targetSelector = evt.detail.target;
         if (!targetSelector) {
-            console.log("Ignoring harmless OOB update for an undefined target.");
-            return;
-        }
-        if (targetSelector.startsWith('#status-dot-') || targetSelector.startsWith('#sidebar-presence-indicator-') || targetSelector.startsWith('#thread-replies-list-') || targetSelector.startsWith('#reactions-container-')) {
-            console.log(`Ignoring harmless OOB update for non-visible target: ${targetSelector}`);
+            console.log("Ignoring OOB update for an undefined target.");
             return;
         }
         const errorMessage = `A UI update failed because the target '${targetSelector}' could not be found.`;
@@ -1437,6 +1433,22 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = JSON.parse(event.detail.message);
             if (typeof data === 'object' && data.type) {
                 if (data.type === 'typing_update') { updateTypingIndicator(data.typists); return; }
+
+                if (data.type === 'presence_update') {
+                    const { user_id, status_class } = data;
+
+                    // Find all possible presence indicators for this user on the page
+                    const indicators = document.querySelectorAll(
+                        `#status-dot-${user_id}, #sidebar-presence-indicator-${user_id}, #profile-presence-indicator-${user_id}`
+                    );
+
+                    indicators.forEach(indicator => {
+                        // Replace the old status class with the new one
+                        indicator.className = indicator.className.replace(/presence-(online|away|busy)/, status_class);
+                    });
+                    return; // End processing for this event
+                }
+
                 if (data.type === 'avatar_update') {
                     const { user_id, avatar_url } = data;
                     const avatarImages = document.querySelectorAll(`.avatar-image[data-user-id="${user_id}"]`);

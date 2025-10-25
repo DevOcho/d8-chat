@@ -906,39 +906,39 @@ def toggle_reaction(message_id):
 @main_bp.route("/profile/status", methods=["PUT"])
 @login_required
 def update_presence_status():
-    """Updates the user's presence status and broadcasts the change."""
+    """Updates the user's presence status and broadcasts the change as a JSON event."""
     new_status = request.form.get("status")
-    if new_status and new_status in STATUS_CLASS_MAP:
-        user = g.user
-        user.presence_status = new_status
-        user.save()
+    if new_status not in ["online", "away", "busy"]:
+        return "Invalid status", 400
 
-        # Use consistent presence classes for all broadcasts
-        presence_class_map = {
-            "online": "presence-online",
-            "away": "presence-away",
-            "busy": "presence-busy",
-        }
-        presence_class = presence_class_map.get(new_status, "presence-away")
+    user = g.user
+    user.presence_status = new_status
+    user.save()
 
-        # Broadcast the DM list update
-        dm_list_presence_html = f'<span id="status-dot-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
-        chat_manager.broadcast_to_all(dm_list_presence_html)
+    # Define the CSS class that corresponds to the new status
+    presence_class_map = {
+        "online": "presence-online",
+        "away": "presence-away",
+        "busy": "presence-busy",
+    }
+    status_class = presence_class_map.get(new_status)
 
-        # Broadcast the sidebar button update
-        sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
-        chat_manager.broadcast_to_all(sidebar_presence_html)
+    # Create a JSON payload to broadcast
+    payload = {
+        "type": "presence_update",
+        "user_id": user.id,
+        "status_class": status_class,
+    }
+    # broadcast_to_all will publish this to Valkey on the global channel
+    chat_manager.broadcast_to_all(payload)
 
-        # Prepare the multi-part HTTP response for the user who made the change.
-        profile_header_html = render_template(
-            "partials/profile_header.html", user=g.user
-        )
-        sidebar_button_html = render_template("partials/_sidebar_profile_button.html")
-        sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
+    # The user who made the change still gets an immediate UI update via HTMX.
+    # This part remains the same.
+    profile_header_html = render_template("partials/profile_header.html", user=g.user)
+    sidebar_button_html = render_template("partials/_sidebar_profile_button.html")
+    sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
 
-        return make_response(profile_header_html + sidebar_oob_swap)
-
-    return "Invalid status", 400
+    return make_response(profile_header_html + sidebar_oob_swap)
 
 
 @main_bp.route("/profile/theme", methods=["PUT"])
@@ -1247,7 +1247,6 @@ def chat(ws):
         return
 
     ws.user = user
-
     chat_manager.set_online(user.id, ws)
 
     presence_class_map = {
@@ -1255,15 +1254,15 @@ def chat(ws):
         "away": "presence-away",
         "busy": "presence-busy",
     }
-    presence_class = presence_class_map.get(user.presence_status, "presence-away")
+    status_class = presence_class_map.get(user.presence_status, "presence-away")
 
-    # Update for the DM list
-    dm_list_presence_html = f'<span id="status-dot-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
-    chat_manager.broadcast_to_all(dm_list_presence_html)
-
-    # Update for the main sidebar profile button
-    sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user.id}" class="presence-indicator {presence_class}" hx-swap-oob="true"></span>'
-    chat_manager.broadcast_to_all(sidebar_presence_html)
+    # Broadcast a JSON event to announce the user's current status
+    payload = {
+        "type": "presence_update",
+        "user_id": user.id,
+        "status_class": status_class,
+    }
+    chat_manager.broadcast_to_all(payload)
 
     try:
         while True:
@@ -1583,12 +1582,13 @@ def chat(ws):
             user_id = ws.user.id
             chat_manager.set_offline(user_id)
 
-            # Broadcast consistent updates for BOTH indicators on disconnect
-            dm_list_presence_html = f'<span id="status-dot-{user_id}" class="presence-indicator presence-away" hx-swap-oob="true"></span>'
-            chat_manager.broadcast_to_all(dm_list_presence_html)
-
-            sidebar_presence_html = f'<span id="sidebar-presence-indicator-{user_id}" class="presence-indicator presence-away" hx-swap-oob="true"></span>'
-            chat_manager.broadcast_to_all(sidebar_presence_html)
+            # Broadcast a JSON event to announce the user is now 'away'
+            payload = {
+                "type": "presence_update",
+                "user_id": user_id,
+                "status_class": "presence-away",  # On disconnect, user is always away
+            }
+            chat_manager.broadcast_to_all(payload)
 
             chat_manager.unsubscribe(ws)
             print(f"INFO: Client connection closed for '{ws.user.username}'.")

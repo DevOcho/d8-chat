@@ -112,173 +112,121 @@ def create_app(config_class=Config):
     @app.template_filter("markdown")
     def markdown_filter(content, context="display"):
         """
-        Converts Markdown content to sanitized HTML.
+        Converts Markdown content to sanitized HTML using a robust multi-stage pipeline.
 
-        This filter is a multi-stage pipeline designed to safely and correctly
-        render user-generated content:
-        1.  Converts emoji shortcodes (e.g., :smile:) to Unicode characters.
-        2.  Linkifies @mentions to user profiles and special keywords.
-        3.  Escapes single-hashtag headers (`# header`) to prevent them from
-            becoming `<h1>` tags, reserving `##` and `###` for headers.
-        4.  Linkifies #channel-names to their respective channels.
-        5.  Separates and processes fenced code blocks for syntax highlighting,
-            replacing them with a placeholder to protect them from sanitization.
-        6.  Converts the remaining Markdown to HTML.
-        7.  Linkifies standard URLs (e.g., google.com).
-        8.  Sanitizes the resulting HTML to prevent XSS attacks.
-        9.  Re-inserts the syntax-highlighted code blocks.
-        10. Returns the final, safe-to-render HTML Markup object.
+        This filter is designed to safely render user-generated content by separating
+        custom HTML generation (like mentions and channel links) from the main Markdown
+        parsing and sanitization process. This is achieved using placeholders.
+
+        The pipeline is as follows:
+        1.  Convert emoji shortcodes (e.g., :smile:) to Unicode characters.
+        2.  Find all custom patterns (@mentions, #channels), generate their final
+            HTML link tags, store them in lists, and replace them in the source
+            text with unique, safe placeholders (e.g., D8CHATMENTIONPLACEHOLDER0).
+        3.  Escape single-hashtag headers to reserve them for channel/hashtag links.
+        4.  Extract and process fenced code blocks, replacing them with placeholders.
+        5.  Process the remaining "safe" Markdown (which now only contains basic
+            formatting and placeholders) into HTML.
+        6.  Sanitize the resulting HTML with Bleach to prevent XSS attacks. The
+            placeholders are plain text and will pass through the sanitizer untouched.
+        7.  Re-insert the pre-generated, safe HTML for mentions, channels, and
+            code blocks back into the sanitized HTML, replacing the placeholders.
+        8.  Return the final, safe-to-render HTML Markup object.
         """
+        # --- Stage 0: Setup placeholder lists ---
+        # These lists will hold the final HTML for our custom elements.
+        mention_links = []
+        channel_links = []
+        code_blocks = []
+
         # --- Stage 1: Initial Emoji Conversion ---
-        # We run this first to ensure that any emoji shortcodes are converted
-        # to their Unicode equivalents before any regex parsing begins.
+        # Convert shortcodes like :smile: to their Unicode equivalents (e.g., 😄)
+        # before any regex parsing begins.
         content_with_emojis = emoji.emojize(content, language="alias")
 
-        # --- Stage 2: Mention Linkification ---
-        # Find all potential @username patterns.
+        # --- Stage 2: Extract & Replace Mentions with Placeholders ---
         mention_pattern = r"@(\w+)"
         usernames = set(re.findall(mention_pattern, content_with_emojis))
-
-        # Separate special keywords from potential user mentions to avoid unnecessary DB queries.
         special_mentions = {"here", "channel"}
         user_mentions_to_find = list(usernames - special_mentions)
         user_map = {}
         if user_mentions_to_find:
-            from .models import User  # Import here to avoid circular dependency
+            from .models import User  # Late import to prevent circular dependency
 
-            # Query the database once for all potential usernames found.
             users = User.select().where(User.username.in_(user_mentions_to_find))
             user_map = {u.username: u for u in users}
 
-        # This function is used by re.sub to perform the replacement logic.
-        def replace_mention(match):
+        def extract_mention(match):
             username = match.group(1)
-            # Handle special mentions with a distinct style.
+            # Generate the final HTML for the mention link.
             if username in special_mentions:
-                return f'<strong class="mention-special">@{username}</strong>'
-
-            # Handle valid user mentions by creating an HTMX link.
-            user = user_map.get(username)
-            if user:
+                link_html = f'<strong class="mention-special">@{username}</strong>'
+            elif username in user_map:
+                user = user_map[username]
                 dm_url = url_for("dms.get_dm_chat", other_user_id=user.id)
-                return f'<a href="#" class="mention-link" hx-get="{dm_url}" hx-target="#chat-messages-container">@{username}</a>'
+                link_html = f'<a href="#" class="mention-link" hx-get="{dm_url}" hx-target="#chat-messages-container">@{username}</a>'
             else:
-                # If it's not a special mention or a valid user, return the original text.
-                return match.group(0)
+                return match.group(0)  # Not a valid mention, leave it as is.
 
-        # Perform the substitution on the content.
-        content_with_mentions = re.sub(
-            mention_pattern, replace_mention, content_with_emojis
+            # Store the final HTML and return a placeholder.
+            mention_links.append(link_html)
+            return f"D8CHATMENTIONPLACEHOLDER{len(mention_links) - 1}"
+
+        content_with_mention_placeholders = re.sub(
+            mention_pattern, extract_mention, content_with_emojis
         )
 
         # --- Stage 3: Pre-process to "defuse" H1-style Markdown headers ---
-        # The Markdown library aggressively converts any line starting with `# ` into an `<h1>`.
-        # We want to reserve this for channel links. This function finds those lines and
-        # prepends a backslash, telling the Markdown parser to treat the '#' as a literal character.
+        # This prevents lines like "# header" from becoming <h1>, reserving the single '#'
+        # for our channel/hashtag link logic.
         def escape_h1_headers(text):
             lines = text.split("\n")
-            processed_lines = []
-            for line in lines:
-                stripped_line = line.strip()
-                # Check for `# ` but ignore `## ` and `### `
-                if stripped_line.startswith("# ") and not stripped_line.startswith(
-                    "##"
-                ):
-                    processed_lines.append("\\" + line)
-                else:
-                    processed_lines.append(line)
+            processed_lines = [
+                "\\" + line
+                if line.strip().startswith("# ") and not line.strip().startswith("##")
+                else line
+                for line in lines
+            ]
             return "\n".join(processed_lines)
 
-        content_preprocessed = escape_h1_headers(content_with_mentions)
+        content_preprocessed = escape_h1_headers(content_with_mention_placeholders)
 
-        # --- Stage 4: Channel Linkification ---
-        # This regex uses a "negative lookbehind" `(?<!#)` to find `#channel-name`
-        # but ignore `##header`, ensuring we only match potential channel links.
+        # --- Stage 4: Extract & Replace Channels/Hashtags with Placeholders ---
         channel_pattern = r"(?<!#)#([a-zA-Z0-9_-]+)"
         potential_channel_names = set(re.findall(channel_pattern, content_preprocessed))
-
         channel_map = {}
         if potential_channel_names:
-            from .models import Channel  # Import here to avoid circular dependency
+            from .models import Channel  # Late import
 
-            # Query the database once for all potential channel names.
             channels = Channel.select().where(
                 Channel.name.in_(list(potential_channel_names))
             )
             channel_map = {c.name: c for c in channels}
 
-        # This function replaces valid channel tags with HTMX links.
-        def replace_channel_tag(match):
-            channel_name = match.group(1)
-            channel = channel_map.get(channel_name)
-            if channel:
-                # If the channel exists, create a link to it.
+        def extract_channel_tag(match):
+            tag_name = match.group(1)
+            # Generate the final HTML for the channel or hashtag link.
+            if tag_name in channel_map:
+                channel = channel_map[tag_name]
                 channel_url = url_for(
                     "channels.get_channel_chat", channel_id=channel.id
                 )
-                return f'<a href="#" class="channel-link" hx-get="{channel_url}" hx-target="#chat-messages-container">#{channel_name}</a>'
+                link_html = f'<a href="#" class="channel-link" hx-get="{channel_url}" hx-target="#chat-messages-container">#{tag_name}</a>'
             else:
-                # This is not a real channel, so render it as a searchable hashtag.
-                # The search query will include the '#' character.
-                search_url = url_for("search.search", q=f"#{channel_name}")
-                return f'<a href="#" class="hashtag-link" hx-get="{search_url}" hx-target="#search-results-overlay" hx-swap="innerHTML">#{channel_name}</a>'
+                search_url = url_for("search.search", q=f"#{tag_name}")
+                link_html = f'<a href="#" class="hashtag-link" hx-get="{search_url}" hx-target="#search-results-overlay" hx-swap="innerHTML">#{tag_name}</a>'
 
-        content_with_channels = re.sub(
-            channel_pattern, replace_channel_tag, content_preprocessed
+            # Store the final HTML and return a placeholder.
+            channel_links.append(link_html)
+            return f"D8CHATCHANNELPLACEHOLDER{len(channel_links) - 1}"
+
+        content_with_all_placeholders = re.sub(
+            channel_pattern, extract_channel_tag, content_preprocessed
         )
 
-        # --- Stage 5: Main Markdown Processing ---
-        # Define the HTML tags and attributes we will allow in the final, sanitized output.
-        allowed_tags = [
-            "p",
-            "br",
-            "strong",
-            "em",
-            "del",
-            "sub",
-            "sup",
-            "ul",
-            "ol",
-            "li",
-            "blockquote",
-            "pre",
-            "code",
-            "span",
-            "div",
-            "a",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "table",
-            "thead",
-            "tbody",
-            "tr",
-            "th",
-            "td",
-        ]
-        allowed_attrs = {
-            "*": ["class"],
-            "a": ["href", "rel", "target", "hx-get", "hx-target", "hx-swap"],
-        }
-
-        # --- Pass 1: Extract and process code blocks separately ---
-        # We do this because the sanitizer (bleach) would strip the syntax highlighting tags.
-        code_blocks = []
-
+        # --- Stage 5: Extract & Replace Code Blocks ---
+        # This is done to protect the syntax-highlighted HTML from the sanitizer.
         def extract_and_process_code_block(m):
-            # If the context is 'edit', we generate a simple <pre> tag.
-            if context == "edit":
-                from markupsafe import escape
-
-                # This regex strips the fences and the language identifier.
-                code_content = re.sub(r"^```(\w*\n)?|```$", "", m.group(0)).strip()
-                # We wrap the escaped raw code in a simple <pre> tag.
-                block_html = f"<pre>{escape(code_content)}</pre>"
-            # For the default 'display' context, we use the full syntax highlighter.
-            # Process the code block with the 'codehilite' extension.
             block_html = markdown.markdown(
                 m.group(0),
                 extensions=["extra", "codehilite", "pymdownx.tilde"],
@@ -290,55 +238,77 @@ def create_app(config_class=Config):
                     }
                 },
             )
-            # Store the processed HTML and return a safe placeholder.
             code_blocks.append(block_html)
             return f"D8CHATCODEBLOCKPLACEHOLDER{len(code_blocks) - 1}"
 
-        # Run the extraction on our content that already has mentions and channel links.
         content_without_code = re.sub(
             r"(?s)(```.*?```|~~~.*?~~~)",
             extract_and_process_code_block,
-            content_with_channels,
+            content_with_all_placeholders,
         )
 
-        # Fix for a Markdown library quirk where an empty blockquote line is rendered improperly.
-        content_without_code = re.sub(
-            r"^(\s*)>(\s*)$", r"\1&gt;\2", content_without_code, flags=re.MULTILINE
-        )
-
-        # --- Pass 2: Process the main content (without code blocks) ---
+        # --- Stage 6: Process Main Markdown, Linkify, & Sanitize ---
         main_html = markdown.markdown(
             content_without_code, extensions=["extra", "pymdownx.tilde", "nl2br"]
         )
 
-        # A callback for bleach.linkify to add target="_blank" to all URLs.
         def set_link_attrs(attrs, new=False):
             attrs[(None, "target")] = "_blank"
             attrs[(None, "rel")] = "noopener noreferrer"
             return attrs
 
-        # Find raw URLs in the text and turn them into clickable links.
         linkified_html = bleach.linkify(
             main_html, callbacks=[set_link_attrs], skip_tags=["pre", "code"]
         )
 
-        # Sanitize the HTML to remove any potentially malicious tags or attributes.
+        # Define allowed tags and attributes for sanitization. Note that HTMX attributes
+        # are not needed here because they are safely stored in our placeholder HTML.
+        allowed_tags = [
+            "p",
+            "br",
+            "strong",
+            "em",
+            "del",
+            "ul",
+            "ol",
+            "li",
+            "blockquote",
+            "pre",
+            "code",
+            "span",
+            "div",
+            "a",
+            "h2",
+            "h3",
+            "table",
+            "thead",
+            "tbody",
+            "tr",
+            "th",
+            "td",
+        ]
+        allowed_attrs = {"*": ["class"], "a": ["href", "rel", "target"]}
+
         safe_html = bleach.clean(
             linkified_html, tags=allowed_tags, attributes=allowed_attrs
         )
 
-        # --- Final Step: Re-insert the processed code blocks ---
+        # --- Final Stage: Re-insert all placeholders ---
+        # Now we replace the safe placeholders in our sanitized HTML with the full,
+        # pre-generated HTML snippets we stored earlier.
+        final_html = safe_html
         for i, block_html in enumerate(code_blocks):
-            placeholder = f"D8CHATCODEBLOCKPLACEHOLDER{i}"
-            # Markdown sometimes wraps standalone placeholders in <p> tags, so we must replace that.
-            placeholder_with_p_tags = f"<p>{placeholder}</p>"
-            if placeholder_with_p_tags in safe_html:
-                safe_html = safe_html.replace(placeholder_with_p_tags, block_html)
-            else:
-                safe_html = safe_html.replace(placeholder, block_html)
+            # Markdown can sometimes wrap a lone placeholder in a <p> tag, so we handle both cases.
+            final_html = final_html.replace(
+                f"<p>D8CHATCODEBLOCKPLACEHOLDER{i}</p>", block_html
+            ).replace(f"D8CHATCODEBLOCKPLACEHOLDER{i}", block_html)
+        for i, link_html in enumerate(channel_links):
+            final_html = final_html.replace(f"D8CHATCHANNELPLACEHOLDER{i}", link_html)
+        for i, link_html in enumerate(mention_links):
+            final_html = final_html.replace(f"D8CHATMENTIONPLACEHOLDER{i}", link_html)
 
-        # Return the final HTML wrapped in a Markup object to prevent double-escaping by Jinja2.
-        return Markup(safe_html)
+        # Return as a Markup object to prevent Jinja from re-escaping our HTML.
+        return Markup(final_html)
 
     # --- Register the helper function for rendering polls ---
     @app.context_processor
