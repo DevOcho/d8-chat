@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -21,7 +22,9 @@ class Config:
         if all([postgres_user, postgres_password, postgres_host, postgres_db]):
             DATABASE_URI = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}:5432/{postgres_db}"
         else:
-            raise ValueError("Database connection not configured. Set either DATABASE_URI or all POSTGRES_* variables.")
+            raise ValueError(
+                "Database connection not configured. Set either DATABASE_URI or all POSTGRES_* variables."
+            )
 
     # OIDC SSO Settings
     OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID")
@@ -35,6 +38,9 @@ class Config:
     MINIO_BUCKET_NAME = os.environ.get("MINIO_BUCKET_NAME", "d8chat")
     MINIO_SECURE = os.environ.get("MINIO_SECURE", "False").lower() == "true"
     MINIO_PUBLIC_URL = os.environ.get("MINIO_PUBLIC_URL")
+
+    # Valkey Config for message broker
+    VALKEY_URL = os.environ.get("VALKEY_URL")
 
 
 class TestConfig(Config):

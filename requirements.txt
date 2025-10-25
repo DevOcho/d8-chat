@@ -23,5 +23,6 @@ pytest-cov
 pytest-flask
 pytest-mock
 python-dotenv
+redis
 requests
 simple-websocket

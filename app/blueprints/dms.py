@@ -193,7 +193,12 @@ def get_dm_chat(other_user_id):
                     conv_id_str=conv_id_str,
                     is_online=g.user.id in chat_manager.online_users,
                 )
-                recipient_ws.send(new_contact_html)
+                # Also render the partial that will force them to subscribe
+                subscription_html = render_template(
+                    "partials/subscribe_oob.html", conv_id_str=conv_id_str
+                )
+                # Send both HTML fragments at once. HTMX will process both OOB swaps.
+                recipient_ws.send(new_contact_html + subscription_html)
             except Exception as e:
                 print(f"Could not send real-time DM add to user {other_user.id}: {e}")
 

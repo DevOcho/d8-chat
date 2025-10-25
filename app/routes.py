@@ -40,8 +40,8 @@ from .models import (
     UploadedFile,
     User,
     UserConversationStatus,
-    db,
     WorkspaceMember,
+    db,
 )
 from .services import chat_service, minio_service
 from .sso import oauth  # Import the oauth object
@@ -67,14 +67,16 @@ limiter = Limiter(
     app=current_app,
     default_limits=["22 per minute", "1 per second"],
     storage_uri="memory://",
-    strategy="fixed-window", # or "moving-window", or "sliding-window-counter"
+    strategy="fixed-window",  # or "moving-window", or "sliding-window-counter"
 )
+
 
 @main_bp.route("/debug-headers")
 def debug_headers():
     # Convert the headers object to a simple dictionary to make it JSON serializable
     headers_dict = {key: value for key, value in request.headers}
     return jsonify(headers_dict)
+
 
 # This function runs before every request to load the logged-in user
 @main_bp.before_app_request
@@ -285,7 +287,9 @@ def sso_login():
     session["nonce"] = nonce
 
     # What line needs added to the Authentik Redirect?
-    current_app.logger.info(f"Redirecting to Authentik with redirect_uri: {redirect_uri}")
+    current_app.logger.info(
+        f"Redirecting to Authentik with redirect_uri: {redirect_uri}"
+    )
 
     return oauth.authentik.authorize_redirect(redirect_uri, nonce=nonce)
 
@@ -1235,8 +1239,8 @@ def chat(ws):
         return
 
     # Origin check to prevent CSWSH
-    origin = request.headers.get('Origin')
-    allowed_origin = request.url_root.rstrip('/') # e.g., 'https://your.d8chat.com'
+    origin = request.headers.get("Origin")
+    allowed_origin = request.url_root.rstrip("/")  # e.g., 'https://your.d8chat.com'
     if not origin or origin != allowed_origin:
         print(f"ERROR: WebSocket connection from invalid origin '{origin}'. Closing.")
         ws.close(reason=1008, message="Invalid origin")
@@ -1410,15 +1414,15 @@ def chat(ws):
                 )
                 message_to_broadcast = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
 
-                # Broadcast to others
-                chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
+            # sending it back to the sender as well as all other recipients.
+            chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
 
-                # Send back to the sender, potentially with an input reset for quoted replies.
-                message_for_sender = message_to_broadcast
-                if new_message.reply_type == "quote":
-                    input_html = render_template("partials/chat_input_default.html")
-                    message_for_sender += f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
-                ws.send(message_for_sender)
+            # If it was a quoted reply, we also need to broadcast the input reset to the sender.
+            if new_message.reply_type == "quote":
+                input_html = render_template("partials/chat_input_default.html")
+                reset_payload = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+                # Use send_to_user to target only the original sender with the input reset.
+                chat_manager.send_to_user(ws.user.id, reset_payload)
 
             # --- Notification logic for users NOT viewing the channel ---
             if conversation.type == "channel":
@@ -1441,10 +1445,10 @@ def chat(ws):
                 member_ws = chat_manager.all_clients[member.id]
 
                 # Condition 2: Don't notify users actively viewing this conversation
-                is_viewing_conversation = False
-                if conv_id_str in chat_manager.active_connections:
-                    if member_ws in chat_manager.active_connections[conv_id_str]:
-                        is_viewing_conversation = True
+                is_viewing_conversation = (
+                    hasattr(member_ws, "channel_id")
+                    and member_ws.channel_id == conv_id_str
+                )
 
                 if is_viewing_conversation:
                     continue
@@ -1519,8 +1523,8 @@ def chat(ws):
                     unread_link_html = render_template(
                         "partials/unreads_link_unread.html"
                     )
-                    member_ws.send(notification_html)
-                    member_ws.send(unread_link_html)
+                    chat_manager.send_to_user(member.id, notification_html)
+                    chat_manager.send_to_user(member.id, unread_link_html)
 
                 now = datetime.datetime.now()
                 is_a_mention = (
@@ -1563,7 +1567,9 @@ def chat(ws):
                             "type": "notification",
                             "title": f"New message from {new_message.user.display_name or new_message.user.username}",
                             "body": new_message.content,
-                            "icon": url_for("static", filename="favicon.ico", _external=True),
+                            "icon": url_for(
+                                "static", filename="favicon.ico", _external=True
+                            ),
                             "tag": conv_id_str,
                         }
                         chat_manager.send_to_user(member.id, notification_payload)

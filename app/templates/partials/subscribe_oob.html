@@ -1,0 +1,5 @@
+{# This is an invisible element that forces a WebSocket subscription when received via OOB #}
+<div hx-swap-oob="true"
+     id="ws-subscriber-{{ conv_id_str }}"
+     ws-send
+     hx-vals='{"type": "subscribe", "conversation_id": "{{ conv_id_str }}"}'></div>

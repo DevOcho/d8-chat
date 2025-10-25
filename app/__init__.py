@@ -2,6 +2,7 @@
 
 import os
 import re
+import threading
 
 import bleach
 import emoji
@@ -14,6 +15,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
 
+from .chat_manager import chat_manager
 from .models import User, initialize_db
 from .services import minio_service
 from .sso import init_sso
@@ -66,6 +68,21 @@ def create_app(config_class=Config):
     init_sso(app)
     login_manager.init_app(app)
     sock.init_app(app)  # Initialize Sock with the app
+
+    # --- Valkey/Redis Pub/Sub Setup ---
+    chat_manager.initialize(app)
+
+    # The listener must run in a background thread so it doesn't block the web server.
+    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+
+        def run_listener():
+            # The thread needs its own application context to access config, etc.
+            with app.app_context():
+                chat_manager.listen_for_messages()
+
+        # daemon=True ensures the thread will exit when the main app process exits
+        listener_thread = threading.Thread(target=run_listener, daemon=True)
+        listener_thread.start()
 
     # --- Register custom template filter for emoji-only messages ---
     @app.template_filter("is_jumboable")
