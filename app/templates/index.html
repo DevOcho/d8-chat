@@ -62,11 +62,18 @@
                     </div>
                     <div class="mb-3">
                         <label for="password" class="form-label">Password</label>
-                        <input type="password"
-                               class="form-control"
-                               id="password"
-                               name="password"
-                               required>
+                        <div class="password-field-wrapper">
+                            <input type="password"
+                                   class="form-control form-control-with-icon"
+                                   id="password"
+                                   name="password"
+                                   required>
+                            <span id="toggle-password-visibility"
+                                  class="password-toggle-icon"
+                                  title="Toggle password visibility">
+                                <i class="bi bi-eye-slash"></i>
+                            </span>
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-pink w-100">Login</button>
                 </form>
@@ -84,4 +91,30 @@
             </div>
         </div>
     </div>
+{% endblock %}
+{% block scripts %}
+    <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const togglePasswordButton = document.getElementById('toggle-password-visibility');
+    const passwordInput = document.getElementById('password');
+    const icon = togglePasswordButton.querySelector('i');
+
+    if (togglePasswordButton && passwordInput) {
+      togglePasswordButton.addEventListener('click', function() {
+        // Toggle the input type attribute
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+
+        // Toggle the icon class
+        if (type === 'password') {
+          icon.classList.remove('bi-eye');
+          icon.classList.add('bi-eye-slash');
+        } else {
+          icon.classList.remove('bi-eye-slash');
+          icon.classList.add('bi-eye');
+        }
+      });
+    }
+  });
+    </script>
 {% endblock %}

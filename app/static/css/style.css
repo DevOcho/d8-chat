@@ -1062,3 +1062,28 @@ a.hashtag-link:hover {
     box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.2);
     color: white;
 }
+
+/* --- Password Visibility Toggle Styles --- */
+.password-field-wrapper {
+  position: relative;
+}
+
+.password-toggle-icon {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem; /* Adjust spacing from the right edge */
+  transform: translateY(-50%);
+  cursor: pointer;
+  color: #6c757d; /* Bootstrap's secondary text color */
+  z-index: 5; /* Ensure icon is clickable */
+}
+
+/* Add a hover effect for better user feedback */
+.password-toggle-icon:hover {
+  color: #212529;
+}
+
+/* Add padding to the input to prevent text from overlapping the icon */
+.form-control-with-icon {
+  padding-right: 2.5rem;
+}
