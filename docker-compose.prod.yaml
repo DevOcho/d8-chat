@@ -26,6 +26,8 @@ services:
       - .env
     environment:
       - POSTGRES_HOST=db
+      # NEW: Add the VALKEY_URL so the app can connect to the message broker
+      - VALKEY_URL=redis://valkey:6379/0
       - TRUSTED_PROXY_COUNT=1
     volumes:
       - static_files:/app/app/static
@@ -34,7 +36,11 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # NEW: Make the app wait for Valkey to be healthy before starting
+      valkey:
+        condition: service_healthy
     entrypoint: ["/app/entrypoint.sh"]
+    # The Gunicorn command now uses the gevent worker, which is required
     command: ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "run:app"]
 
   certbot:
@@ -44,7 +50,7 @@ services:
       - certbot_www:/var/www/certbot
 
   db:
-    image: postgres:15
+    image: postgres18:latest
     restart: always
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
@@ -75,9 +81,23 @@ services:
       timeout: 20s
       retries: 3
 
+  valkey:
+    image: valkey/valkey:9-alpine
+    command: valkey-server
+    restart: always
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      # This command checks if the Valkey server is responsive
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_data: {}
   minio_data: {}
+  valkey_data: {}
   static_files: {}
   certbot_conf: {}
   certbot_www: {}

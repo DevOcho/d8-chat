@@ -1,40 +1,73 @@
-# docker-compose.dev.yaml
-# For local development and quick testing.
+# This file is for a quick, self-contained demonstration of the application.
+# It builds and runs all services, including the main app, in Docker.
+# You will need to create a .env file with some passwords, see the README
+# for instructions.
+# Also for local development with code auto-reloading or a prodution
+# setup using docker, see the README.
+
 services:
-  db:
-    image: postgres:15
-    restart: always
+  postgres:
+    image: postgres:18
+    container_name: d8-chat-postgres-quickstart
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-    ports:
-      - "5432:5432" # Expose DB port for local access if needed
+      # These values should be set in your .env file
+      POSTGRES_DB: ${POSTGRES_DB:-d8chat}
+      POSTGRES_USER: ${POSTGRES_USER:-d8chat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    restart: unless-stopped
 
   minio:
     image: minio/minio:latest
+    container_name: d8-chat-minio-quickstart
     command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000" # API Port
-      - "9001:9001" # Web Console Port
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+      # These values should be set in your .env file
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-password}
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    restart: unless-stopped
 
+  valkey:
+    image: valkey/valkey:9-alpine
+    container_name: d8-chat-valkey-quickstart
+    command: valkey-server
+    volumes:
+      - valkey_data:/data
+    restart: unless-stopped
+
+  app:
+    container_name: d8-chat-app-quickstart
+    # This tells Docker Compose to build the image from the Dockerfile in the current directory
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # Exposes the application on port 5001 on your host machine
+      - "5001:5001"
+    # This reads environment variables from the .env file
+    env_file:
+      - .env
+    # We set these here to ensure the app container can find the other services
+    # using their service names as hostnames.
+    environment:
+      - POSTGRES_HOST=postgres
+      - MINIO_ENDPOINT=minio:9000
+      - VALKEY_URL=redis://valkey:6379/0
+    # This ensures the database, storage, and message broker are running before the app starts
+    depends_on:
+      - postgres
+      - minio
+      - valkey
+    restart: unless-stopped
+
+# Named volumes for persistent data storage
 volumes:
-  postgres_data: {}
-  minio_data: {}
+  postgres_data:
+  minio_data:
+  valkey_data:
