@@ -3,7 +3,7 @@
     {# Use a DIV instead of an A tag to prevent default browser navigation #}
     <div class="text-decoration-none text-body search-result-item d-block py-2"
          style="cursor: pointer"
-         hx-get="{{ url_for('main.jump_to_message', message_id=message.id) }}"
+         hx-get="{{ url_for('messages.jump_to_message', message_id=message.id) }}"
          hx-target="#chat-messages-container"
          hx-swap="innerHTML">
         <!-- Context Header -->

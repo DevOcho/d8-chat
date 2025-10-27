@@ -50,7 +50,7 @@
                     <div class="alert alert-danger" role="alert">{{ request.args.get("error") }}</div>
                 {% endif %}
                 <!-- Update the form tag and remove 'disabled' from inputs/button -->
-                <form action="{{ url_for('main.login') }}" method="POST">
+                <form action="{{ url_for('auth.login') }}" method="POST">
                     <div class="mb-3">
                         <label for="username" class="form-label">Username or Email</label>
                         <input type="text"
@@ -81,7 +81,7 @@
                     <span>OR</span>
                 </div>
                 <div class="d-grid gap-2">
-                    <a href="{{ url_for('main.sso_login') }}" class="btn btn-sso-authentik">
+                    <a href="{{ url_for('auth.sso_login') }}" class="btn btn-sso-authentik">
                         <i class="bi bi-key-fill"></i> Login with Authentik SSO
                     </a>
                     <a href="#" class="btn btn-sso-google">

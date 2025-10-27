@@ -38,13 +38,13 @@ def admin_required(view):
     @functools.wraps(view)
     def wrapped_view(**kwargs):
         if g.user is None:
-            return redirect(url_for("main.login_page"))
+            return redirect(url_for("auth.index"))
 
         # Check for admin role in the workspace
         workspace_member = WorkspaceMember.get_or_none(user=g.user)
         if not workspace_member or workspace_member.role != "admin":
             flash("You do not have permission to access this page.", "danger")
-            return redirect(url_for("main.chat_interface"))
+            return redirect(url_for("auth.chat_interface"))
 
         return view(**kwargs)
 

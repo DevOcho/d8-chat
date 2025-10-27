@@ -2,7 +2,7 @@
 <a href="#"
    id="sidebar-profile-button"
    title="View your profile"
-   hx-get="{{ url_for('main.profile') }}"
+   hx-get="{{ url_for('profile.profile') }}"
    hx-target="#right-panel-offcanvas">
     <div class="profile-avatar">
         {% with user=g.user, size=36 %}

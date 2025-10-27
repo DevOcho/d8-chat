@@ -6,7 +6,7 @@
     {% set user_has_reacted = g.user.id in users %}
     <button class="btn btn-sm reaction-pill {% if user_has_reacted %}user-reacted{% endif %}"
             data-reactor-ids="{{ users|join(',') }}"
-            hx-post="{{ url_for('main.toggle_reaction', message_id=message.id) }}"
+            hx-post="{{ url_for('messages.toggle_reaction', message_id=message.id) }}"
             hx-vals='{"emoji": "{{ emoji }}"}'
             hx-swap="innerHTML"
             title="Reacted by: {{ reaction.reactor_names|join(", ") }}">

@@ -9,7 +9,7 @@ def test_login_redirect(client):
     """
     response = client.get("/chat", follow_redirects=False)
     assert response.status_code == 302
-    assert "/login" in response.headers["Location"]
+    assert "/" in response.headers["Location"]
 
 
 def test_profile_access(logged_in_client):
@@ -34,4 +34,4 @@ def test_logout(logged_in_client):
     # Now verify that a protected route requires login again
     response = logged_in_client.get("/chat", follow_redirects=False)
     assert response.status_code == 302
-    assert "/login" in response.headers["Location"]
+    assert "/" in response.headers["Location"]

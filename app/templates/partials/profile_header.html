@@ -31,7 +31,7 @@
                 </li>
                 <li>
                     <button class="dropdown-item"
-                            hx-put="{{ url_for('main.update_presence_status') }}"
+                            hx-put="{{ url_for('profile.update_presence_status') }}"
                             hx-vals='{"status": "online"}'
                             hx-target="#profile-header-card"
                             hx-swap="outerHTML">
@@ -40,7 +40,7 @@
                 </li>
                 <li>
                     <button class="dropdown-item"
-                            hx-put="{{ url_for('main.update_presence_status') }}"
+                            hx-put="{{ url_for('profile.update_presence_status') }}"
                             hx-vals='{"status": "away"}'
                             hx-target="#profile-header-card"
                             hx-swap="outerHTML">
@@ -49,7 +49,7 @@
                 </li>
                 <li>
                     <button class="dropdown-item"
-                            hx-put="{{ url_for('main.update_presence_status') }}"
+                            hx-put="{{ url_for('profile.update_presence_status') }}"
                             hx-vals='{"status": "busy"}'
                             hx-target="#profile-header-card"
                             hx-swap="outerHTML">
@@ -61,7 +61,7 @@
                 </li>
                 <li>
                     <!-- The Upload Form is now an item inside the dropdown -->
-                    <form hx-post="{{ url_for('main.upload_avatar') }}"
+                    <form hx-post="{{ url_for('profile.upload_avatar') }}"
                           hx-encoding="multipart/form-data"
                           hx-target="#profile-header-card"
                           hx-swap="outerHTML">

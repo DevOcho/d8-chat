@@ -355,21 +355,27 @@ def create_app(config_class=Config):
     # Import blueprints
     from .blueprints.activity import activity_bp
     from .blueprints.admin import admin_bp
+    from .blueprints.auth import auth_bp
     from .blueprints.channels import channels_bp
     from .blueprints.dms import dms_bp
     from .blueprints.files import files_bp
+    from .blueprints.messages import messages_bp
     from .blueprints.polls import polls_bp
+    from .blueprints.profile import profile_bp
     from .blueprints.search import search_bp
     from .routes import main_bp
 
     # Register blueprints
     app.register_blueprint(main_bp)
     app.register_blueprint(admin_bp, url_prefix="/admin")
+    app.register_blueprint(auth_bp)
     app.register_blueprint(search_bp)
     app.register_blueprint(channels_bp)
     app.register_blueprint(dms_bp)
     app.register_blueprint(files_bp)
     app.register_blueprint(activity_bp)
+    app.register_blueprint(messages_bp)
     app.register_blueprint(polls_bp)
+    app.register_blueprint(profile_bp)
 
     return app

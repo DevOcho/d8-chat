@@ -49,7 +49,7 @@ def handle_auth_callback():
     if not sso_id or not email:
         return redirect(
             url_for(
-                "main.login_page",
+                "auth.index",
                 error="SSO provider did not return required information.",
             )
         )

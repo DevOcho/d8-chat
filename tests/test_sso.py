@@ -77,7 +77,7 @@ def test_sso_callback_fails_with_incomplete_info(client, mocker):
 
     # Should redirect back to the login page with an error
     assert response.status_code == 200
-    assert response.request.path == "/login"
+    assert response.request.path == "/"
     # This assertion is brittle, but good enough to check that an error was passed
     assert b"did not return required information" in response.data
 
