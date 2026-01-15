@@ -43,7 +43,9 @@ def handle_auth_callback():
 
     sso_id = user_info.get("sub")  # 'sub' is the standard OIDC subject identifier
     email = user_info.get("email")
-    username = email.split("@")[0].lower().replace(".", "_")
+    
+    # Generate a safe base username
+    base_username = email.split("@")[0].lower().replace(".", "_")
     display_name = user_info.get("given_name")
 
     if not sso_id or not email:
@@ -68,10 +70,18 @@ def handle_auth_callback():
                 user.sso_id = sso_id
                 user.sso_provider = "authentik"
                 # Optionally update their name from SSO
-                user.display_name = display_name
+                if display_name:
+                    user.display_name = display_name
                 user.save()
 
             else:  # User does not exist, create a new one
+                # Ensure username uniqueness
+                username = base_username
+                counter = 1
+                while User.select().where(User.username == username).exists():
+                    username = f"{base_username}_{counter}"
+                    counter += 1
+
                 print(f"Creating a new user '{username}' from SSO login.")
                 user = User.create(
                     sso_id=sso_id,
@@ -86,14 +96,17 @@ def handle_auth_callback():
             # 1. Add to Workspace and Broadcast
             default_workspace = Workspace.get_or_none(Workspace.name == "DevOcho")
             if default_workspace:
-                WorkspaceMember.create(
-                    user=user, workspace=default_workspace, role="member"
+                # Use get_or_create to prevent 500 errors if they are already a member
+                WorkspaceMember.get_or_create(
+                    user=user, 
+                    workspace=default_workspace, 
+                    defaults={"role": "member"}
                 )
                 print(
-                    f"-> Added '{user.username}' to workspace '{default_workspace.name}'."
+                    f"-> Verified '{user.username}' in workspace '{default_workspace.name}'."
                 )
 
-                # 2. Add to Default Channels
+                # 2. Add to Default Channels (Idempotent)
                 print("-> Searching for default channels...")
                 default_channels = Channel.select().where(
                     (Channel.name.in_(["general", "announcements"]))
@@ -106,9 +119,10 @@ def handle_auth_callback():
                     )
                 else:
                     for channel in default_channels:
-                        ChannelMember.create(user=user, channel=channel)
+                        # Use get_or_create to prevent 500 errors
+                        ChannelMember.get_or_create(user=user, channel=channel)
                         print(
-                            f"-> Added '{user.username}' to default channel '#{channel.name}'."
+                            f"-> Verified '{user.username}' in default channel '#{channel.name}'."
                         )
             else:
                 print(
@@ -118,8 +132,9 @@ def handle_auth_callback():
         else:
             # User was found by sso_id, update their details just in case they changed.
             user.email = email
-            user.username = username
-            user.display_name = display_name
+            # Do NOT update username here, as that changes their identity handle
+            if display_name:
+                user.display_name = display_name
             user.save()
 
     # Store user ID in the session to log them in
