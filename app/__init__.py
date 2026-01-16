@@ -108,6 +108,41 @@ def create_app(config_class=Config):
         count = emoji.emoji_count(stripped_text)
         return 1 <= count <= 3
 
+    # --- Register custom template filter for Date Separators ---
+    @app.template_filter("date_label")
+    def date_label_filter(dt):
+        """
+        Converts a datetime to 'Today', 'Yesterday', 'March 7th', or 'Aug 21st 2025'.
+        """
+        if not dt:
+            return ""
+        
+        now = datetime.datetime.now()
+        today = now.date()
+        date_obj = dt.date()
+        
+        # 1. Handle Today / Yesterday
+        delta = (today - date_obj).days
+        if delta == 0:
+            return "Today"
+        elif delta == 1:
+            return "Yesterday"
+        
+        # 2. Helper for ordinal suffix (st, nd, rd, th)
+        day = date_obj.day
+        if 4 <= day <= 20 or 24 <= day <= 30:
+            suffix = "th"
+        else:
+            suffix = ["st", "nd", "rd"][day % 10 - 1]
+        
+        # 3. Format based on year
+        if date_obj.year == today.year:
+            # Current year: "March 7th"
+            return f"{date_obj.strftime('%B')} {day}{suffix}"
+        else:
+            # Past/Future year: "August 21st 2025"
+            return f"{date_obj.strftime('%B')} {day}{suffix}, {date_obj.year}"
+
     # --- Register custom template filter for Markdown ---
     @app.template_filter("markdown")
     def markdown_filter(content, context="display"):

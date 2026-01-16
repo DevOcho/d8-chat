@@ -1087,3 +1087,44 @@ a.hashtag-link:hover {
 .form-control-with-icon {
   padding-right: 2.5rem;
 }
+
+/* --- Date Separator Styles --- */
+.date-separator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 1.5rem 0;
+    color: #6c757d; /* Bootstrap muted color */
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.date-separator::before,
+.date-separator::after {
+    content: "";
+    flex-grow: 1;
+    background-color: #dee2e6; /* Light gray line */
+    height: 1px;
+}
+
+.date-separator::before {
+    margin-right: 1rem;
+}
+
+.date-separator::after {
+    margin-left: 1rem;
+}
+
+.date-separator span {
+    background-color: transparent;
+    padding: 0 0.5rem;
+}
+
+/* Dark mode overrides */
+[data-bs-theme="dark"] .date-separator {
+    color: #adb5bd;
+}
+[data-bs-theme="dark"] .date-separator::before,
+[data-bs-theme="dark"] .date-separator::after {
+    background-color: #495057;
+}

@@ -6,7 +6,7 @@
     <div id="message-list">
         {% if messages and messages|length == PAGE_SIZE %}
             <div class="text-center"
-                 hx-get="{{ url_for('main.get_older_messages', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
+                 hx-get="{{ url_for('messages.get_older_messages', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
                  hx-trigger="intersect once"
                  hx-swap="outerHTML"
                  hx-target="this">
@@ -17,6 +17,14 @@
         {% endif %}
         {% set ns = namespace(first_unread_found=false) %}
         {% for message in messages %}
+
+            {# Date Separator Logic #}
+            {% if loop.first or message.created_at.date() != loop.previtem.created_at.date() %}
+                {% with date_obj=message.created_at %}
+                    {% include 'partials/date_separator.html' %}
+                {% endwith %}
+            {% endif %}
+
             {% if message.reply_type != 'thread' %}
                 {% if not ns.first_unread_found and message.created_at > last_read_timestamp and message.user_id != g.user.id %}
                     {% include 'partials/new_message_separator.html' %}

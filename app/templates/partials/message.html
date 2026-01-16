@@ -65,7 +65,7 @@
                            class="text-decoration-none small ms-2"
                            data-bs-toggle="offcanvas"
                            data-bs-target="#right-panel-offcanvas"
-                           hx-get="{{ url_for('main.view_thread', parent_message_id=message.id) }}"
+                           hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"
                            hx-target="#right-panel-offcanvas">
                             {{ thread_reply_count }} {{ 'reply' if thread_reply_count == 1 else 'replies' }}
                         </a>

@@ -24,6 +24,14 @@
         <!-- Replies -->
         <div class="p-3" id="thread-replies-list-{{ parent_message.id }}">
             {% for reply in thread_replies %}
+
+                {# Date Separator Logic for Threads #}
+                {% if loop.first or reply.created_at.date() != loop.previtem.created_at.date() %}
+                    {% with date_obj=reply.created_at %}
+                        {% include 'partials/date_separator.html' %}
+                    {% endwith %}
+                {% endif %}
+
                 {% with message=reply, is_in_thread_view=True %}
                     {% include 'partials/message.html' %}
                 {% endwith %}
@@ -34,7 +42,7 @@
     </div>
     <!-- Reply Input (Fixed at the bottom) -->
     <div class="flex-shrink-0"
-         hx-get="{{ url_for('main.get_thread_chat_input', parent_message_id=parent_message.id) }}"
+         hx-get="{{ url_for('messages.get_thread_chat_input', parent_message_id=parent_message.id) }}"
          hx-trigger="load"
          hx-swap="outerHTML">
         <div class="p-3 text-center">

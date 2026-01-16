@@ -10,29 +10,35 @@ Google Chat, WhatsApp, etc.
 It was developed with ❤ by [DevOcho](https://www.devocho.com) as a showcase of
 our abilities.  Feel free to hire us if you need custom software.
 
-We use it in our company every day.
+We use d8-chat in our company every day.
 
-There is a companion mobile app under development.
+*There is a companion mobile app under development.*
 
 ## Features
-- Real-time Messaging
+- Real-time Messaging with Presence Indicators
 - Public & Private Channels
-- Direct Messaging
-- Threaded Conversations
-- Emojis & Reactions
+- Direct Messaging (DMs)
+- Threaded Conversations and Replies
+- Emojis & Message Reactions
 - Message Editing & Deletion
-- Markdown & Code Snippets with Syntax Highlighting
-- User Presence Status (Online, Away, Busy)
-- Image Uploads with Image Previews
-- SSO support (OIDC)
+- File Uploads with Image Previews and Carousels
+- Markdown Support & Code Snippets with Syntax Highlighting
+- User Mentioning (@username, @channel, @here)
+- Polls
+- Desktop Notifications and Sounds
+- Global Search (Messages, Channels, People)
+- Single Sign-On (SSO) support via OIDC (e.g., Authentik, Keycloak)
+- Dark/Light/System Theme Preference
 - And more...
 
-## Quick Start (production instructions below)
+## Quick Start 
+
+*Note: See production installation instructions below if you are ready to deploy.
+       the following instructions are for previewing the software.*
 
 ### Prerequisites
 - [Git](https://git-scm.com/downloads)
 - [Docker](https://www.docker.com/get-started)
-- [Docker Compose](https://docs.docker.com/compose/install/)
 
 ### 1. Clone the Repository
 
@@ -169,17 +175,30 @@ To stop the running containers, use the command:
 docker compose down
 ```
 
-You can restart them with the followig:
+You can restart them with the following command:
 
 ```sh
 docker compose up -d
 ```
 
-
 ## Development instructions
 
+We accept pull requests!  If you have the skills and want to add a feature
+then the tech stack and instructions are below.
+
+### Tech Stack
+- **Backend:** Python, Flask, Gunicorn
+- **Database:** PostgreSQL
+- **ORM:** Peewee
+- **Real-time Communication:** WebSockets, Valkey (Redis-compatible) for Pub/Sub
+- **Frontend:** HTMX, Bootstrap 5, JavaScript
+- **File Storage:** Minio (S3-compatible object storage)
+- **Containerization:** Docker, Docker Compose
+
+### Local development environment
+
 If you are looking to contribute a Pull Request (thanks) you can run the app
-locally with the following:
+locally with the following commands:
 
 ```sh
 git clone https://github.com/DevOcho/d8-chat.git
