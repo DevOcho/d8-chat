@@ -1,0 +1,26 @@
+---
+# Portal information
+name: d8-chat
+desc: Reference Portal
+version: 0.0.2
+
+# k8s/k3s commands
+command: kubectl apply -f deployment.yaml
+#command-args: -f deployment.yaml
+
+# Database commands
+seed-command: seed.py
+init-command: init_db.py
+
+# Configuration for the system-pods
+system-pods:
+
+  # We need a Postgres database
+  - name: postgres
+    databases:
+      - name: d8-chat
+
+  # We need a MinIO bucket
+  - name: minio
+    buckets:
+       - name: d8-chat

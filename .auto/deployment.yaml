@@ -1,0 +1,152 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: code-pv
+  labels:
+    type: local
+spec:
+  storageClassName: manual
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  hostPath:
+    path: /mnt/code
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: code-pvc
+  namespace: default
+spec:
+  storageClassName: manual
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  volumeName: code-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: d8-chat
+  namespace: default
+  labels:
+    app: d8-chat
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: d8-chat
+  template:
+    metadata:
+      labels:
+        app: d8-chat
+    spec:
+      containers:
+      - name: d8-chat
+        image: k3d-registry.local:12345/d8-chat:0.0.2
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5001
+        resources:
+          requests:
+            memory: "512Mi"   # Minimum RAM required to schedule the pod
+            cpu: "250m"       # 0.25 CPU Core
+          limits:
+            memory: "2Gi"     # Maximum RAM allowed before OOMKilled
+            cpu: "1500m"      # 1 Full CPU Core
+        env:
+        - name: FLASK_SECRET
+          value: "Dev-secrets-are-not-secure"
+        - name: FLASK_ENV
+          value: "development"
+        - name: REQUESTS_CA_BUNDLE
+          value: "./root_ca.crt"
+        - name: POSTGRES_USER
+          value: "root"
+        - name: POSTGRES_PASSWORD
+          value: "password"
+        - name: POSTGRES_HOST
+          value: "postgres"
+        - name: POSTGRES_DB
+          value: "d8-chat"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: VALKEY_URL
+          value: "redis://redis:6379/0"
+        - name: MINIO_ENDPOINT
+          value: "minio:9000"
+        - name: MINIO_ROOT_USER
+          value: "minio"
+        - name: MINIO_ROOT_PASSWORD
+          value: "minio123"
+        - name: MINIO_SECURE
+          value: "false"
+        - name: MINIO_BUCKET_NAME
+          value: "d8-chat"
+        - name: MINIO_PUBLIC_URL
+          value: "http://minio.local"
+        - name: OIDC_CLIENT_ID
+          value: "WFhonUDQAoI2RI4ln3yjn0cXl2gc72582YdNKDna"
+        - name: OIDC_CLIENT_SECRET
+          value: "vFzRoVLOVydE2AfRUVtOzTWESqwwwJuUZTIjMb5OpuwM6U9zhVOnwpl4qmFY7qOJA69dVHv3gHJjSxD1VYUVoNs1nycYiQyav2mJZRaGN4058v5xmUzOohSl5qu1BMaN"
+        - name: OIDC_ISSUER_URL
+          value: "https://authentik.devocho.com/application/o/d8-chat/"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5001
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        volumeMounts:
+          - name: code-pvc
+            mountPath: /mnt/code
+      volumes:
+        - name: code-pvc
+          persistentVolumeClaim:
+            claimName: code-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: d8-chat
+  namespace: default
+spec:
+  selector:
+    app: d8-chat
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 5001
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: d8-chat
+  namespace: default
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: d8-chat.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: d8-chat
+            port:
+              number: 80
+  - host: d8-chat.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: d8-chat
+            port:
+              number: 80

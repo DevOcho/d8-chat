@@ -43,7 +43,8 @@ def init_app(app):
 
     # 2. Configure the PUBLIC client. It determines security based on the
     #    MINIO_PUBLIC_URL itself, ignoring the MINIO_SECURE flag.
-    public_endpoint_url = app.config.get("MINIO_PUBLIC_URL", "")
+    #public_endpoint_url = app.config.get("MINIO_PUBLIC_URL", "")
+    public_endpoint_url = app.config.get("MINIO_PUBLIC_URL") or ""
     public_endpoint_host = internal_endpoint # Default to internal
     # Determine if the public URL is secure by checking its scheme.
     public_secure = public_endpoint_url.lower().startswith("https://")
