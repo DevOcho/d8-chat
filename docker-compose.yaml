@@ -15,7 +15,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-d8chat}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     restart: unless-stopped
 
   minio:

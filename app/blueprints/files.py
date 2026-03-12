@@ -23,6 +23,9 @@ ALLOWED_EXTENSIONS = {
     "js",
     "css",
     "html",
+    "md",
+    "ts",
+    "zip",
 }
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024
 

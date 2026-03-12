@@ -243,7 +243,7 @@ class UploadedFile(BaseModel):
     @property
     def url(self):
         """Returns a presigned URL for the file."""
-        return minio_service.get_presigned_url(self.stored_filename)
+        return minio_service.get_presigned_url(self.stored_filename, response_headers={'response-content-disposition': f'attachment; filename="{self.original_filename}"'})
 
 
 class MessageAttachment(BaseModel):
