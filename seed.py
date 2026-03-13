@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 
+from faker import Faker
+from peewee import IntegrityError
+
 from app import create_app
 from app.models import (
-    db,
-    User,
-    Workspace,
-    WorkspaceMember,
     Channel,
     ChannelMember,
     Conversation,
+    User,
+    Workspace,
+    WorkspaceMember,
+    db,
 )
-from peewee import IntegrityError
-from faker import Faker
 
 # Initialize Faker
 fake = Faker()

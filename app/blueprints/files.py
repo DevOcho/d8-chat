@@ -11,24 +11,8 @@ from app.services import minio_service
 
 files_bp = Blueprint("files", __name__)
 
-# Configure allowed extensions and max size (e.g., 10MB)
-ALLOWED_EXTENSIONS = {
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "pdf",
-    "txt",
-    "py",
-    "js",
-    "css",
-    "html",
-}
+# Configure max size (e.g., 10MB). We no longer restrict extensions.
 MAX_CONTENT_LENGTH = 10 * 1024 * 1024
-
-
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 @files_bp.route("/files/upload", methods=["POST"])
@@ -40,13 +24,16 @@ def upload_file():
     if file.filename == "":
         return jsonify(error="No selected file"), 400
 
-    if file and allowed_file(file.filename):
+    if file:
         # Secure the original filename
         original_filename = secure_filename(file.filename)
 
-        # Generate a unique filename for storage
-        file_ext = original_filename.rsplit(".", 1)[1].lower()
-        stored_filename = f"{uuid.uuid4()}.{file_ext}"
+        # Generate a unique filename for storage, handling files without extensions gracefully
+        if "." in original_filename:
+            file_ext = original_filename.rsplit(".", 1)[1].lower()
+            stored_filename = f"{uuid.uuid4()}.{file_ext}"
+        else:
+            stored_filename = f"{uuid.uuid4()}"
 
         # Save the file temporarily to the server filesystem for processing
         temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
@@ -84,6 +71,4 @@ def upload_file():
         else:
             return jsonify(error="Failed to upload file to storage"), 500
 
-    return jsonify(
-        error="File type not allowed. Files must have an extension (e.g., .png, .jpg)."
-    ), 400
+    return jsonify(error="Invalid file request"), 400

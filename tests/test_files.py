@@ -65,17 +65,26 @@ def test_upload_empty_filename(logged_in_client):
     assert response.json["error"] == "No selected file"
 
 
-def test_upload_disallowed_extension(logged_in_client):
+def test_upload_any_extension_allowed(logged_in_client, mocker):
     """
-    WHEN a file with a non-whitelisted extension (e.g., .exe) is uploaded
-    THEN the server should return a 400 Bad Request error.
+    WHEN a file with an arbitrary extension (e.g., .exe) is uploaded
+    THEN the server should return a 201 Created success response.
     """
-    file_data = {"file": (io.BytesIO(b"malicious content"), "virus.exe")}
+
+    file_data = {"file": (io.BytesIO(b"safe content"), "program.exe")}
     response = logged_in_client.post(
         "/files/upload", data=file_data, content_type="multipart/form-data"
     )
-    assert response.status_code == 400
-    assert "File type not allowed" in response.json["error"]
+    assert response.status_code == 201
+    assert "file_id" in response.json
+
+    # Verify the file was stored in our database
+    assert (
+        UploadedFile.select()
+        .where(UploadedFile.original_filename == "program.exe")
+        .count()
+        == 1
+    )
 
 
 def test_upload_file_too_large(logged_in_client, mocker):
