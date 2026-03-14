@@ -1318,21 +1318,24 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const processCodeBlocks = (container) => {
         const MAX_HEIGHT = 300;
-        const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');
-        codeBlocks.forEach(block => {
-            if (block.scrollHeight > MAX_HEIGHT) {
-                block.classList.add('collapsible');
-                const toggler = document.createElement('div');
-                toggler.className = 'code-expander';
-                toggler.innerText = 'Show more...';
-                block.appendChild(toggler);
-                toggler.addEventListener('click', () => {
-                    block.classList.toggle('collapsible');
-                    toggler.innerText = block.classList.contains('collapsible') ? 'Show more...' : 'Show less';
-                });
-            }
-            block.classList.add('code-processed');
-        });
+        // A tiny timeout allows the browser to calculate the layout (scrollHeight) before checking
+        setTimeout(() => {
+            const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');
+            codeBlocks.forEach(block => {
+                if (block.scrollHeight > MAX_HEIGHT) {
+                    block.classList.add('collapsible');
+                    const toggler = document.createElement('div');
+                    toggler.className = 'code-expander';
+                    toggler.innerText = 'Show more...';
+                    block.appendChild(toggler);
+                    toggler.addEventListener('click', () => {
+                        block.classList.toggle('collapsible');
+                        toggler.innerText = block.classList.contains('collapsible') ? 'Show more...' : 'Show less';
+                    });
+                }
+                block.classList.add('code-processed');
+            });
+        }, 50);
     };
     const handleMentionHighlights = (container, conversationId) => {
         const mentions = container.querySelectorAll('.mentioned-message');
@@ -1426,6 +1429,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.body.addEventListener('htmx:oobAfterSwap', function(evt) {
         const target = evt.detail.target; // The element that was swapped.
+
+        // --- Re-initialize components for edited messages received via WebSocket ---
+        if (target && target.classList && target.classList.contains('message-container')) {
+            initializeTooltips(target);
+            updateReactionHighlights(target);
+            initializeReactionPopovers(target);
+            processCodeBlocks(target);
+        }
 
         // --- Scrolling logic for new messages in a thread ---
         if (target && target.id.startsWith('thread-replies-list-')) {
