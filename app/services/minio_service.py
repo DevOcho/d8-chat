@@ -99,7 +99,7 @@ def upload_file(object_name, file_path, content_type):
         return False
 
 
-def get_presigned_url(object_name):
+def get_presigned_url(object_name, response_headers = {}):
     """Generates a temporary, secure URL using the PUBLIC client."""
     if not minio_client_public:
         raise Exception("Public Minio client not initialized.")
@@ -110,6 +110,7 @@ def get_presigned_url(object_name):
             bucket_name=current_app.config["MINIO_BUCKET_NAME"],
             object_name=object_name,
             expires=timedelta(hours=1),
+            response_headers=response_headers
         )
         return url
     except S3Error as exc:
