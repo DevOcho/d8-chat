@@ -381,7 +381,14 @@ def chat(ws):
                     Message=Message,
                     is_in_thread_view=False,
                 )
-                broadcast_html += f'<div id="message-{parent_id}" hx-swap-oob="outerHTML">{parent_in_channel_html}</div>'
+                
+                # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
+                parent_in_channel_oob = parent_in_channel_html.replace(
+                    f'id="message-{parent_id}"', 
+                    f'id="message-{parent_id}" hx-swap-oob="true"', 
+                    1
+                )
+                broadcast_html += parent_in_channel_oob
                 all_participant_ids = {parent_message.user_id}
                 replies = Message.select(Message.user_id).where(
                     Message.parent_message == parent_message

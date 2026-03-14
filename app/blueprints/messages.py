@@ -103,7 +103,13 @@ def update_message(message_id):
             Message=Message,
             is_in_thread_view=is_in_thread_view,
         )
-        broadcast_html = f'<div id="message-{message.id}" hx-swap-oob="outerHTML">{updated_message_html}</div>'
+        
+        # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
+        broadcast_html = updated_message_html.replace(
+            f'id="message-{message.id}"', 
+            f'id="message-{message.id}" hx-swap-oob="true"', 
+            1
+        )
         chat_manager.broadcast(conv_id_str, broadcast_html)
     return render_template(
         "partials/message.html",
