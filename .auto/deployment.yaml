@@ -98,8 +98,8 @@ spec:
           httpGet:
             path: /
             port: 5001
-          initialDelaySeconds: 15
-          periodSeconds: 10
+          initialDelaySeconds: 60
+          periodSeconds: 30
         volumeMounts:
           - name: code-pvc
             mountPath: /mnt/code

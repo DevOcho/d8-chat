@@ -5,8 +5,8 @@ desc: Reference Portal
 version: 0.0.2
 
 # k8s/k3s commands
-command: kubectl apply -f deployment.yaml
-#command-args: -f deployment.yaml
+command: kubectl apply
+command-args: -f .auto/deployment.yaml
 
 # Database commands
 seed-command: seed.py
