@@ -71,7 +71,8 @@ def handle_new_message(
 
         # --- Mention handling logic ---
         # 1. Handle regular @username mentions
-        mentioned_usernames = set(re.findall(r"@(\w+)", chat_text))
+        mention_pattern = r"(?<![^\s(\['\"])@(\w+)"
+        mentioned_usernames = set(re.findall(mention_pattern, chat_text))
         mentioned_usernames.discard("here")
         mentioned_usernames.discard("channel")
 
@@ -122,7 +123,7 @@ def handle_new_message(
 
         # --- Hashtag handling logic ---
         # 1. Find all potential hashtags in the message content.
-        hashtag_pattern = r"(?<!#)#([a-zA-Z0-9_-]+)"
+        hashtag_pattern = r"(?<![^\s(\['\"])#([a-zA-Z0-9_-]+)"
         hashtag_names = set(re.findall(hashtag_pattern, chat_text))
 
         # 2. Loop through the found tags, get or create them, and link to the message.

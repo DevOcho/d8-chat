@@ -46,14 +46,31 @@ const NotificationManager = {
         }
     },
     showNotification: function(data) {
+        // 1. If the app is focused, or OS notifications aren't allowed/supported (e.g., local HTTP),
+        // fallback to our in-app ToastManager so you still see the message!
+        if (document.hasFocus() || !("Notification" in window) || Notification.permission !== "granted") {
+            if (typeof ToastManager !== 'undefined') {
+                // Use 'primary' color for standard info instead of the default red 'danger'
+                ToastManager.show(data.title, data.body, 'primary', true);
+            }
+            return;
+        }
+
+        // 2. Otherwise, show the native OS system notification
         if (Notification.permission === "granted") {
-            this.playSound();
             const notification = new Notification(data.title, {
                 body: data.body,
                 icon: data.icon,
                 tag: data.tag
             });
-            notification.onclick = () => { window.focus(); };
+                
+            // Auto-close after 5 seconds so it pops up and then disappears
+            setTimeout(() => notification.close(), 5000);
+                
+            notification.onclick = () => { 
+                window.focus(); 
+                notification.close();
+            };
         }
     }
 };

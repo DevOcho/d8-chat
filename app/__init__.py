@@ -181,7 +181,7 @@ def create_app(config_class=Config):
         content_with_emojis = emoji.emojize(content, language="alias")
 
         # --- Stage 2: Extract & Replace Mentions with Placeholders ---
-        mention_pattern = r"@(\w+)"
+        mention_pattern = r"(?<![^\s(\['\"])@(\w+)"
         usernames = set(re.findall(mention_pattern, content_with_emojis))
         special_mentions = {"here", "channel"}
         user_mentions_to_find = list(usernames - special_mentions)
@@ -228,7 +228,7 @@ def create_app(config_class=Config):
         content_preprocessed = escape_h1_headers(content_with_mention_placeholders)
 
         # --- Stage 4: Extract & Replace Channels/Hashtags with Placeholders ---
-        channel_pattern = r"(?<!#)#([a-zA-Z0-9_-]+)"
+        channel_pattern = r"(?<![^\s(\['\"])#([a-zA-Z0-9_-]+)"
         potential_channel_names = set(re.findall(channel_pattern, content_preprocessed))
         channel_map = {}
         if potential_channel_names:

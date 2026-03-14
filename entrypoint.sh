@@ -35,5 +35,5 @@ python init_db.py
 echo "Database initialization complete."
 
 # Execute the command passed to this script (the CMD from the Dockerfile)
-echo "--- Starting Gunicorn ---"
+echo "--- Executing: $@ ---"
 exec "$@"
