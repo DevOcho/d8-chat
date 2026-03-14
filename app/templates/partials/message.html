@@ -2,9 +2,12 @@
     {% set all_attachments = attachments_map.get(message.id, []) %}
     {# Create a list containing only the image attachments #}
     {% set image_attachments = [] %}
+    {% set other_attachments = [] %}
     {% for att in all_attachments %}
         {% if att.mime_type.startswith('image/') %}
             {% set _ = image_attachments.append(att) %}
+        {% else %}
+            {% set _ = other_attachments.append(att) %}
         {% endif %}
     {% endfor %}
     <div class="d-flex mb-1 message-container {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
@@ -87,6 +90,35 @@
                                 {% if loop.index == 4 and image_count > 4 %}<div class="attachment-overlay">+{{ image_count - 4 }}</div>{% endif %}
                             </a>
                         </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+            {% set other_count = other_attachments | length %}
+            {% if other_count > 0 %}
+                <div class="d-flex flex-wrap justify-content-start gap-3">
+                    {% for attachment in other_attachments %}
+                    <div class="card h-100 shadow-sm attachment-card" style="width: 120px;">
+                        <div class="card-body p-2 text-center d-flex flex-column align-items-center justify-content-center">
+                            <div class="file-icon-wrapper">
+                                {% if attachment.mime_type == "application/pdf" %}
+                                    <img src="icons/pdf-icon.svg" class="file-icon-img"/>
+                                {% else %}
+                                    <img src="icons/generic-file-icon.svg" class="file-icon-img"/>
+                                {% endif %}
+                            </div>
+                            <p class="card-text small mb-0 text-truncate w-100"/>
+                                {{attachment.original_filename}}
+                            </p>
+                        </div>
+                         <div class="download-overlay">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="white" viewBox="0 0 16 16">
+                                <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                            </svg>
+                        </div>
+
+                        <a href={{attachment.url}} download="{{attachment.original_filename}}" class="stretched-link"></a>
+                    </div>
                     {% endfor %}
                 </div>
             {% endif %}

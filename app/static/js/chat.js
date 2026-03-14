@@ -253,38 +253,78 @@ const createAttachmentManager = function(editorState) {
 
     const createPreviewAndUpload = function(file, uploadKey) {
         state.previewContainer.classList.add('has-attachments');
+        
         const thumbnailDiv = document.createElement('div');
         thumbnailDiv.className = 'attachment-thumbnail';
         thumbnailDiv.dataset.uploadKey = uploadKey;
-        thumbnailDiv.innerHTML = `<img src="" alt="Uploading..." /><div class="spinner-border spinner-border-sm text-light position-absolute top-50 start-50"></div><button type="button" class="remove-attachment-btn">&times;</button>`;
+
+        const isImage = file.type.startsWith('image/');
+        
+        let iconPath = '';
+        if (file.type === 'application/pdf') {
+            iconPath = '/icons/pdf-icon.svg';
+        } else if (!isImage) {
+            iconPath = '/icons/generic-file-icon.svg';
+        }
+
+        thumbnailDiv.innerHTML = `
+            ${isImage 
+                ? `<img src="" alt="Uploading..." />` 
+                : `<img src="${iconPath}" class="file-icon-img" alt="file" />`
+            }
+            <div class="file-name-small">${file.name.substring(0, 15)}</div>
+            <div class="spinner-border spinner-border-sm text-light position-absolute top-50 start-50"></div>
+            <button type="button" class="remove-attachment-btn">&times;</button>
+        `;
+        
+
         state.previewContainer.appendChild(thumbnailDiv);
-        const reader = new FileReader();
-        reader.onload = (e) => { thumbnailDiv.querySelector('img').src = e.target.result; };
-        reader.readAsDataURL(file);
+
+        if (isImage) {
+            const reader = new FileReader();
+            reader.onload = (e) => { 
+                thumbnailDiv.querySelector('img').src = e.target.result; 
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 3. Upload logic remains the same
         const formData = new FormData();
         formData.append('file', file);
+
         fetch('/files/upload', { method: 'POST', body: formData })
             .then(response => {
-                thumbnailDiv.querySelector('.spinner-border').remove();
+                const spinner = thumbnailDiv.querySelector('.spinner-border');
+                if (spinner) spinner.remove();
+                
                 if (!response.ok) return response.json().then(err => { throw err; });
                 return response.json();
             })
             .then(data => {
                 if (data && data.file_id) {
                     const upload = state.uploads.get(uploadKey);
-                    upload.fileId = data.file_id;
-                    upload.status = 'success';
+                    if (upload) {
+                        upload.fileId = data.file_id;
+                        upload.status = 'success';
+                    }
                     updateHiddenInput();
                 }
             })
             .catch(error => {
                 const errorMessage = error.error || "Upload failed";
                 console.error("Upload failed for key", uploadKey, ":", errorMessage);
-                ToastManager.show('Upload Error', errorMessage, 'danger');
+                if (typeof ToastManager !== 'undefined') {
+                    ToastManager.show('Upload Error', errorMessage, 'danger');
+                }
+                
                 const upload = state.uploads.get(uploadKey);
                 if (upload) upload.status = 'error';
                 thumbnailDiv.style.opacity = '0.5';
                 thumbnailDiv.title = errorMessage;
+                setTimeout(() => {
+                    removeAttachment(uploadKey)
+                }, 3000);
+                
             });
     };
 
