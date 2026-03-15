@@ -74,7 +74,10 @@ def create_app(config_class=Config):
     chat_manager.initialize(app)
 
     # The listener must run in a background thread so it doesn't block the web server.
-    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    # Skip starting the background thread during testing to prevent Redis connection errors.
+    if not app.testing and (
+        not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    ):
 
         def run_listener():
             # The thread needs its own application context to access config, etc.
@@ -117,25 +120,25 @@ def create_app(config_class=Config):
         """
         if not dt:
             return ""
-        
+
         now = datetime.datetime.now()
         today = now.date()
         date_obj = dt.date()
-        
+
         # 1. Handle Today / Yesterday
         delta = (today - date_obj).days
         if delta == 0:
             return "Today"
         elif delta == 1:
             return "Yesterday"
-        
+
         # 2. Helper for ordinal suffix (st, nd, rd, th)
         day = date_obj.day
         if 4 <= day <= 20 or 24 <= day <= 30:
             suffix = "th"
         else:
             suffix = ["st", "nd", "rd"][day % 10 - 1]
-        
+
         # 3. Format based on year
         if date_obj.year == today.year:
             # Current year: "March 7th"
@@ -391,6 +394,7 @@ def create_app(config_class=Config):
     # Import blueprints
     from .blueprints.activity import activity_bp
     from .blueprints.admin import admin_bp
+    from .blueprints.api_v1 import api_v1_bp
     from .blueprints.auth import auth_bp
     from .blueprints.channels import channels_bp
     from .blueprints.dms import dms_bp
@@ -413,5 +417,6 @@ def create_app(config_class=Config):
     app.register_blueprint(messages_bp)
     app.register_blueprint(polls_bp)
     app.register_blueprint(profile_bp)
+    app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
 
     return app

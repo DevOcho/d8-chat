@@ -24,3 +24,6 @@ system-pods:
   - name: minio
     buckets:
        - name: d8-chat
+
+  # We need a Redis
+  - name: redis
