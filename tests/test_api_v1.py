@@ -153,3 +153,89 @@ def test_api_get_dms_success(client):
     assert "dms" in data
     # By default in conftest, testuser doesn't have any active DMs initialized
     assert isinstance(data["dms"], list)
+
+
+def test_api_get_messages_success(client):
+    """
+    GIVEN a valid api_token and a conversation with messages
+    WHEN the /api/v1/conversations/<conv_id>/messages endpoint is called
+    THEN it should return a list of messages with attachments and reactions
+    """
+    from app.models import Channel, ChannelMember, Conversation, Message
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    # Ensure user is in the channel and create a test message
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+    Message.create(user=user, conversation=conv, content="API Test Message")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.get(
+        f"/api/v1/conversations/{conv.conversation_id_str}/messages",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    data = res.get_json()
+
+    assert "messages" in data
+    assert len(data["messages"]) > 0
+    # The most recent message should be at the end (chronological order)
+    assert data["messages"][-1]["content"] == "API Test Message"
+    assert "reactions" in data["messages"][-1]
+    assert "attachments" in data["messages"][-1]
+
+
+def test_api_get_thread_success(client):
+    """
+    GIVEN a parent message with thread replies
+    WHEN the /api/v1/threads/<msg_id> endpoint is called
+    THEN it should return the parent message and its replies
+    """
+    from app.models import Channel, ChannelMember, Conversation, Message
+
+    user = User.get_by_id(1)
+
+    # We need to set the password so the login works!
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    parent = Message.create(
+        user=user, conversation=conv, content="Parent Thread Message"
+    )
+    Message.create(
+        user=user,
+        conversation=conv,
+        content="Thread Reply",
+        parent_message=parent,
+        reply_type="thread",
+    )
+
+    # Get token
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.get(
+        f"/api/v1/threads/{parent.id}", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert res.status_code == 200
+    data = res.get_json()
+
+    assert "parent_message" in data
+    assert data["parent_message"]["content"] == "Parent Thread Message"
+    assert "replies" in data
+    assert len(data["replies"]) == 1
+    assert data["replies"][0]["content"] == "Thread Reply"

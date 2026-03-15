@@ -17,6 +17,7 @@ from app.models import (
     WorkspaceMember,
     db,
 )
+from app.routes import get_attachments_for_messages, get_reactions_for_messages
 from app.sso import oauth
 
 api_v1_bp = Blueprint("api_v1", __name__)
@@ -79,6 +80,42 @@ def user_to_dict(user):
         "display_name": user.display_name,
         "avatar_url": user.avatar_url,
         "presence_status": user.presence_status,
+    }
+
+
+def serialize_message(message, reactions_map, attachments_map):
+    """Helper to serialize a Message model for JSON responses."""
+    poll_data = None
+    # Check if the message has a poll (using the backref)
+    if hasattr(message, "poll") and message.poll.count() > 0:
+        poll = message.poll.get()
+        poll_data = {
+            "id": poll.id,
+            "question": poll.question,
+            "options": [
+                {"id": opt.id, "text": opt.text, "count": opt.votes.count()}
+                for opt in poll.options
+            ],
+        }
+
+    return {
+        "id": message.id,
+        "content": message.content,
+        "created_at": message.created_at.isoformat() if message.created_at else None,
+        "is_edited": message.is_edited,
+        "user": user_to_dict(message.user) if message.user else None,
+        "reply_type": message.reply_type,
+        "parent_message_id": message.parent_message_id,
+        "quoted_message_id": message.quoted_message_id,
+        "reactions": reactions_map.get(message.id, []),
+        "attachments": attachments_map.get(message.id, []),
+        "thread_reply_count": message.replies.where(
+            Message.reply_type == "thread"
+        ).count(),
+        "last_reply_at": message.last_reply_at.isoformat()
+        if message.last_reply_at
+        else None,
+        "poll": poll_data,
     }
 
 
@@ -284,3 +321,111 @@ def get_dms():
         )
 
     return jsonify({"dms": results}), 200
+
+
+@api_v1_bp.route("/conversations/<conv_id_str>/messages", methods=["GET"])
+@api_token_required
+def get_messages(conv_id_str):
+    """Returns paginated messages for a conversation."""
+    conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    # Access check: is the user a part of this conversation?
+    has_access = False
+    if conv.type == "channel":
+        channel_id = int(conv_id_str.split("_")[1])
+        has_access = (
+            ChannelMember.select()
+            .where(
+                (ChannelMember.user == g.api_user)
+                & (ChannelMember.channel_id == channel_id)
+            )
+            .exists()
+        )
+    elif conv.type == "dm":
+        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
+        has_access = g.api_user.id in user_ids
+
+    if not has_access:
+        return jsonify({"error": "Access denied"}), 403
+
+    # Pagination: fetches older messages if before_message_id is provided
+    before_message_id = request.args.get("before_message_id", type=int)
+
+    # We exclude 'thread' replies here because they only show up in the thread view or as quoted replies
+    # NOTE: We must explicitly allow NULLs because standard messages have a NULL reply_type!
+    query = Message.select().where(
+        (Message.conversation == conv)
+        & ((Message.reply_type != "thread") | (Message.reply_type.is_null()))
+    )
+    if before_message_id:
+        query = query.where(Message.id < before_message_id)
+
+    messages = list(query.order_by(Message.created_at.desc()).limit(30))
+    # Reverse to chronological order (oldest to newest)
+    messages.reverse()
+
+    # Efficiently fetch reactions and attachments in bulk
+    reactions_map = get_reactions_for_messages(messages)
+    attachments_map = get_attachments_for_messages(messages)
+
+    results = [
+        serialize_message(msg, reactions_map, attachments_map) for msg in messages
+    ]
+    return jsonify({"messages": results}), 200
+
+
+@api_v1_bp.route("/threads/<int:parent_message_id>", methods=["GET"])
+@api_token_required
+def get_thread(parent_message_id):
+    """Returns a parent message and all its thread replies."""
+    parent_msg = Message.get_or_none(Message.id == parent_message_id)
+    if not parent_msg:
+        return jsonify({"error": "Message not found"}), 404
+
+    conv = parent_msg.conversation
+
+    # Access check
+    has_access = False
+    if conv.type == "channel":
+        channel_id = int(conv.conversation_id_str.split("_")[1])
+        has_access = (
+            ChannelMember.select()
+            .where(
+                (ChannelMember.user == g.api_user)
+                & (ChannelMember.channel_id == channel_id)
+            )
+            .exists()
+        )
+    elif conv.type == "dm":
+        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+        has_access = g.api_user.id in user_ids
+
+    if not has_access:
+        return jsonify({"error": "Access denied"}), 403
+
+    # Fetch thread replies chronologically
+    replies = list(
+        Message.select()
+        .where(
+            (Message.parent_message == parent_msg) & (Message.reply_type == "thread")
+        )
+        .order_by(Message.created_at.asc())
+    )
+
+    all_messages = [parent_msg] + replies
+    reactions_map = get_reactions_for_messages(all_messages)
+    attachments_map = get_attachments_for_messages(all_messages)
+
+    return jsonify(
+        {
+            "parent_message": serialize_message(
+                parent_msg, reactions_map, attachments_map
+            ),
+            "replies": [
+                serialize_message(msg, reactions_map, attachments_map)
+                for msg in replies
+            ],
+        }
+    ), 200
