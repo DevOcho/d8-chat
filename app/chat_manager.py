@@ -148,8 +148,6 @@ class ChatManager:
         return user_id in self.online_users
 
     def broadcast_to_all(self, message):
-
-    def broadcast_to_all(self, message):
         self.redis_client.publish("global:events", json.dumps({"_raw_html": message}))
 
     def subscribe(self, channel_id, ws):

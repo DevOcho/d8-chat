@@ -247,7 +247,7 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
         if notification_html:
             unread_link_html = render_template("partials/unreads_link_unread.html")
             chat_manager.send_to_user(member.id, notification_html, exclude_channel=conv_id_str)
-            chat_manager.send_to_user(member.id, unread_link_html), exclude_channel=conv_id_str
+            chat_manager.send_to_user(member.id, unread_link_html, exclude_channel=conv_id_str)
 
         # Sound and Desktop Notification Logic (remains the same)
         now = datetime.datetime.now()
