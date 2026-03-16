@@ -397,9 +397,9 @@ def chat(ws):
                 unread_link_html = render_template("partials/threads_link_unread.html")
                 now = datetime.datetime.now()
                 for user_id in all_participant_ids:
-                    if user_id == ws.user.id or user_id not in chat_manager.all_clients:
+                    if user_id == ws.user.id or not chat_manager.is_user_online_in_cluster(user_id):
                         continue
-                    chat_manager.send_to_user(user_id, unread_link_html)
+                    chat_manager.send_to_user(user_id, unread_link_html, exclude_channel=conv_id_str)
                     try:
                         status, _ = UserConversationStatus.get_or_create(
                             user_id=user_id, conversation=parent_message.conversation
@@ -408,7 +408,7 @@ def chat(ws):
                             now - status.last_notified_timestamp
                         ) > datetime.timedelta(seconds=10)
                         if should_notify:
-                            chat_manager.send_to_user(user_id, {"type": "sound"})
+                            chat_manager.send_to_user(user_id, {"type": "sound"}, exclude_channel=conv_id_str)
                             status.last_notified_timestamp = now
                             status.save()
                     except Exception as e:

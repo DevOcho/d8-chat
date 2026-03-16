@@ -46,9 +46,14 @@ class ChatManager:
             if channel_name.startswith("user:"):
                 target_user_id = int(channel_name.split(":", 1)[1])
                 if target_user_id in self.all_clients:
-                    self._send_message(
-                        self.all_clients[target_user_id], payload_to_send
-                    )
+                    ws = self.all_clients[target_user_id]
+                    
+                    # Filter out messages meant to be excluded for the active channel
+                    exclude_channel = payload_data.get("_exclude_channel")
+                    if exclude_channel and getattr(ws, "channel_id", None) == exclude_channel:
+                        continue
+                        
+                    self._send_message(ws, payload_to_send)
                 continue
 
             target_channel = None
@@ -96,16 +101,18 @@ class ChatManager:
         payload_data["_sender_id"] = sender_id
         self.redis_client.publish(redis_channel, json.dumps(payload_data))
 
-    def send_to_user(self, user_id, message):
+    def send_to_user(self, user_id, message, exclude_channel=None):
         """Publishes a message to a user-specific channel on Valkey."""
         redis_channel = f"user:{user_id}"
         if isinstance(message, dict):
-            payload = json.dumps(message)
+            payload_data = message.copy()
         else:
-            payload = json.dumps({"_raw_html": message})
-        self.redis_client.publish(redis_channel, payload)
-
-    # --- Other methods remain largely the same ---
+            payload_data = {"_raw_html": message}
+            
+        if exclude_channel:
+            payload_data["_exclude_channel"] = exclude_channel
+            
+        self.redis_client.publish(redis_channel, json.dumps(payload_data))
 
     def _handle_disconnect(self, ws):
         user_id_to_remove = None
@@ -122,13 +129,25 @@ class ChatManager:
         self.clients.add(ws)
         self.online_users[user_id] = "online"
         self.all_clients[user_id] = ws
+        if self.redis_client:
+            self.redis_client.sadd("global:online_users", user_id)
 
     def set_offline(self, user_id):
         self.online_users.pop(user_id, None)
         self.all_clients.pop(user_id, None)
+        if self.redis_client:
+            self.redis_client.srem("global:online_users", user_id)
 
     def is_online(self, user_id):
         return user_id in self.online_users
+
+    def is_user_online_in_cluster(self, user_id):
+        """Checks if a user is online across ANY worker via Redis."""
+        if self.redis_client:
+            return self.redis_client.sismember("global:online_users", str(user_id))
+        return user_id in self.online_users
+
+    def broadcast_to_all(self, message):
 
     def broadcast_to_all(self, message):
         self.redis_client.publish("global:events", json.dumps({"_raw_html": message}))

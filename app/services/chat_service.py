@@ -2,6 +2,7 @@
 
 import datetime
 import re
+from flask import render_template, url_for
 
 from app.chat_manager import chat_manager
 from app.models import (
@@ -163,22 +164,11 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
 
     # Loop through every member to see if they need a notification
     for member in members:
-        # Condition 1: Don't notify the sender or any offline users
-        if member.id == sender_user.id or member.id not in chat_manager.all_clients:
+        # Condition 1: Don't notify the sender or any offline users (cluster-aware)
+        if member.id == sender_user.id or not chat_manager.is_user_online_in_cluster(member.id):
             continue
 
-        member_ws = chat_manager.all_clients[member.id]
-
-        # Condition 2: Don't notify users who are currently viewing this exact conversation
-        is_viewing_conversation = (
-            hasattr(member_ws, "channel_id") and member_ws.channel_id == conv_id_str
-        )
-        if is_viewing_conversation:
-            continue
-
-        # If we get here, the user is online but in a different channel/DM.
-        # They need a UI update.
-        from flask import render_template, url_for
+        # Condition 2: Check viewing status via 'exclude_channel' in send_to_user payload
 
         status, _ = UserConversationStatus.get_or_create(
             user=member, conversation=conversation
@@ -256,8 +246,8 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
 
         if notification_html:
             unread_link_html = render_template("partials/unreads_link_unread.html")
-            chat_manager.send_to_user(member.id, notification_html)
-            chat_manager.send_to_user(member.id, unread_link_html)
+            chat_manager.send_to_user(member.id, notification_html, exclude_channel=conv_id_str)
+            chat_manager.send_to_user(member.id, unread_link_html), exclude_channel=conv_id_str
 
         # Sound and Desktop Notification Logic (remains the same)
         now = datetime.datetime.now()
@@ -268,15 +258,16 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
         )
 
         if is_a_mention:
-            chat_manager.send_to_user(member.id, {"type": "sound"})
+            chat_manager.send_to_user(member.id, {"type": "sound"}, exclude_channel=conv_id_str)
             notification_payload = {
                 "type": "notification",
                 "title": f"New mention from {new_message.user.display_name or new_message.user.username}",
                 "body": new_message.content,
-                "icon": url_for("static", filename="favicon.ico", _external=True),
+                # Remove _external=True to use a safe relative path
+                "icon": url_for("static", filename="favicon.ico"),
                 "tag": conv_id_str,
             }
-            chat_manager.send_to_user(member.id, notification_payload)
+            chat_manager.send_to_user(member.id, notification_payload, exclude_channel=conv_id_str)
             status.last_notified_timestamp = now
             status.save()
         elif conversation.type == "dm":
@@ -284,14 +275,15 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 now - status.last_notified_timestamp
             ) > datetime.timedelta(seconds=10)
             if should_notify:
-                chat_manager.send_to_user(member.id, {"type": "sound"})
+                chat_manager.send_to_user(member.id, {"type": "sound"}, exclude_channel=conv_id_str)
                 notification_payload = {
                     "type": "notification",
                     "title": f"New message from {new_message.user.display_name or new_message.user.username}",
                     "body": new_message.content,
-                    "icon": url_for("static", filename="favicon.ico", _external=True),
+                    # Remove _external=True to use a safe relative path
+                    "icon": url_for("static", filename="favicon.ico"),
                     "tag": conv_id_str,
                 }
-                chat_manager.send_to_user(member.id, notification_payload)
+                chat_manager.send_to_user(member.id, notification_payload, exclude_channel=conv_id_str)
                 status.last_notified_timestamp = now
                 status.save()
