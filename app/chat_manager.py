@@ -1,3 +1,8 @@
+# app/chat_manager.py
+"""Module for managing WebSocket connections and Redis Pub/Sub."""
+
+# pylint: disable=import-error
+
 import datetime
 import json
 
@@ -8,6 +13,8 @@ from .models import Conversation, UserConversationStatus
 
 
 class ChatManager:
+    """Manages WebSocket clients, online status, and Redis Pub/Sub broadcasting."""
+
     def __init__(self):
         self.clients = set()
         self.online_users = {}
@@ -47,12 +54,15 @@ class ChatManager:
                 target_user_id = int(channel_name.split(":", 1)[1])
                 if target_user_id in self.all_clients:
                     ws = self.all_clients[target_user_id]
-                    
+
                     # Filter out messages meant to be excluded for the active channel
                     exclude_channel = payload_data.get("_exclude_channel")
-                    if exclude_channel and getattr(ws, "channel_id", None) == exclude_channel:
+                    if (
+                        exclude_channel
+                        and getattr(ws, "channel_id", None) == exclude_channel
+                    ):
                         continue
-                        
+
                     self._send_message(ws, payload_to_send)
                 continue
 
@@ -81,11 +91,11 @@ class ChatManager:
             else:
                 payload = str(message)
             ws.send(payload)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Error sending to client {ws}: {e}")
             self._handle_disconnect(ws)
 
-    def broadcast(self, channel_id, message, sender_ws=None, is_event=False):
+    def broadcast(self, channel_id, message, sender_ws=None):
         """Publishes a message to a specific channel on Valkey."""
         redis_channel = f"chat:{channel_id}"
         sender_id = (
@@ -108,10 +118,10 @@ class ChatManager:
             payload_data = message.copy()
         else:
             payload_data = {"_raw_html": message}
-            
+
         if exclude_channel:
             payload_data["_exclude_channel"] = exclude_channel
-            
+
         self.redis_client.publish(redis_channel, json.dumps(payload_data))
 
     def _handle_disconnect(self, ws):
@@ -126,6 +136,7 @@ class ChatManager:
         self.clients.discard(ws)
 
     def set_online(self, user_id, ws):
+        """Marks a user as online and tracks their websocket connection."""
         self.clients.add(ws)
         self.online_users[user_id] = "online"
         self.all_clients[user_id] = ws
@@ -133,12 +144,14 @@ class ChatManager:
             self.redis_client.sadd("global:online_users", user_id)
 
     def set_offline(self, user_id):
+        """Marks a user as offline and cleans up their state."""
         self.online_users.pop(user_id, None)
         self.all_clients.pop(user_id, None)
         if self.redis_client:
             self.redis_client.srem("global:online_users", user_id)
 
     def is_online(self, user_id):
+        """Checks if a user is online in the current pod."""
         return user_id in self.online_users
 
     def is_user_online_in_cluster(self, user_id):
@@ -148,14 +161,17 @@ class ChatManager:
         return user_id in self.online_users
 
     def broadcast_to_all(self, message):
+        """Publishes a message to all users globally."""
         self.redis_client.publish("global:events", json.dumps({"_raw_html": message}))
 
     def subscribe(self, channel_id, ws):
+        """Subscribes a websocket to a specific conversation channel."""
         self.unsubscribe(ws)
         ws.channel_id = str(channel_id)
         print(f"Client {ws} subscribed to channel {ws.channel_id}")
 
     def unsubscribe(self, ws):
+        """Unsubscribes a websocket from its current channel, updating read status."""
         if hasattr(ws, "channel_id") and ws.channel_id:
             channel_id = ws.channel_id
             if hasattr(ws, "user") and ws.user:
@@ -168,7 +184,7 @@ class ChatManager:
                             (UserConversationStatus.user == ws.user)
                             & (UserConversationStatus.conversation == conv)
                         ).execute()
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     print(f"Error updating last_read_timestamp: {e}")
             print(f"Client {ws} unsubscribed from channel {channel_id}")
             ws.channel_id = None
@@ -177,6 +193,7 @@ class ChatManager:
             self.handle_typing_event(ws.channel_id, user, is_typing=False, sender_ws=ws)
 
     def handle_typing_event(self, conversation_id, user, is_typing, sender_ws):
+        """Handles and broadcasts typing status updates."""
         if not conversation_id or not user:
             return
         self.typing_users.setdefault(conversation_id, set())

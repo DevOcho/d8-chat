@@ -1,5 +1,8 @@
 # app/models.py
-# This should work for both SQLite and PostgreSQL
+"""Database models for the application."""
+
+# pylint: disable=too-few-public-methods
+
 import datetime
 import os
 
@@ -44,23 +47,31 @@ def initialize_db(app):
 
 
 class BaseModel(Model):
+    """Base model providing created_at and updated_at fields."""
+
     created_at = DateTimeField(default=datetime.datetime.now)
     updated_at = DateTimeField(default=datetime.datetime.now)
 
     class Meta:
+        """Peewee Meta class."""
+
         database = db
 
     def save(self, *args, **kwargs):
         self.updated_at = datetime.datetime.now()
-        return super(BaseModel, self).save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
 
 class Workspace(BaseModel):
+    """Represents a workspace containing channels and users."""
+
     id = PrimaryKeyField()
     name = CharField(unique=True)
 
 
 class User(BaseModel, UserMixin):
+    """Represents a user of the chat application."""
+
     id = PrimaryKeyField()
     username = CharField(unique=True)
     email = CharField(unique=True)
@@ -98,11 +109,14 @@ class User(BaseModel, UserMixin):
     def avatar_url(self):
         """Returns a presigned URL for the user's avatar, or None."""
         if self.avatar:
+            # pylint: disable=no-member
             return minio_service.get_presigned_url(self.avatar.stored_filename)
         return None
 
 
 class WorkspaceMember(BaseModel):
+    """Links users to workspaces with a specific role."""
+
     id = PrimaryKeyField()
     user = ForeignKeyField(User, backref="workspaces")
     workspace = ForeignKeyField(Workspace, backref="members")
@@ -110,6 +124,8 @@ class WorkspaceMember(BaseModel):
 
 
 class Channel(BaseModel):
+    """Represents a channel where multiple users can chat."""
+
     id = PrimaryKeyField()
     workspace = ForeignKeyField(Workspace, backref="channels")
     name = CharField(max_length=80)
@@ -121,10 +137,14 @@ class Channel(BaseModel):
     invites_restricted_to_admins = BooleanField(default=False)
 
     class Meta:
+        """Peewee Meta class."""
+
         constraints = [SQL("UNIQUE(workspace_id, name)")]
 
 
 class ChannelMember(BaseModel):
+    """Links users to channels with a specific role."""
+
     id = PrimaryKeyField()
     user = ForeignKeyField(User, backref="channels")
     channel = ForeignKeyField(Channel, backref="members")
@@ -133,6 +153,8 @@ class ChannelMember(BaseModel):
 
 # This table will represent a "chat room", which can be a channel or a DM
 class Conversation(BaseModel):
+    """Represents a conversation container for messages."""
+
     id = PrimaryKeyField()
     # A conversation_id string like "channel_1" or "dm_4_5"
     conversation_id_str = CharField(unique=True)
@@ -141,6 +163,8 @@ class Conversation(BaseModel):
 
 
 class Message(BaseModel):
+    """Represents a chat message sent in a conversation."""
+
     id = PrimaryKeyField()
     conversation = ForeignKeyField(Conversation, backref="messages")
     user = ForeignKeyField(User, backref="messages", null=True)
@@ -168,7 +192,7 @@ class Message(BaseModel):
         """
         return (
             User.select()
-            .join(Message, on=(User.id == Message.user))
+            .join(Message, on=User.id == Message.user)
             .where((Message.parent_message == self) & (Message.reply_type == "thread"))
             .group_by(User.id)
             .order_by(fn.MAX(Message.created_at).desc())
@@ -184,6 +208,8 @@ class Reaction(BaseModel):
     emoji = CharField()  # Stores the actual unicode emoji character
 
     class Meta:
+        """Peewee Meta class."""
+
         # A user can only react with the same emoji once per message
         primary_key = CompositeKey("user", "message", "emoji")
 
@@ -198,6 +224,8 @@ class Mention(BaseModel):
     message = ForeignKeyField(Message, backref="mentions", on_delete="CASCADE")
 
     class Meta:
+        """Peewee Meta class."""
+
         # A user can only be mentioned once per message
         primary_key = CompositeKey("user", "message")
 
@@ -216,10 +244,14 @@ class MessageHashtag(BaseModel):
     hashtag = ForeignKeyField(Hashtag, backref="message_links", on_delete="CASCADE")
 
     class Meta:
+        """Peewee Meta class."""
+
         primary_key = CompositeKey("message", "hashtag")
 
 
 class UserConversationStatus(BaseModel):
+    """Tracks the read/notification status of a user in a conversation."""
+
     user = ForeignKeyField(User, backref="conversation_statuses")
     conversation = ForeignKeyField(Conversation, backref="user_statuses")
     last_read_timestamp = DateTimeField(default=datetime.datetime.now)
@@ -227,11 +259,15 @@ class UserConversationStatus(BaseModel):
     last_seen_mention_id = BigIntegerField(null=True)
 
     class Meta:
+        """Peewee Meta class."""
+
         # Ensures a user has only one status per conversation
         primary_key = CompositeKey("user", "conversation")
 
 
 class UploadedFile(BaseModel):
+    """Tracks metadata for files uploaded to Minio."""
+
     id = PrimaryKeyField()
     uploader = ForeignKeyField(User, backref="files")
     original_filename = CharField()
@@ -243,7 +279,12 @@ class UploadedFile(BaseModel):
     @property
     def url(self):
         """Returns a presigned URL for the file."""
-        return minio_service.get_presigned_url(self.stored_filename, response_headers={'response-content-disposition': f'attachment; filename="{self.original_filename}"'})
+        return minio_service.get_presigned_url(
+            self.stored_filename,
+            response_headers={
+                "response-content-disposition": f'attachment; filename="{self.original_filename}"'
+            },
+        )
 
 
 class MessageAttachment(BaseModel):
@@ -253,10 +294,14 @@ class MessageAttachment(BaseModel):
     attachment = ForeignKeyField(UploadedFile, backref="file_links")
 
     class Meta:
+        """Peewee Meta class."""
+
         primary_key = CompositeKey("message", "attachment")
 
 
 class Poll(BaseModel):
+    """Represents a poll associated with a message."""
+
     id = PrimaryKeyField()
     # A poll is a special type of message. This links them.
     message = ForeignKeyField(Message, backref="poll", unique=True)
@@ -265,15 +310,21 @@ class Poll(BaseModel):
 
 
 class PollOption(BaseModel):
+    """Represents a selectable option within a poll."""
+
     id = PrimaryKeyField()
     poll = ForeignKeyField(Poll, backref="options", on_delete="CASCADE")
     text = TextField()
 
 
 class Vote(BaseModel):
+    """Tracks a user's vote on a specific poll option."""
+
     # A user can only vote once per option in a given poll.
     user = ForeignKeyField(User, backref="votes")
     option = ForeignKeyField(PollOption, backref="votes", on_delete="CASCADE")
 
     class Meta:
+        """Peewee Meta class."""
+
         primary_key = CompositeKey("user", "option")

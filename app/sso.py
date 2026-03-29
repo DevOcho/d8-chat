@@ -1,3 +1,8 @@
+# app/sso.py
+"""Single Sign-On (SSO) integration using Authlib."""
+
+# pylint: disable=import-error
+
 import datetime
 
 from authlib.integrations.flask_client import OAuth
@@ -24,6 +29,95 @@ def init_sso(app):
     )
 
 
+def _setup_new_user_workspace(user):
+    """Adds a newly created SSO user to the default workspace and channels."""
+    default_workspace = Workspace.get_or_none(Workspace.name == "DevOcho")
+    if default_workspace:
+        # Use get_or_create to prevent 500 errors if they are already a member
+        WorkspaceMember.get_or_create(
+            user=user, workspace=default_workspace, defaults={"role": "member"}
+        )
+        print(f"-> Verified '{user.username}' in workspace '{default_workspace.name}'.")
+
+        # 2. Add to Default Channels (Idempotent)
+        print("-> Searching for default channels...")
+        channel_names = list(("general", "announcements"))
+        default_channels = list(
+            Channel.select().where(
+                (Channel.name.in_(channel_names))
+                & (Channel.workspace == default_workspace)
+            )
+        )
+
+        if not default_channels:
+            print(
+                "-> WARNING: Default channels 'general' or 'announcements' not found!"
+            )
+        else:
+            for channel in default_channels:
+                # Use get_or_create to prevent 500 errors
+                ChannelMember.get_or_create(user=user, channel=channel)
+                print(
+                    f"-> Verified '{user.username}' in default channel '#{channel.name}'."
+                )
+    else:
+        print(
+            f"-> WARNING: Default workspace 'DevOcho' not found. "
+            f"Could not process new user '{user.username}'."
+        )
+
+
+def _create_or_link_sso_user(sso_id, email, base_username, display_name):
+    """Finds, links, or creates a user based on SSO attributes."""
+    # Try to find the user by their unique SSO ID first. This is the most reliable.
+    user = User.get_or_none(User.sso_id == sso_id)
+
+    if user:
+        # User was found by sso_id, update their details just in case they changed.
+        user.email = email
+        # Do NOT update username here, as that changes their identity handle
+        if display_name:
+            user.display_name = display_name
+        user.save()
+        return user
+
+    # No user found by SSO ID. Check if one exists with this email but no SSO ID.
+    user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
+
+    if user:  # User exists, link the account
+        print(f"Linking existing user '{user.username}' via SSO.")
+        user.sso_id = sso_id
+        user.sso_provider = "authentik"
+        # Optionally update their name from SSO
+        if display_name:
+            user.display_name = display_name
+        user.save()
+        return user
+
+    # User does not exist, create a new one
+    # Ensure username uniqueness
+    username = base_username
+    counter = 1
+    while User.select().where(User.username == username).exists():
+        username = f"{base_username}_{counter}"
+        counter += 1
+
+    print(f"Creating a new user '{username}' from SSO login.")
+    user = User.create(
+        sso_id=sso_id,
+        email=email,
+        username=username,
+        display_name=display_name,
+        sso_provider="authentik",
+        is_active=True,
+        last_threads_view_at=datetime.datetime.now(),
+    )
+
+    # Assign to workspace and default channels
+    _setup_new_user_workspace(user)
+    return user
+
+
 def handle_auth_callback():
     """
     Handles the authentication callback from the SSO provider.
@@ -43,10 +137,6 @@ def handle_auth_callback():
 
     sso_id = user_info.get("sub")  # 'sub' is the standard OIDC subject identifier
     email = user_info.get("email")
-    
-    # Generate a safe base username
-    base_username = email.split("@")[0].lower().replace(".", "_")
-    display_name = user_info.get("given_name")
 
     if not sso_id or not email:
         return redirect(
@@ -56,86 +146,12 @@ def handle_auth_callback():
             )
         )
 
-    # --- Let's setup or create this user ---
-    # Try to find the user by their unique SSO ID first. This is the most reliable.
-    user = User.get_or_none(User.sso_id == sso_id)
+    # Generate a safe base username
+    base_username = email.split("@")[0].lower().replace(".", "_")
+    display_name = user_info.get("given_name")
 
     with db.atomic():
-        if user is None:
-            # No user found by SSO ID. Check if one exists with this email but no SSO ID.
-            user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
-
-            if user:  # User exists, link the account
-                print(f"Linking existing user '{user.username}' via SSO.")
-                user.sso_id = sso_id
-                user.sso_provider = "authentik"
-                # Optionally update their name from SSO
-                if display_name:
-                    user.display_name = display_name
-                user.save()
-
-            else:  # User does not exist, create a new one
-                # Ensure username uniqueness
-                username = base_username
-                counter = 1
-                while User.select().where(User.username == username).exists():
-                    username = f"{base_username}_{counter}"
-                    counter += 1
-
-                print(f"Creating a new user '{username}' from SSO login.")
-                user = User.create(
-                    sso_id=sso_id,
-                    email=email,
-                    username=username,
-                    display_name=display_name,
-                    sso_provider="authentik",
-                    is_active=True,
-                    last_threads_view_at=datetime.datetime.now(),
-                )
-
-            # 1. Add to Workspace and Broadcast
-            default_workspace = Workspace.get_or_none(Workspace.name == "DevOcho")
-            if default_workspace:
-                # Use get_or_create to prevent 500 errors if they are already a member
-                WorkspaceMember.get_or_create(
-                    user=user, 
-                    workspace=default_workspace, 
-                    defaults={"role": "member"}
-                )
-                print(
-                    f"-> Verified '{user.username}' in workspace '{default_workspace.name}'."
-                )
-
-                # 2. Add to Default Channels (Idempotent)
-                print("-> Searching for default channels...")
-                default_channels = Channel.select().where(
-                    (Channel.name.in_(["general", "announcements"]))
-                    & (Channel.workspace == default_workspace)
-                )
-
-                if not default_channels.exists():
-                    print(
-                        "-> WARNING: Default channels 'general' or 'announcements' not found!"
-                    )
-                else:
-                    for channel in default_channels:
-                        # Use get_or_create to prevent 500 errors
-                        ChannelMember.get_or_create(user=user, channel=channel)
-                        print(
-                            f"-> Verified '{user.username}' in default channel '#{channel.name}'."
-                        )
-            else:
-                print(
-                    f"-> WARNING: Default workspace 'DevOcho' not found. Could not process new user '{user.username}'."
-                )
-
-        else:
-            # User was found by sso_id, update their details just in case they changed.
-            user.email = email
-            # Do NOT update username here, as that changes their identity handle
-            if display_name:
-                user.display_name = display_name
-            user.save()
+        user = _create_or_link_sso_user(sso_id, email, base_username, display_name)
 
     # Store user ID in the session to log them in
     session["user_id"] = user.id

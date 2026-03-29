@@ -1,5 +1,7 @@
 # app/routes.py
+"""Main routing and WebSocket handlers for the chat application."""
 
+# pylint: disable=cyclic-import
 import datetime
 import functools
 import json
@@ -14,7 +16,9 @@ from .models import (
     Conversation,
     Mention,
     Message,
+    MessageAttachment,
     Reaction,
+    UploadedFile,
     User,
     UserConversationStatus,
     WorkspaceMember,
@@ -32,6 +36,7 @@ AVATAR_SIZE = (256, 256)
 # This function runs before every request to load the logged-in user.
 @main_bp.before_app_request
 def load_logged_in_user():
+    """Loads the user from the session into the Flask g object."""
     user_id = session.get("user_id")
     if user_id is None:
         g.user = None
@@ -41,6 +46,8 @@ def load_logged_in_user():
 
 # Decorator to require login for a route.
 def login_required(view):
+    """Decorator to require a logged-in user for routes."""
+
     @functools.wraps(view)
     def wrapped_view(**kwargs):
         if g.user is None:
@@ -61,16 +68,16 @@ def get_reactions_for_messages(messages):
     reactions_map = {}
     if not messages:
         return reactions_map
-    message_ids = [m.id for m in messages]
+    message_ids = list(m.id for m in messages)
     all_reactions = (
         Reaction.select(Reaction, User)
         .join(User)
-        .where(Reaction.message_id.in_(message_ids))
+        .where(Reaction.message.in_(message_ids))
         .order_by(Reaction.created_at)
     )
     reactions_by_message = {}
     for r in all_reactions:
-        mid = r.message_id
+        mid = r.message.id
         if mid not in reactions_by_message:
             reactions_by_message[mid] = {}
         if r.emoji not in reactions_by_message[mid]:
@@ -96,16 +103,15 @@ def get_attachments_for_messages(messages):
     attachments_map = {}
     if not messages:
         return attachments_map
-    from .models import MessageAttachment, UploadedFile
 
-    message_ids = [m.id for m in messages]
+    message_ids = list(m.id for m in messages)
     all_links = (
         MessageAttachment.select(MessageAttachment, UploadedFile)
         .join(UploadedFile)
-        .where(MessageAttachment.message_id.in_(message_ids))
+        .where(MessageAttachment.message.in_(message_ids))
     )
     for link in all_links:
-        mid = link.message_id
+        mid = link.message.id
         if mid not in attachments_map:
             attachments_map[mid] = []
         attachments_map[mid].append(
@@ -148,6 +154,89 @@ def check_and_get_read_state_oob(current_user, just_read_conversation):
 # --- CORE CHAT INTERFACE AND WEBSOCKET ---
 
 
+def _get_unread_info(all_conversations):
+    """Calculates unread message and mention counts for a list of conversations."""
+    unread_info = {}
+    if not all_conversations:
+        return unread_info
+
+    statuses = list(
+        UserConversationStatus.select().where(
+            UserConversationStatus.user == g.user,
+            UserConversationStatus.conversation.in_(
+                list(c.id for c in all_conversations)
+            ),
+        )
+    )
+    last_read_map = {s.conversation.id: s.last_read_timestamp for s in statuses}
+
+    for conv in all_conversations:
+        last_read = last_read_map.get(conv.id, datetime.datetime.min)
+        if conv.type == "channel":
+            mentions = (
+                Mention.select()
+                .join(Message)
+                .where(
+                    (Mention.user == g.user)
+                    & (Message.conversation == conv)
+                    & (Message.created_at > last_read)
+                )
+                .count()
+            )
+            has_unread = (
+                mentions > 0
+                or Message.select()
+                .where(
+                    (Message.conversation == conv)
+                    & (Message.created_at > last_read)
+                    & (Message.user != g.user)
+                )
+                .exists()
+            )
+        else:  # DM
+            mentions = (
+                Message.select()
+                .where(
+                    (Message.conversation == conv)
+                    & (Message.created_at > last_read)
+                    & (Message.user != g.user)
+                )
+                .count()
+            )
+            has_unread = mentions > 0
+        unread_info[conv.conversation_id_str] = {
+            "mentions": mentions,
+            "has_unread": has_unread,
+        }
+    return unread_info
+
+
+def _has_unread_threads(last_view_time):
+    """Checks if the user has any unread thread replies."""
+    user_thread_replies = list(
+        Message.select().where(
+            (Message.user == g.user) & (Message.reply_type == "thread")
+        )
+    )
+    involved_parent_ids = {r.parent_message_id for r in user_thread_replies}
+    started_threads = list(
+        Message.select(Message.id).where(
+            (Message.user == g.user) & (Message.last_reply_at.is_null(False))
+        )
+    )
+    involved_parent_ids.update(p.id for p in started_threads)
+    if involved_parent_ids:
+        return (
+            Message.select()
+            .where(
+                (Message.id.in_(list(involved_parent_ids)))
+                & (Message.last_reply_at > last_view_time)
+            )
+            .exists()
+        )
+    return False
+
+
 @main_bp.route("/chat")
 @login_required
 def chat_interface():
@@ -163,7 +252,7 @@ def chat_interface():
         .join(UserConversationStatus)
         .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
     )
-    channel_conv_ids = [f"channel_{c.id}" for c in user_channels]
+    channel_conv_ids = list(f"channel_{c.id}" for c in user_channels)
     channel_convs_query = Conversation.select().where(
         Conversation.conversation_id_str.in_(channel_conv_ids)
     )
@@ -178,72 +267,10 @@ def chat_interface():
     }
     direct_message_users = User.select().where(User.id.in_(list(dm_partner_ids)))
 
-    unread_info = {}
-    if all_conversations:
-        statuses = UserConversationStatus.select().where(
-            UserConversationStatus.user == g.user,
-            UserConversationStatus.conversation.in_([c.id for c in all_conversations]),
-        )
-        last_read_map = {s.conversation.id: s.last_read_timestamp for s in statuses}
-        for conv in all_conversations:
-            last_read = last_read_map.get(conv.id, datetime.datetime.min)
-            if conv.type == "channel":
-                mentions = (
-                    Mention.select()
-                    .join(Message)
-                    .where(
-                        (Mention.user == g.user)
-                        & (Message.conversation == conv)
-                        & (Message.created_at > last_read)
-                    )
-                    .count()
-                )
-                has_unread = (
-                    mentions > 0
-                    or Message.select()
-                    .where(
-                        (Message.conversation == conv)
-                        & (Message.created_at > last_read)
-                        & (Message.user != g.user)
-                    )
-                    .exists()
-                )
-            else:  # DM
-                mentions = (
-                    Message.select()
-                    .where(
-                        (Message.conversation_id == conv.id)
-                        & (Message.created_at > last_read)
-                        & (Message.user != g.user)
-                    )
-                    .count()
-                )
-                has_unread = mentions > 0
-            unread_info[conv.conversation_id_str] = {
-                "mentions": mentions,
-                "has_unread": has_unread,
-            }
-
+    unread_info = _get_unread_info(all_conversations)
     has_unreads = any(info["has_unread"] for info in unread_info.values())
     last_view_time = g.user.last_threads_view_at or datetime.datetime.min
-    user_thread_replies = Message.select().where(
-        (Message.user == g.user) & (Message.reply_type == "thread")
-    )
-    involved_parent_ids = {r.parent_message_id for r in user_thread_replies}
-    started_threads = Message.select(Message.id).where(
-        (Message.user == g.user) & (Message.last_reply_at.is_null(False))
-    )
-    involved_parent_ids.update(p.id for p in started_threads)
-    has_unread_threads = False
-    if involved_parent_ids:
-        has_unread_threads = (
-            Message.select()
-            .where(
-                (Message.id.in_(list(involved_parent_ids)))
-                & (Message.last_reply_at > last_view_time)
-            )
-            .exists()
-        )
+    has_unread_threads = _has_unread_threads(last_view_time)
 
     workspace_member = WorkspaceMember.get_or_none(user=g.user)
 
@@ -258,6 +285,169 @@ def chat_interface():
         theme=g.user.theme,
         workspace_member=workspace_member,
     )
+
+
+def _notify_thread_participant(user_id, conversation, now, conv_id_str):
+    """Sends sound notification for thread replies if needed."""
+    status, _ = UserConversationStatus.get_or_create(
+        user_id=user_id, conversation=conversation
+    )
+    should_notify = status.last_notified_timestamp is None or (
+        now - status.last_notified_timestamp
+    ) > datetime.timedelta(seconds=10)
+    if should_notify:
+        chat_manager.send_to_user(
+            user_id, {"type": "sound"}, exclude_channel=conv_id_str
+        )
+        status.last_notified_timestamp = now
+        status.save()
+
+
+def _notify_all_thread_participants(ws, parent_message, conv_id_str):
+    """Gathers all thread participants and sends them unread notifications."""
+    all_participant_ids = {parent_message.user.id}
+    replies = list(
+        Message.select(Message.user).where(Message.parent_message == parent_message)
+    )
+    all_participant_ids.update(r.user.id for r in replies)
+
+    unread_link_html = render_template("partials/threads_link_unread.html")
+    now = datetime.datetime.now()
+
+    for user_id in list(all_participant_ids):
+        if user_id == ws.user.id or not chat_manager.is_user_online_in_cluster(user_id):
+            continue
+        chat_manager.send_to_user(
+            user_id, unread_link_html, exclude_channel=conv_id_str
+        )
+        try:
+            _notify_thread_participant(
+                user_id, parent_message.conversation, now, conv_id_str
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            print(f"Error sending thread notification to user {user_id}: {e}")
+
+
+def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
+    """Broadcasts a thread reply to relevant users."""
+    reactions_map_for_reply = get_reactions_for_messages(list((new_message,)))
+    attachments_map_for_reply = get_attachments_for_messages(list((new_message,)))
+    new_reply_html = render_template(
+        "partials/message.html",
+        message=new_message,
+        reactions_map=reactions_map_for_reply,
+        attachments_map=attachments_map_for_reply,
+        Message=Message,
+        is_in_thread_view=True,
+    )
+    broadcast_html = f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
+
+    parent_message = Message.get_by_id(parent_id)
+    reactions_map_for_parent = get_reactions_for_messages(list((parent_message,)))
+    attachments_map_for_parent = get_attachments_for_messages(list((parent_message,)))
+    parent_in_channel_html = render_template(
+        "partials/message.html",
+        message=parent_message,
+        reactions_map=reactions_map_for_parent,
+        attachments_map=attachments_map_for_parent,
+        Message=Message,
+        is_in_thread_view=False,
+    )
+
+    # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
+    parent_in_channel_oob = parent_in_channel_html.replace(
+        f'id="message-{parent_id}"', f'id="message-{parent_id}" hx-swap-oob="true"', 1
+    )
+    broadcast_html += parent_in_channel_oob
+
+    # Delegate the notification loop to our new helper function
+    _notify_all_thread_participants(ws, parent_message, conv_id_str)
+
+    chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
+
+
+def _broadcast_regular_message(ws, new_message, conv_id_str):
+    """Broadcasts a regular message or quoted reply."""
+    reactions_map = get_reactions_for_messages(list((new_message,)))
+    attachments_map = get_attachments_for_messages(list((new_message,)))
+    new_message_html = render_template(
+        "partials/message.html",
+        message=new_message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
+    message_to_broadcast = (
+        f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
+    )
+    chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
+
+    if new_message.reply_type == "quote":
+        input_html = render_template("partials/chat_input_default.html")
+        reset_payload = (
+            f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+        )
+        chat_manager.send_to_user(ws.user.id, reset_payload)
+
+
+def _process_ws_event(ws, data):
+    """Processes a single WebSocket event."""
+    event_type = data.get("type")
+    conv_id_str = data.get("conversation_id") or getattr(ws, "channel_id", None)
+
+    if event_type == "subscribe":
+        if conv_id_str:
+            chat_manager.subscribe(conv_id_str, ws)
+        return
+
+    if event_type in ("typing_start", "typing_stop"):
+        is_typing = event_type == "typing_start"
+        chat_manager.handle_typing_event(
+            conversation_id=conv_id_str,
+            user=ws.user,
+            is_typing=is_typing,
+            sender_ws=ws,
+        )
+        return
+
+    # --- New Message Handling ---
+    chat_text = data.get("chat_message")
+    parent_id = data.get("parent_message_id")
+    reply_type = data.get("reply_type")
+    attachment_file_ids = data.get("attachment_file_ids")
+    quoted_message_id = data.get("quoted_message_id")
+
+    if not chat_text and not attachment_file_ids:
+        return
+
+    conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
+    if not conversation:
+        return
+
+    if conversation.type == "channel":
+        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        if channel.posting_restricted_to_admins:
+            membership = ChannelMember.get_or_none(user=ws.user, channel=channel)
+            if not membership or membership.role != "admin":
+                return
+
+    new_message = chat_service.handle_new_message(
+        sender=ws.user,
+        conversation=conversation,
+        chat_text=chat_text,
+        parent_id=parent_id,
+        reply_type=reply_type,
+        attachment_file_ids=attachment_file_ids,
+        quoted_message_id=quoted_message_id,
+    )
+
+    # --- Broadcast and Notification Logic ---
+    if new_message.reply_type == "thread":
+        _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str)
+    else:
+        _broadcast_regular_message(ws, new_message, conv_id_str)
+
+    chat_service.send_notifications_for_new_message(new_message, ws.user)
 
 
 # --- WebSocket Handler ---
@@ -301,149 +491,7 @@ def chat(ws):
     try:
         while True:
             data = json.loads(ws.receive())
-            event_type = data.get("type")
-            conv_id_str = data.get("conversation_id") or getattr(ws, "channel_id", None)
-
-            if event_type == "subscribe":
-                if conv_id_str:
-                    chat_manager.subscribe(conv_id_str, ws)
-                continue
-
-            if event_type in ["typing_start", "typing_stop"]:
-                is_typing = event_type == "typing_start"
-                chat_manager.handle_typing_event(
-                    conversation_id=conv_id_str,
-                    user=ws.user,
-                    is_typing=is_typing,
-                    sender_ws=ws,
-                )
-                continue
-
-            # --- New Message Handling ---
-            chat_text = data.get("chat_message")
-            parent_id = data.get("parent_message_id")
-            reply_type = data.get("reply_type")
-            attachment_file_ids = data.get("attachment_file_ids")
-            quoted_message_id = data.get("quoted_message_id")
-
-            if not chat_text and not attachment_file_ids:
-                continue
-
-            conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
-            if not conversation:
-                continue
-
-            if conversation.type == "channel":
-                channel = Channel.get_by_id(
-                    conversation.conversation_id_str.split("_")[1]
-                )
-                if channel.posting_restricted_to_admins:
-                    membership = ChannelMember.get_or_none(
-                        user=ws.user, channel=channel
-                    )
-                    if not membership or membership.role != "admin":
-                        continue
-
-            new_message = chat_service.handle_new_message(
-                sender=ws.user,
-                conversation=conversation,
-                chat_text=chat_text,
-                parent_id=parent_id,
-                reply_type=reply_type,
-                attachment_file_ids=attachment_file_ids,
-                quoted_message_id=quoted_message_id,
-            )
-
-            # --- Broadcast and Notification Logic ---
-            if new_message.reply_type == "thread":
-                broadcast_html = ""
-                reactions_map_for_reply = get_reactions_for_messages([new_message])
-                attachments_map_for_reply = get_attachments_for_messages([new_message])
-                new_reply_html = render_template(
-                    "partials/message.html",
-                    message=new_message,
-                    reactions_map=reactions_map_for_reply,
-                    attachments_map=attachments_map_for_reply,
-                    Message=Message,
-                    is_in_thread_view=True,
-                )
-                broadcast_html += f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
-                parent_message = Message.get_by_id(parent_id)
-                reactions_map_for_parent = get_reactions_for_messages([parent_message])
-                attachments_map_for_parent = get_attachments_for_messages(
-                    [parent_message]
-                )
-                parent_in_channel_html = render_template(
-                    "partials/message.html",
-                    message=parent_message,
-                    reactions_map=reactions_map_for_parent,
-                    attachments_map=attachments_map_for_parent,
-                    Message=Message,
-                    is_in_thread_view=False,
-                )
-
-                # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
-                parent_in_channel_oob = parent_in_channel_html.replace(
-                    f'id="message-{parent_id}"',
-                    f'id="message-{parent_id}" hx-swap-oob="true"',
-                    1,
-                )
-                broadcast_html += parent_in_channel_oob
-                all_participant_ids = {parent_message.user_id}
-                replies = Message.select(Message.user_id).where(
-                    Message.parent_message == parent_message
-                )
-                all_participant_ids.update(r.user_id for r in replies)
-                unread_link_html = render_template("partials/threads_link_unread.html")
-                now = datetime.datetime.now()
-                for user_id in all_participant_ids:
-                    if (
-                        user_id == ws.user.id
-                        or not chat_manager.is_user_online_in_cluster(user_id)
-                    ):
-                        continue
-                    chat_manager.send_to_user(
-                        user_id, unread_link_html, exclude_channel=conv_id_str
-                    )
-                    try:
-                        status, _ = UserConversationStatus.get_or_create(
-                            user_id=user_id, conversation=parent_message.conversation
-                        )
-                        should_notify = status.last_notified_timestamp is None or (
-                            now - status.last_notified_timestamp
-                        ) > datetime.timedelta(seconds=10)
-                        if should_notify:
-                            chat_manager.send_to_user(
-                                user_id, {"type": "sound"}, exclude_channel=conv_id_str
-                            )
-                            status.last_notified_timestamp = now
-                            status.save()
-                    except Exception as e:
-                        print(
-                            f"Error sending thread notification to user {user_id}: {e}"
-                        )
-                chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
-
-            else:
-                # This is for regular messages and quoted replies.
-                reactions_map = get_reactions_for_messages([new_message])
-                attachments_map = get_attachments_for_messages([new_message])
-                new_message_html = render_template(
-                    "partials/message.html",
-                    message=new_message,
-                    reactions_map=reactions_map,
-                    attachments_map=attachments_map,
-                    Message=Message,
-                )
-                message_to_broadcast = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-                chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
-
-                if new_message.reply_type == "quote":
-                    input_html = render_template("partials/chat_input_default.html")
-                    reset_payload = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
-                    chat_manager.send_to_user(ws.user.id, reset_payload)
-
-            chat_service.send_notifications_for_new_message(new_message, ws.user)
+            _process_ws_event(ws, data)
     finally:
         if hasattr(ws, "user") and ws.user:
             user_id = ws.user.id
