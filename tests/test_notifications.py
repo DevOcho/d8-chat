@@ -90,12 +90,28 @@ def test_channel_mention_sends_badge_notification(app, setup_mention_test, mocke
 
     # 2. Check that send_to_user was called with the correct arguments
     # We use call objects to check for multiple calls
-    expected_calls = [
-        call(recipient.id, expected_badge_html),
-        call(recipient.id, expected_unreads_link_html),
-        call(recipient.id, {"type": "sound"}),
-        # We can also check parts of the desktop notification payload
-    ]
+    expected_calls = list()
+    expected_calls.append(
+        call(
+            recipient.id,
+            expected_badge_html,
+            exclude_channel=conversation.conversation_id_str,
+        )
+    )
+    expected_calls.append(
+        call(
+            recipient.id,
+            expected_unreads_link_html,
+            exclude_channel=conversation.conversation_id_str,
+        )
+    )
+    expected_calls.append(
+        call(
+            recipient.id,
+            {"type": "sound"},
+            exclude_channel=conversation.conversation_id_str,
+        )
+    )
 
     mock_chat_manager.send_to_user.assert_has_calls(expected_calls, any_order=True)
 

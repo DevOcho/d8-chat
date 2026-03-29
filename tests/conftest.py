@@ -4,9 +4,12 @@ import os
 
 os.environ["PYTEST_CURRENT_TEST"] = "true"
 
+from unittest.mock import Mock
+
 import pytest
 
 from app import create_app
+from app.chat_manager import chat_manager
 from app.models import (
     Channel,
     ChannelMember,
@@ -27,6 +30,23 @@ from app.models import (
     WorkspaceMember,
     db,
 )
+
+
+@pytest.fixture(scope="function", autouse=True)
+def mock_redis(mocker):
+    """
+    Mock the Redis client for all tests to prevent real connection attempts.
+    """
+    mock_redis_client = Mock()
+    mocker.patch("redis.from_url", return_value=mock_redis_client)
+
+    chat_manager.redis_client = mock_redis_client
+    chat_manager.pubsub = mock_redis_client.pubsub.return_value
+
+    yield
+
+    chat_manager.redis_client = None
+    chat_manager.pubsub = None
 
 
 @pytest.fixture(scope="function")
