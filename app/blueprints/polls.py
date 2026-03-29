@@ -138,9 +138,11 @@ def vote_on_poll(option_id):
             if existing_vote.option.id == option.id:
                 existing_vote.delete_instance()
             else:
-                # If they clicked a different option, switch their vote
-                existing_vote.option = option
-                existing_vote.save()
+                # If they clicked a different option, switch their vote.
+                # Because 'option' is part of a composite primary key, we must
+                # delete the old record and create a new one instead of updating.
+                existing_vote.delete_instance()
+                Vote.create(user=g.user, option=option)
         else:
             # If they haven't voted yet, create a new vote
             Vote.create(user=g.user, option=option)

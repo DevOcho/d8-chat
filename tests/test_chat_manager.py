@@ -1,3 +1,5 @@
+# tests/test_chat_manager.py
+
 import json
 from unittest.mock import Mock
 
@@ -74,3 +76,74 @@ def test_broadcast_to_all(chat_manager):
     chat_manager.redis_client.publish.assert_called_once_with(
         "global:events", expected_payload
     )
+
+
+def test_send_to_user(chat_manager):
+    """Tests sending targeted user messages with exclusions."""
+    chat_manager.send_to_user(1, "Hello", exclude_channel="chan_1")
+
+    expected_payload = json.dumps({"_raw_html": "Hello", "_exclude_channel": "chan_1"})
+    chat_manager.redis_client.publish.assert_called_once_with(
+        "user:1", expected_payload
+    )
+
+
+def test_handle_typing_event(chat_manager):
+    """Tests typing event additions, removals, and broadcasts."""
+    mock_user = Mock()
+    mock_user.username = "testuser"  # Explicitly set as a string
+    mock_user.id = 1  # Add a serializable ID
+    mock_ws = Mock()
+    mock_ws.user = mock_user  # Attach the mock user to the mock websocket
+
+    # Start typing
+    chat_manager.handle_typing_event("chan_1", mock_user, True, mock_ws)
+    assert "testuser" in chat_manager.typing_users["chan_1"]
+    chat_manager.redis_client.publish.assert_called_once()
+
+    # Stop typing
+    chat_manager.handle_typing_event("chan_1", mock_user, False, mock_ws)
+    assert "testuser" not in chat_manager.typing_users["chan_1"]
+
+
+def test_is_user_online_in_cluster(chat_manager):
+    """Tests checking online status checks Redis set."""
+    chat_manager.redis_client.sismember.return_value = True
+    assert chat_manager.is_user_online_in_cluster(1) is True
+
+
+def test_handle_disconnect(chat_manager):
+    """Tests the cleanup when a client disconnects."""
+    mock_ws = Mock()
+    chat_manager.all_clients[1] = mock_ws
+    chat_manager.clients.add(mock_ws)
+
+    chat_manager._handle_disconnect(mock_ws)
+
+    assert 1 not in chat_manager.all_clients
+    assert mock_ws not in chat_manager.clients
+
+
+def test_send_message_success(chat_manager):
+    """Tests _send_message safely strips internal keys and dispatches."""
+    mock_ws = Mock()
+    payload = {"type": "test", "_sender_id": 1}
+
+    chat_manager._send_message(mock_ws, payload)
+
+    # ensure _sender_id was stripped
+    mock_ws.send.assert_called_once_with('{"type": "test"}')
+
+
+def test_send_message_exception(chat_manager):
+    """Tests _send_message failing correctly calls _handle_disconnect."""
+    mock_ws = Mock()
+    mock_ws.send.side_effect = Exception("Socket Closed")
+
+    chat_manager.all_clients[1] = mock_ws
+    chat_manager.clients.add(mock_ws)
+
+    # This should trigger an exception catch and disconnect
+    chat_manager._send_message(mock_ws, "test html")
+
+    assert 1 not in chat_manager.all_clients

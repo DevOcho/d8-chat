@@ -1,11 +1,15 @@
-import pytest
+# tests/test_messages.py
+
 import json
+
+import pytest
+
 from app.models import (
-    User,
     Channel,
     ChannelMember,
     Conversation,
     Message,
+    User,
     UserConversationStatus,
 )
 from app.routes import PAGE_SIZE
@@ -195,7 +199,7 @@ def test_get_older_messages_success(logged_in_client, setup_conversation):
     # The `setup_conversation` already created one message. We need the ID of the
     # first message in our new batch, which will be the one with the lowest ID after the first.
     # We fetch all, sort by ID ascending, and get the second one.
-    all_messages = (
+    all_messages = list(
         Message.select()
         .where(Message.conversation == conversation)
         .order_by(Message.id)
@@ -372,3 +376,61 @@ def test_jump_to_nonexistent_message(logged_in_client):
     """
     response = logged_in_client.get("/chat/message/9999/context")
     assert response.status_code == 404
+
+
+def test_load_for_thread_reply(logged_in_client, setup_conversation):
+    """
+    WHEN a user clicks to reply to a message within a thread view
+    THEN it should load the thread-specific reply HTML
+    """
+    parent_message = setup_conversation["message"]
+    # User 2 replies in thread
+    thread_reply = Message.create(
+        user=setup_conversation["user2"],
+        conversation=parent_message.conversation,
+        content="Thread reply",
+        parent_message=parent_message,
+        reply_type="thread",
+    )
+
+    response = logged_in_client.get(
+        f"/chat/message/{thread_reply.id}/load_for_thread_reply"
+    )
+    assert response.status_code == 200
+    assert b"Replying to " in response.data
+    assert f'id="thread-input-container-{parent_message.id}"'.encode() in response.data
+
+
+def test_get_thread_chat_input(logged_in_client, setup_conversation):
+    """
+    WHEN a thread is opened
+    THEN it should load the clean thread-specific input form
+    """
+    parent_message = setup_conversation["message"]
+    response = logged_in_client.get(f"/chat/input/thread/{parent_message.id}")
+    assert response.status_code == 200
+    assert f'id="thread-input-container-{parent_message.id}"'.encode() in response.data
+
+
+def test_load_message_for_thread_edit(logged_in_client, setup_conversation):
+    """
+    WHEN a user clicks to edit their own message in a thread
+    THEN it should load the thread-specific edit HTML
+    """
+    parent_message = setup_conversation["message"]
+
+    # User 1 replies to themselves in a thread
+    thread_reply = Message.create(
+        user=setup_conversation["user1"],
+        conversation=parent_message.conversation,
+        content="My own thread reply",
+        parent_message=parent_message,
+        reply_type="thread",
+    )
+
+    response = logged_in_client.get(
+        f"/chat/message/{thread_reply.id}/load_for_thread_edit"
+    )
+    assert response.status_code == 200
+    assert b"Editing Message" in response.data
+    assert f'id="thread-input-container-{parent_message.id}"'.encode() in response.data

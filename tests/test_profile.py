@@ -1,5 +1,7 @@
 # tests/test_profile.py
 
+import io
+
 from app.models import User
 
 
@@ -233,3 +235,44 @@ def test_update_notification_sound_invalid(logged_in_client):
     assert response.status_code == 400
     updated_user = User.get_by_id(1)
     assert updated_user.notification_sound == original_sound
+
+
+def test_upload_avatar_success(logged_in_client, mocker):
+    """
+    GIVEN a valid image file
+    WHEN posted to the /profile/avatar endpoint
+    THEN the avatar should be saved, uploaded, and the user updated.
+    """
+    mocker.patch("app.blueprints.profile.minio_service.upload_file", return_value=True)
+    mocker.patch(
+        "app.blueprints.profile.minio_service.get_presigned_url",
+        return_value="http://mock-url",
+    )
+
+    # A valid, tiny 1x1 transparent PNG payload so Pillow doesn't crash
+    tiny_png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    data = {"avatar": (io.BytesIO(tiny_png), "avatar.png")}
+
+    response = logged_in_client.post(
+        "/profile/avatar", data=data, content_type="multipart/form-data"
+    )
+
+    assert response.status_code == 200
+    assert b"profile-header-card" in response.data
+
+
+def test_upload_avatar_missing_file(logged_in_client):
+    """WHEN an avatar upload request has no file, it returns 400."""
+    response = logged_in_client.post("/profile/avatar", data={})
+    assert response.status_code == 400
+    assert b"No file part" in response.data
+
+
+def test_upload_avatar_invalid_type(logged_in_client):
+    """WHEN an avatar upload request has an invalid extension, it returns 400."""
+    data = {"avatar": (io.BytesIO(b"fake data"), "avatar.pdf")}
+    response = logged_in_client.post(
+        "/profile/avatar", data=data, content_type="multipart/form-data"
+    )
+    assert response.status_code == 400
+    assert b"File type not allowed" in response.data

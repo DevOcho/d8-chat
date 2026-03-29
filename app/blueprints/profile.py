@@ -3,7 +3,7 @@ import json
 import os
 import uuid
 
-from flask import Blueprint, g, make_response, render_template, request
+from flask import Blueprint, current_app, g, make_response, render_template, request
 from PIL import Image
 from werkzeug.utils import secure_filename
 
@@ -52,7 +52,8 @@ def upload_avatar():
     old_avatar_file = g.user.avatar
     original_filename = secure_filename(file.filename)
     stored_filename = f"{uuid.uuid4()}.png"
-    temp_dir = os.path.join(g.app.instance_path, "temp_uploads")
+
+    temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
     os.makedirs(temp_dir, exist_ok=True)
     temp_path = os.path.join(temp_dir, stored_filename)
 
@@ -80,7 +81,7 @@ def upload_avatar():
                 try:
                     minio_service.delete_file(old_avatar_file.stored_filename)
                     old_avatar_file.delete_instance()
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     print(f"Error during old avatar cleanup: {e}")
 
             payload = {
