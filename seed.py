@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 
+from faker import Faker
+from peewee import IntegrityError
+
 from app import create_app
 from app.models import (
-    db,
-    User,
-    Workspace,
-    WorkspaceMember,
     Channel,
     ChannelMember,
     Conversation,
+    User,
+    Workspace,
+    WorkspaceMember,
+    db,
 )
-from peewee import IntegrityError
-from faker import Faker
 
 # Initialize Faker
 fake = Faker()
@@ -193,7 +194,7 @@ def seed_data():
 if __name__ == "__main__":
     # Create a Flask app to get the application context.
     # This initializes the db proxy with the correct connection string.
-    app = create_app()
+    app = create_app(start_listener=False)
     with app.app_context():
         # All database operations must happen within the app context.
         with db.atomic():

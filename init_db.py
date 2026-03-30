@@ -146,7 +146,7 @@ if __name__ == "__main__":
 
     # Create a Flask app to get the application context.
     # This initializes our 'db' proxy to connect to the correct PostgreSQL DB.
-    app = create_app()
+    app = create_app(start_listener=False)
 
     with app.app_context():
         with db.atomic():

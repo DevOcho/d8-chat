@@ -317,7 +317,7 @@ def register_blueprints(app):
     app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
 
 
-def create_app(config_class=Config):
+def create_app(config_class=Config, start_listener=True):
     """
     Creates and configures the Flask application.
     """
@@ -348,8 +348,11 @@ def create_app(config_class=Config):
     sock.init_app(app)
     chat_manager.initialize(app)
 
-    if not app.testing and (
-        not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"
+    # Add the start_listener check here
+    if (
+        start_listener
+        and not app.testing
+        and (not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true")
     ):
 
         def run_listener():
