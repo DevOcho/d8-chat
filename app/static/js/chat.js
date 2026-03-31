@@ -22,17 +22,18 @@ const NotificationManager = {
             console.log("This browser does not support desktop notification");
             return;
         }
+        const banner = document.getElementById('enable-notifications-banner');
         const button = document.getElementById('enable-notifications-btn');
-        if (!button) return;
+        if (!banner || !button) return;
         if (Notification.permission === "default") {
-            button.style.display = 'block';
+            banner.style.display = 'block';
             button.addEventListener('click', this.requestPermission.bind(this));
         }
     },
     requestPermission: function() {
         Notification.requestPermission().then(permission => {
-            const button = document.getElementById('enable-notifications-btn');
-            if (button) button.style.display = 'none';
+            const banner = document.getElementById('enable-notifications-banner');
+            if (banner) banner.style.display = 'none';
             if (permission === "granted") {
                 this.playSound('d8-notification.mp3');
             }
@@ -63,12 +64,12 @@ const NotificationManager = {
                 icon: data.icon,
                 tag: data.tag
             });
-                
+
             // Auto-close after 5 seconds so it pops up and then disappears
             setTimeout(() => notification.close(), 5000);
-                
-            notification.onclick = () => { 
-                window.focus(); 
+
+            notification.onclick = () => {
+                window.focus();
                 notification.close();
             };
         }
@@ -270,13 +271,13 @@ const createAttachmentManager = function(editorState) {
 
     const createPreviewAndUpload = function(file, uploadKey) {
         state.previewContainer.classList.add('has-attachments');
-        
+
         const thumbnailDiv = document.createElement('div');
         thumbnailDiv.className = 'attachment-thumbnail';
         thumbnailDiv.dataset.uploadKey = uploadKey;
 
         const isImage = file.type.startsWith('image/');
-        
+
         let iconPath = '';
         if (file.type === 'application/pdf') {
             iconPath = '/icons/pdf-icon.svg';
@@ -285,22 +286,22 @@ const createAttachmentManager = function(editorState) {
         }
 
         thumbnailDiv.innerHTML = `
-            ${isImage 
-                ? `<img src="" alt="Uploading..." />` 
+            ${isImage
+                ? `<img src="" alt="Uploading..." />`
                 : `<img src="${iconPath}" class="file-icon-img" alt="file" />`
             }
             <div class="file-name-small">${file.name.substring(0, 15)}</div>
             <div class="spinner-border spinner-border-sm text-light position-absolute top-50 start-50"></div>
             <button type="button" class="remove-attachment-btn">&times;</button>
         `;
-        
+
 
         state.previewContainer.appendChild(thumbnailDiv);
 
         if (isImage) {
             const reader = new FileReader();
-            reader.onload = (e) => { 
-                thumbnailDiv.querySelector('img').src = e.target.result; 
+            reader.onload = (e) => {
+                thumbnailDiv.querySelector('img').src = e.target.result;
             };
             reader.readAsDataURL(file);
         }
@@ -313,7 +314,7 @@ const createAttachmentManager = function(editorState) {
             .then(response => {
                 const spinner = thumbnailDiv.querySelector('.spinner-border');
                 if (spinner) spinner.remove();
-                
+
                 if (!response.ok) return response.json().then(err => { throw err; });
                 return response.json();
             })
@@ -333,7 +334,7 @@ const createAttachmentManager = function(editorState) {
                 if (typeof ToastManager !== 'undefined') {
                     ToastManager.show('Upload Error', errorMessage, 'danger');
                 }
-                
+
                 const upload = state.uploads.get(uploadKey);
                 if (upload) upload.status = 'error';
                 thumbnailDiv.style.opacity = '0.5';
@@ -341,7 +342,7 @@ const createAttachmentManager = function(editorState) {
                 setTimeout(() => {
                     removeAttachment(uploadKey)
                 }, 3000);
-                
+
             });
     };
 
@@ -1318,20 +1319,22 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const processCodeBlocks = (container) => {
         const MAX_HEIGHT = 300;
-        // A tiny timeout allows the browser to calculate the layout (scrollHeight) before checking
         setTimeout(() => {
             const codeBlocks = container.querySelectorAll('.codehilite:not(.code-processed)');
             codeBlocks.forEach(block => {
+                // If scrollHeight is greater than MAX_HEIGHT, it's a tall block hiding content
                 if (block.scrollHeight > MAX_HEIGHT) {
-                    block.classList.add('collapsible');
                     const toggler = document.createElement('div');
                     toggler.className = 'code-expander';
                     toggler.innerText = 'Show more...';
                     block.appendChild(toggler);
                     toggler.addEventListener('click', () => {
-                        block.classList.toggle('collapsible');
-                        toggler.innerText = block.classList.contains('collapsible') ? 'Show more...' : 'Show less';
+                        block.classList.toggle('expanded');
+                        toggler.innerText = block.classList.contains('expanded') ? 'Show less' : 'Show more...';
                     });
+                } else {
+                    // It's a short block, remove the 300px constraint so it flexes naturally
+                    block.classList.add('short');
                 }
                 block.classList.add('code-processed');
             });

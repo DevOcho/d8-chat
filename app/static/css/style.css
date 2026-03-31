@@ -30,6 +30,7 @@ body, html {
   height: 100vh;
   background-color: #ffffff;
   position: relative;
+  min-width: 0;
 }
 .container-fluid {
     background-color: #f4f7fa;
@@ -58,6 +59,13 @@ form[id^="message-form"] {
 
 .message-container:hover {
   background-color: #f8f9fa; /* A subtle light gray for light mode */
+}
+
+/* Add this rule to constrain the message body flex item */
+.message-container .flex-grow-1 {
+  min-width: 0;
+}[data-bs-theme="dark"] .message-container:hover {
+    background-color: #313a4a; /* row highlight */
 }
 
 [data-bs-theme="dark"] .message-container:hover {
@@ -99,14 +107,17 @@ form[id^="message-form"] {
     padding: 1em;
     border-radius: 4px;
     position: relative; /* Required for the show more button overlay */
-    max-height: 5000px; /* Arbitrary large max-height for expansion transition */
+    max-height: 300px;
     transition: max-height 0.4s ease-in-out;
     overflow: hidden;
 }
 
-/* --- Code Block Expander Styles --- */
-.codehilite.collapsible {
-    max-height: 300px; /* Constrains the block height when collapsed */
+.codehilite.expanded {
+    max-height: 5000px; /* Arbitrary large max-height for expansion transition */
+}
+
+.codehilite.short {
+    max-height: none;
 }
 
 .code-expander {
@@ -125,8 +136,8 @@ form[id^="message-form"] {
     text-decoration: underline;
 }
 
-/* When collapsed, pin the button to the bottom with a gradient fade */
-.codehilite.collapsible .code-expander {
+/* When NOT expanded, pin the button to the bottom with a gradient fade */
+.codehilite:not(.expanded) .code-expander {
     position: absolute;
     bottom: 0;
     left: 0;
@@ -137,6 +148,7 @@ form[id^="message-form"] {
     /* Fade from transparent to the Monokai background color */
     background: linear-gradient(to bottom, rgba(39, 40, 34, 0), rgba(39, 40, 34, 1) 60%);
 }
+
 
 /* --- Login Page Styles --- */
 html.login-page, body.login-page { overflow: auto; }
@@ -1187,14 +1199,14 @@ a.hashtag-link:hover {
 }
 
 .file-icon-wrapper {
-    width: 40px; 
+    width: 40px;
     height: 40px;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-.file-icon-wrapper svg, 
+.file-icon-wrapper svg,
 .file-icon-wrapper img {
     max-width: 100%;
     max-height: 100%;

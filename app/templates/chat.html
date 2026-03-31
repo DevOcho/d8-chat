@@ -77,12 +77,6 @@
                 </button>
             </div>
         </div>
-        <!-- Button to request notification permissions -->
-        <button id="enable-notifications-btn"
-                class="btn btn-sm text-secondary w-100 text-start"
-                style="display: none">
-            <i class="bi bi-bell-fill me-1"></i> Enable Notifications
-        </button>
         <ul id="channel-list" class="list-unstyled">
             {% for channel in channels %}
                 {% set conv_id_str = "channel_" ~ channel.id %}
@@ -333,6 +327,16 @@
                 <i class="bi bi-upload"></i>
                 <span>Drop files to attach them</span>
             </div>
+        </div>
+        <!-- Notification permission -->
+        <div id="enable-notifications-banner"
+             class="bg-primary text-white text-center p-2 position-fixed bottom-0 start-0 w-100 shadow-lg"
+             style="z-index: 1060;
+                    display: none">
+            <span class="me-3">Don't miss a message! Enable desktop notifications to stay in the loop.</span>
+            <button id="enable-notifications-btn" class="btn btn-light btn-sm fw-bold">
+                <i class="bi bi-bell-fill me-1"></i> Enable Notifications
+            </button>
         </div>
     </main>
 {% endblock %}
