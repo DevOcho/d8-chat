@@ -7,6 +7,7 @@ from flask import Blueprint, g, json, make_response, render_template, request, u
 from app.chat_manager import chat_manager
 from app.models import (
     Channel,
+    ChannelMember,
     Conversation,
     Hashtag,
     Message,
@@ -21,7 +22,7 @@ from app.routes import (
     get_reactions_for_messages,
     login_required,
 )
-from app.services import minio_service
+from app.services import minio_service, chat_service
 
 messages_bp = Blueprint("messages", __name__)
 
@@ -467,3 +468,106 @@ def toggle_reaction(message_id):
     conv_id_str = message.conversation.conversation_id_str
     chat_manager.broadcast(conv_id_str, broadcast_html)
     return broadcast_html, 200
+
+@messages_bp.route("/chat/message/<int:message_id>/forward", methods=list(("GET",)))
+@login_required
+def get_forward_message_modal(message_id):
+    """Returns the modal content to forward a message."""
+    message = Message.get_or_none(id=message_id)
+    if not message:
+        return "Message not found", 404
+
+    # Get user's channels
+    user_channels = list(
+        Channel.select()
+        .join(ChannelMember)
+        .where(ChannelMember.user == g.user)
+        .order_by(Channel.name)
+    )
+
+    # Get user's DMs
+    dm_convs = list(
+        Conversation.select()
+        .join(UserConversationStatus)
+        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
+    )
+
+    # Prepare a list of active DMs with the partner's info
+    dm_list = list()
+    for conv in dm_convs:
+        user_ids = list(int(uid) for uid in conv.conversation_id_str.split("_")[1:])
+        partner_id = next((uid for uid in user_ids if uid != g.user.id), g.user.id)
+        partner = User.get_or_none(id=partner_id)
+        if partner:
+            dm_list.append({"conv_id_str": conv.conversation_id_str, "partner": partner})
+
+    return render_template(
+        "partials/forward_message_modal.html",
+        message=message,
+        channels=user_channels,
+        dms=dm_list
+    )
+
+
+@messages_bp.route("/chat/message/<int:message_id>/forward", methods=list(("POST",)))
+@login_required
+def forward_message(message_id):
+    """Handles the actual forwarding of a message."""
+    original_message = Message.get_or_none(id=message_id)
+    if not original_message:
+        return "Message not found", 404
+
+    target_conv_id_str = request.form.get("conversation_id_str")
+    optional_note = request.form.get("optional_note", "").strip()
+
+    if not target_conv_id_str:
+        return "Target conversation required", 400
+
+    target_conv = Conversation.get_or_none(conversation_id_str=target_conv_id_str)
+    if not target_conv:
+        return "Target conversation not found", 404
+
+    # Verify access to the target conversation
+    if target_conv.type == "channel":
+        channel_id = int(target_conv_id_str.split("_")[1])
+        is_member = ChannelMember.select().where(
+            (ChannelMember.user == g.user) & (ChannelMember.channel_id == channel_id)
+        ).exists()
+        if not is_member:
+            return "You are not a member of the target channel", 403
+    else:
+        user_ids = list(int(uid) for uid in target_conv_id_str.split("_")[1:])
+        if g.user.id not in user_ids:
+            return "You are not part of this DM", 403
+
+    # Add default text if no note is provided so the message isn't completely empty
+    if not optional_note:
+        optional_note = "Forwarded a message."
+
+    # Create the forwarded message using the chat_service to handle mentions/hashtags
+    new_message = chat_service.handle_new_message(
+        sender=g.user,
+        conversation=target_conv,
+        chat_text=optional_note,
+        quoted_message_id=original_message.id
+    )
+
+    # Broadcast to the destination channel so online users see it immediately
+    reactions_map = get_reactions_for_messages(list((new_message,)))
+    attachments_map = get_attachments_for_messages(list((new_message,)))
+    new_message_html = render_template(
+        "partials/message.html",
+        message=new_message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
+    
+    broadcast_html = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
+    chat_manager.broadcast(target_conv_id_str, broadcast_html, sender_ws=None)
+    chat_service.send_notifications_for_new_message(new_message, g.user)
+
+    # Signal HTMX to close the modal
+    response = make_response()
+    response.headers["HX-Trigger"] = "close-modal"
+    return response

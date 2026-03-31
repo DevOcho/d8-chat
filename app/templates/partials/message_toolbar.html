@@ -6,6 +6,15 @@
             title="Add Reaction">
         <i class="bi bi-emoji-smile"></i>
     </button>
+    {# Forward Button #}
+    <button class="btn btn-sm btn-light"
+            hx-get="/chat/message/{{ message.id }}/forward"
+            hx-target="#htmx-modal-content"
+            data-bs-toggle="modal"
+            data-bs-target="#htmx-modal"
+            title="Forward Message">
+        <i class="bi bi-arrow-90deg-right"></i>
+    </button>
     {# Quote Reply Button #}
     {% if is_in_thread_view %}
         {# Inside a thread, target the thread's input container with a new route #}
