@@ -100,6 +100,7 @@ def serialize_message(message, reactions_map, attachments_map):
 
     return {
         "id": message.id,
+        "conversation_id_str": message.conversation.conversation_id_str,
         "content": message.content,
         "created_at": message.created_at.isoformat() if message.created_at else None,
         "is_edited": message.is_edited,

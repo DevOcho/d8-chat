@@ -330,6 +330,8 @@ def _notify_all_thread_participants(ws, parent_message, conv_id_str):
 
 def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
     """Broadcasts a thread reply to relevant users."""
+    from app.blueprints.api_v1 import serialize_message
+
     reactions_map_for_reply = get_reactions_for_messages(list((new_message,)))
     attachments_map_for_reply = get_attachments_for_messages(list((new_message,)))
     new_reply_html = render_template(
@@ -363,11 +365,27 @@ def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
     # Delegate the notification loop to our new helper function
     _notify_all_thread_participants(ws, parent_message, conv_id_str)
 
-    chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
+    api_data = {
+        "type": "new_thread_reply",
+        "data": {
+            "parent_message": serialize_message(
+                parent_message, reactions_map_for_parent, attachments_map_for_parent
+            ),
+            "reply": serialize_message(
+                new_message, reactions_map_for_reply, attachments_map_for_reply
+            ),
+        },
+    }
+
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}, sender_ws=ws
+    )
 
 
 def _broadcast_regular_message(ws, new_message, conv_id_str):
     """Broadcasts a regular message or quoted reply."""
+    from app.blueprints.api_v1 import serialize_message
+
     reactions_map = get_reactions_for_messages(list((new_message,)))
     attachments_map = get_attachments_for_messages(list((new_message,)))
     new_message_html = render_template(
@@ -380,13 +398,23 @@ def _broadcast_regular_message(ws, new_message, conv_id_str):
     message_to_broadcast = (
         f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
     )
-    chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
+
+    api_data = {
+        "type": "new_message",
+        "data": serialize_message(new_message, reactions_map, attachments_map),
+    }
+
+    chat_manager.broadcast(
+        conv_id_str,
+        {"_raw_html": message_to_broadcast, "api_data": api_data},
+        sender_ws=ws,
+    )
 
     if new_message.reply_type == "quote":
         input_html = render_template("partials/chat_input_default.html")
-        reset_payload = (
-            f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
-        )
+        reset_payload = {
+            "_raw_html": f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+        }
         chat_manager.send_to_user(ws.user.id, reset_payload)
 
 
@@ -485,6 +513,7 @@ def chat(ws):
         "type": "presence_update",
         "user_id": user.id,
         "status_class": status_class,
+        "status": user.presence_status,
     }
     chat_manager.broadcast_to_all(payload)
 
@@ -500,7 +529,77 @@ def chat(ws):
                 "type": "presence_update",
                 "user_id": user_id,
                 "status_class": "presence-away",
+                "status": "away",
             }
             chat_manager.broadcast_to_all(payload)
             chat_manager.unsubscribe(ws)
             print(f"INFO: Client connection closed for '{ws.user.username}'.")
+
+
+# --- API JSON WebSocket Handler ---
+@sock.route("/api/v1/ws")
+def api_ws(ws):
+    """Handles JSON WebSocket connections for mobile/API clients."""
+    from app.blueprints.api_v1 import verify_api_token
+
+    # We grab the token directly out of the initial connection URL params
+    token = request.args.get("token")
+    if token and token.startswith("d8_sec_"):
+        token = token[7:]
+
+    user_id = verify_api_token(token)
+    if not user_id:
+        ws.close(reason=1008, message="Invalid or missing token")
+        return
+
+    user = User.get_or_none(id=user_id)
+    if not user:
+        ws.close(reason=1008, message="User not found")
+        return
+
+    ws.user = user
+    ws.is_api_client = True  # Tell chat_manager to serve raw JSON to this WS
+
+    chat_manager.set_online(user.id, ws)
+
+    presence_class_map = {
+        "online": "presence-online",
+        "away": "presence-away",
+        "busy": "presence-busy",
+    }
+    status_class = presence_class_map.get(user.presence_status, "presence-away")
+
+    payload = {
+        "type": "presence_update",
+        "user_id": user.id,
+        "status_class": status_class,
+        "status": user.presence_status,
+    }
+    chat_manager.broadcast_to_all(payload)
+
+    try:
+        while True:
+            data = json.loads(ws.receive())
+
+            # Route API events using the exact same flow but without relying on HTML
+            # Mobile app is expected to send {"type": "send_message", "content": "..."}
+            event_type = data.get("type")
+
+            if event_type == "send_message":
+                data["chat_message"] = data.get("content")
+
+            _process_ws_event(ws, data)
+
+    finally:
+        if hasattr(ws, "user") and ws.user:
+            user_id = ws.user.id
+            chat_manager.set_offline(user_id)
+            disconnect_payload = {
+                "type": "presence_update",
+                "user_id": user_id,
+                "status_class": "presence-away",
+                "status": "away",
+            }
+            chat_manager.broadcast_to_all(disconnect_payload)
+            chat_manager.unsubscribe(ws)
+            print(f"INFO: API Client connection closed for '{ws.user.username}'.")

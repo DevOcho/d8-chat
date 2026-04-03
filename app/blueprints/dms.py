@@ -175,7 +175,8 @@ def get_dm_chat(other_user_id):
             link_text=other_user.display_name or other_user.username,
         )
     elif created and other_user.id != g.user.id:
-        # [THE FIX] This block now renders the correct partial for the initiator
+        from app.blueprints.api_v1 import user_to_dict
+
         add_to_sidebar_html = render_template(
             "partials/dm_list_item_oob.html",
             user=other_user,
@@ -183,24 +184,29 @@ def get_dm_chat(other_user_id):
             is_online=other_user.id in chat_manager.online_users,
         )
 
-        if other_user.id in chat_manager.all_clients:
-            try:
-                recipient_ws = chat_manager.all_clients[other_user.id]
-                # And this renders the correct partial for the recipient
-                new_contact_html = render_template(
-                    "partials/dm_list_item_oob.html",
-                    user=g.user,
-                    conv_id_str=conv_id_str,
-                    is_online=g.user.id in chat_manager.online_users,
-                )
-                # Also render the partial that will force them to subscribe
-                subscription_html = render_template(
-                    "partials/subscribe_oob.html", conv_id_str=conv_id_str
-                )
-                # Send both HTML fragments at once. HTMX will process both OOB swaps.
-                recipient_ws.send(new_contact_html + subscription_html)
-            except Exception as e:
-                print(f"Could not send real-time DM add to user {other_user.id}: {e}")
+        # Render the correct partials for the recipient
+        new_contact_html = render_template(
+            "partials/dm_list_item_oob.html",
+            user=g.user,
+            conv_id_str=conv_id_str,
+            is_online=g.user.id in chat_manager.online_users,
+        )
+        subscription_html = render_template(
+            "partials/subscribe_oob.html", conv_id_str=conv_id_str
+        )
+
+        payload = {
+            "_raw_html": new_contact_html + subscription_html,
+            "api_data": {
+                "type": "dm_created",
+                "data": {
+                    "conversation_id_str": conv_id_str,
+                    "other_user": user_to_dict(g.user),
+                },
+            },
+        }
+
+        chat_manager.send_to_user(other_user.id, payload)
 
     chat_input_html = render_template("partials/chat_input_default.html")
     chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'

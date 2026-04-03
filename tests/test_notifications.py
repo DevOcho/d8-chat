@@ -94,7 +94,17 @@ def test_channel_mention_sends_badge_notification(app, setup_mention_test, mocke
     expected_calls.append(
         call(
             recipient.id,
-            expected_badge_html,
+            {
+                "_raw_html": expected_badge_html,
+                "api_data": {
+                    "type": "unread_updated",
+                    "data": {
+                        "conversation_id_str": conversation.conversation_id_str,
+                        "unread_count": 1,
+                        "is_mention": True,
+                    },
+                },
+            },
             exclude_channel=conversation.conversation_id_str,
         )
     )

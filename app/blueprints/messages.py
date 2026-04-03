@@ -103,14 +103,22 @@ def update_message(message_id):
             Message=Message,
             is_in_thread_view=is_in_thread_view,
         )
-        
+
         # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
         broadcast_html = updated_message_html.replace(
-            f'id="message-{message.id}"', 
-            f'id="message-{message.id}" hx-swap-oob="true"', 
-            1
+            f'id="message-{message.id}"',
+            f'id="message-{message.id}" hx-swap-oob="true"',
+            1,
         )
-        chat_manager.broadcast(conv_id_str, broadcast_html)
+        from app.blueprints.api_v1 import serialize_message
+
+        api_data = {
+            "type": "message_edited",
+            "data": serialize_message(message, reactions_map, attachments_map),
+        }
+        chat_manager.broadcast(
+            conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+        )
     return render_template(
         "partials/message.html",
         message=message,
@@ -145,7 +153,13 @@ def delete_message(message_id):
         print(f"Error deleting message {message_id}: {e}")
         return "Error deleting message", 500
     broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
-    chat_manager.broadcast(conv_id_str, broadcast_html)
+    api_data = {
+        "type": "message_deleted",
+        "data": {"message_id": message_id, "conversation_id_str": conv_id_str},
+    }
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
     return "", 204
 
 
@@ -465,5 +479,15 @@ def toggle_reaction(message_id):
     )
     broadcast_html = f'<div id="reactions-container-{message.id}" hx-swap-oob="innerHTML">{reactions_html_content}</div>'
     conv_id_str = message.conversation.conversation_id_str
-    chat_manager.broadcast(conv_id_str, broadcast_html)
+    api_data = {
+        "type": "reaction_updated",
+        "data": {
+            "message_id": message.id,
+            "conversation_id_str": conv_id_str,
+            "reactions": grouped_reactions,
+        },
+    }
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
     return broadcast_html, 200

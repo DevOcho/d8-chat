@@ -44,9 +44,6 @@ class ChatManager:
             channel_name = message["channel"].decode("utf-8")
             payload_data = json.loads(message["data"])
 
-            # Determine what to send: raw HTML or a JSON object
-            payload_to_send = payload_data.get("_raw_html") or payload_data
-
             # Create a safe copy of clients to iterate over for this pod
             clients_on_this_pod = list(self.clients)
 
@@ -63,7 +60,7 @@ class ChatManager:
                     ):
                         continue
 
-                    self._send_message(ws, payload_to_send)
+                    self._send_message(ws, payload_data)
                 continue
 
             target_channel = None
@@ -77,20 +74,42 @@ class ChatManager:
                         hasattr(client_ws, "channel_id")
                         and client_ws.channel_id == target_channel
                     ):
-                        self._send_message(client_ws, payload_to_send)
+                        self._send_message(client_ws, payload_data)
                 # For a global message, send to everyone.
                 elif channel_name.startswith("global:"):
-                    self._send_message(client_ws, payload_to_send)
+                    self._send_message(client_ws, payload_data)
 
     def _send_message(self, ws, message):
         try:
-            # The payload from the listener might be a dict (typing) or str (HTML)
+            is_api = getattr(ws, "is_api_client", False)
+
+            # The payload from the listener or tests is usually a dictionary
             if isinstance(message, dict):
-                message.pop("_sender_id", None)
-                payload = json.dumps(message)
+                if is_api:
+                    # API Clients exclusively get the structured JSON data if present
+                    if "api_data" in message:
+                        ws.send(json.dumps(message["api_data"]))
+                    elif "_raw_html" not in message:
+                        # Forward generic events (like typing or presence)
+                        clean_payload = message.copy()
+                        clean_payload.pop("_sender_id", None)
+                        clean_payload.pop("_exclude_channel", None)
+                        ws.send(json.dumps(clean_payload))
+                    return
+
+                # Web clients prefer the HTML payload if provided
+                payload_to_send = message.get("_raw_html") or message
+                if isinstance(payload_to_send, dict):
+                    clean_payload = payload_to_send.copy()
+                    clean_payload.pop("_sender_id", None)
+                    clean_payload.pop("_exclude_channel", None)
+                    clean_payload.pop("api_data", None)
+                    ws.send(json.dumps(clean_payload))
+                else:
+                    ws.send(str(payload_to_send))
             else:
-                payload = str(message)
-            ws.send(payload)
+                # Fallback for plain string messages (often sent in tests)
+                ws.send(str(message))
         except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"Error sending to client {ws}: {e}")
             self._handle_disconnect(ws)
@@ -201,8 +220,12 @@ class ChatManager:
             self.typing_users[conversation_id].add(user.username)
         else:
             self.typing_users[conversation_id].discard(user.username)
-        typists = list(self.typing_users.get(conversation_id, []))
-        payload = {"type": "typing_update", "typists": typists}
+        typists = list(self.typing_users.get(conversation_id, list()))
+        payload = {
+            "type": "typing_update",
+            "conversation_id": conversation_id,
+            "typists": typists,
+        }
         self.broadcast(conversation_id, payload, sender_ws=sender_ws)
 
 

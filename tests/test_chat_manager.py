@@ -127,12 +127,41 @@ def test_handle_disconnect(chat_manager):
 def test_send_message_success(chat_manager):
     """Tests _send_message safely strips internal keys and dispatches."""
     mock_ws = Mock()
-    payload = {"type": "test", "_sender_id": 1}
+    mock_ws.is_api_client = False
+    # Add api_data to ensure it gets stripped for web clients
+    payload = {"type": "test", "_sender_id": 1, "api_data": {"foo": "bar"}}
 
     chat_manager._send_message(mock_ws, payload)
 
-    # ensure _sender_id was stripped
+    # ensure _sender_id and api_data were stripped for non-API clients
     mock_ws.send.assert_called_once_with('{"type": "test"}')
+
+
+def test_send_message_api_client(chat_manager):
+    """Tests that API clients get the api_data dictionary."""
+    mock_ws = Mock()
+    mock_ws.is_api_client = True
+    payload = {
+        "_raw_html": "<p>Hello</p>",
+        "api_data": {"type": "new_message", "data": "Hello"},
+    }
+
+    chat_manager._send_message(mock_ws, payload)
+
+    # ensure the API client only receives the JSON representation
+    mock_ws.send.assert_called_once_with('{"type": "new_message", "data": "Hello"}')
+
+
+def test_send_message_api_client_generic_event(chat_manager):
+    """Tests that API clients receive generic events without _raw_html."""
+    mock_ws = Mock()
+    mock_ws.is_api_client = True
+    payload = {"type": "typing_start", "_sender_id": 1}
+
+    chat_manager._send_message(mock_ws, payload)
+
+    # ensure internal tracking keys are stripped but the generic payload remains
+    mock_ws.send.assert_called_once_with('{"type": "typing_start"}')
 
 
 def test_send_message_exception(chat_manager):

@@ -148,6 +148,7 @@ def update_presence_status():
         "type": "presence_update",
         "user_id": user.id,
         "status_class": status_class,
+        "status": new_status,
     }
     chat_manager.broadcast_to_all(payload)
 
