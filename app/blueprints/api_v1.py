@@ -377,6 +377,134 @@ def get_messages(conv_id_str):
     return jsonify({"messages": results}), 200
 
 
+@api_v1_bp.route("/conversations/<conv_id_str>/messages", methods=["POST"])
+@api_token_required
+def create_message(conv_id_str):
+    """Creates a new message in a conversation via REST API."""
+    from flask import render_template
+
+    from app.chat_manager import chat_manager
+    from app.services import chat_service
+
+    conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    # 1. Access Check
+    has_access = False
+    if conv.type == "channel":
+        channel_id = int(conv_id_str.split("_")[1])
+        has_access = (
+            ChannelMember.select()
+            .where(
+                (ChannelMember.user == g.api_user)
+                & (ChannelMember.channel_id == channel_id)
+            )
+            .exists()
+        )
+    elif conv.type == "dm":
+        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
+        has_access = g.api_user.id in user_ids
+
+    if not has_access:
+        return jsonify({"error": "Access denied"}), 403
+
+    # 2. Parse incoming JSON
+    data = request.get_json() or {}
+    content = data.get("content")
+    if not content:
+        return jsonify({"error": "Message content is required"}), 400
+
+    parent_id = data.get("parent_message_id")
+    reply_type = data.get("reply_type")
+    quoted_message_id = data.get("quoted_message_id")
+    attachment_file_ids = data.get("attachment_file_ids")
+
+    # 3. Create the message using our centralized service
+    new_message = chat_service.handle_new_message(
+        sender=g.api_user,
+        conversation=conv,
+        chat_text=content,
+        parent_id=parent_id,
+        reply_type=reply_type,
+        attachment_file_ids=attachment_file_ids,
+        quoted_message_id=quoted_message_id,
+    )
+
+    # Prepare maps for serialization and HTML rendering
+    reactions_map = get_reactions_for_messages([new_message])
+    attachments_map = get_attachments_for_messages([new_message])
+    message_data = serialize_message(new_message, reactions_map, attachments_map)
+
+    # 4. Broadcast the new message to active websocket clients (Web & Mobile)
+    if reply_type == "thread" and parent_id:
+        parent_message = Message.get_by_id(parent_id)
+        parent_reactions = get_reactions_for_messages([parent_message])
+        parent_attachments = get_attachments_for_messages([parent_message])
+
+        new_reply_html = render_template(
+            "partials/message.html",
+            message=new_message,
+            reactions_map=reactions_map,
+            attachments_map=attachments_map,
+            Message=Message,
+            is_in_thread_view=True,
+        )
+        broadcast_html = f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
+
+        parent_html = render_template(
+            "partials/message.html",
+            message=parent_message,
+            reactions_map=parent_reactions,
+            attachments_map=parent_attachments,
+            Message=Message,
+            is_in_thread_view=False,
+        )
+        parent_oob = parent_html.replace(
+            f'id="message-{parent_id}"',
+            f'id="message-{parent_id}" hx-swap-oob="true"',
+            1,
+        )
+        broadcast_html += parent_oob
+
+        api_data = {
+            "type": "new_thread_reply",
+            "data": {
+                "parent_message": serialize_message(
+                    parent_message, parent_reactions, parent_attachments
+                ),
+                "reply": message_data,
+            },
+        }
+
+        chat_manager.broadcast(
+            conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+        )
+    else:
+        new_message_html = render_template(
+            "partials/message.html",
+            message=new_message,
+            reactions_map=reactions_map,
+            attachments_map=attachments_map,
+            Message=Message,
+        )
+        broadcast_html = (
+            f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
+        )
+
+        api_data = {"type": "new_message", "data": message_data}
+
+        chat_manager.broadcast(
+            conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+        )
+
+    # 5. Process standard push notifications / badges for inactive users
+    chat_service.send_notifications_for_new_message(new_message, g.api_user)
+
+    # 6. Return the created message object to the REST caller
+    return jsonify(message_data), 201
+
+
 @api_v1_bp.route("/threads/<int:parent_message_id>", methods=["GET"])
 @api_token_required
 def get_thread(parent_message_id):

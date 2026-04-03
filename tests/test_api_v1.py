@@ -239,3 +239,145 @@ def test_api_get_thread_success(client):
     assert "replies" in data
     assert len(data["replies"]) == 1
     assert data["replies"][0]["content"] == "Thread Reply"
+
+
+def test_api_create_message_success_channel(client):
+    """
+    GIVEN a valid api_token and a conversation the user is in
+    WHEN a POST request is made to create a message
+    THEN it should return 201 and the serialized message data
+    """
+    from app.models import Channel, ChannelMember, Conversation
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    # Add user to general channel
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    payload = {"content": "Hello API world!"}
+    res = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/messages",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 201
+    data = res.get_json()
+    assert data["content"] == "Hello API world!"
+    assert data["user"]["username"] == "testuser"
+    assert data["conversation_id_str"] == conv.conversation_id_str
+
+
+def test_api_create_message_thread_reply(client):
+    """
+    GIVEN a valid api_token and a parent message
+    WHEN a POST request is made to create a thread reply
+    THEN it should return 201 and correctly link the parent message
+    """
+    from app.models import Channel, ChannelMember, Conversation, Message
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    parent_msg = Message.create(user=user, conversation=conv, content="Parent")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    payload = {
+        "content": "Thread reply via API",
+        "parent_message_id": parent_msg.id,
+        "reply_type": "thread",
+    }
+    res = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/messages",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 201
+    data = res.get_json()
+    assert data["content"] == "Thread reply via API"
+    assert data["reply_type"] == "thread"
+    assert data["parent_message_id"] == parent_msg.id
+
+
+def test_api_create_message_missing_content(client):
+    """
+    WHEN POSTing without content
+    THEN return 400 Bad Request
+    """
+    from app.models import Channel, ChannelMember, Conversation
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    # Post with empty content
+    res = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/messages",
+        json={"content": ""},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "Message content is required"
+
+
+def test_api_create_message_access_denied(client):
+    """
+    GIVEN a valid api_token but a conversation the user is NOT in
+    WHEN a POST request is made
+    THEN it should return 403 Forbidden
+    """
+    from app.models import Channel, Conversation
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    # Create a private channel but DO NOT add the user to it
+    channel = Channel.create(workspace_id=1, name="secret-api-channel", is_private=True)
+    conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel.id}", defaults={"type": "channel"}
+    )
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    payload = {"content": "Sneaking in"}
+    res = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/messages",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 403
+    assert res.get_json()["error"] == "Access denied"
