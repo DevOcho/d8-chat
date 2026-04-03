@@ -9,7 +9,7 @@ We use **REST (HTTP)** for mutations (sending messages) to utilize standard HTTP
 
 ## 1. Connection & Authentication
 
-**WebSocket Endpoint:** `wss://<your-domain.com>/api/v1/ws?token=<api_token>`
+**WebSocket Endpoint:** `wss://<your-domain.com>/ws/api/v1?token=<api_token>`
 
 To connect to the WebSocket, the mobile client must pass a valid API token in the query string.
 * The token can optionally include the `d8_sec_` prefix.

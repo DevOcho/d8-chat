@@ -537,7 +537,7 @@ def chat(ws):
 
 
 # --- API JSON WebSocket Handler ---
-@sock.route("/api/v1/ws")
+@sock.route("/ws/api/v1")
 def api_ws(ws):
     """Handles JSON WebSocket connections for mobile/API clients."""
     from app.blueprints.api_v1 import verify_api_token
