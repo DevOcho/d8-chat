@@ -1,8 +1,8 @@
-# app/blueprints/files.py
 import os
 import uuid
 
 from flask import Blueprint, current_app, g, jsonify, request
+from PIL import Image, ImageOps
 from werkzeug.utils import secure_filename
 
 from app.models import UploadedFile
@@ -11,7 +11,6 @@ from app.services import minio_service
 
 files_bp = Blueprint("files", __name__)
 
-# Configure allowed extensions and max size (e.g., 10MB)
 ALLOWED_EXTENSIONS = {
     "png",
     "jpg",
@@ -27,11 +26,31 @@ ALLOWED_EXTENSIONS = {
     "ts",
     "zip",
 }
-MAX_CONTENT_LENGTH = 10 * 1024 * 1024
+# Bump limit to 50MB
+MAX_CONTENT_LENGTH = 50 * 1024 * 1024
 
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def optimize_if_image(file_path, mime_type):
+    """Resizes and compresses large images to save bandwidth and storage."""
+    if not mime_type.startswith("image/"):
+        return
+    if "gif" in mime_type.lower():
+        return  # Do not process GIFs, Pillow can break animations
+
+    try:
+        with Image.open(file_path) as img:
+            # Auto-orient based on camera EXIF data
+            img = ImageOps.exif_transpose(img)
+            # Resize preserving aspect ratio (max 1920x1920)
+            img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
+            # Save back to the same path, optimizing
+            img.save(file_path, optimize=True, quality=85)
+    except Exception as e:
+        print(f"Image optimization skipped/failed: {e}")
 
 
 @files_bp.route("/files/upload", methods=["POST"])
@@ -56,6 +75,9 @@ def upload_file():
         os.makedirs(temp_dir, exist_ok=True)
         temp_path = os.path.join(temp_dir, stored_filename)
         file.save(temp_path)
+
+        # Optimize the image before checking final size and uploading
+        optimize_if_image(temp_path, file.mimetype)
 
         # Get file size
         file_size = os.path.getsize(temp_path)

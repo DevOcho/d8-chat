@@ -444,3 +444,76 @@ def test_api_upload_file_missing_file(client):
 
     assert res.status_code == 400
     assert res.get_json()["error"] == "No file part"
+
+
+def test_api_get_file_content_success(client, mocker):
+    """
+    GIVEN a valid api_token and an existing file
+    WHEN a GET request is made to /api/v1/files/<file_id>/content
+    THEN it should return a 200 OK and stream the file content
+    """
+    from app.models import UploadedFile
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    dummy_file = UploadedFile.create(
+        uploader=user,
+        original_filename="test.txt",
+        stored_filename="dummy-uuid.txt",
+        mime_type="text/plain",
+        file_size_bytes=12,
+    )
+
+    # Create a mock response object that mimics urllib3 HTTPResponse
+    mock_response = mocker.Mock()
+    mock_response.stream.return_value = [b"mock ", b"file ", b"content"]
+
+    # Mock the internal Minio client
+    mocker.patch(
+        "app.blueprints.api_v1.minio_service.minio_client_internal.get_object",
+        return_value=mock_response,
+    )
+
+    res = client.get(
+        f"/api/v1/files/{dummy_file.id}/content",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 200
+    assert res.mimetype == "text/plain"
+    assert res.headers["Cache-Control"] == "private, max-age=3600"
+    assert "test.txt" in res.headers["Content-Disposition"]
+    assert res.data == b"mock file content"
+
+    # Ensure connection cleanup was called
+    mock_response.close.assert_called_once()
+    mock_response.release_conn.assert_called_once()
+
+
+def test_api_get_file_content_not_found(client):
+    """
+    WHEN requesting a file that doesn't exist
+    THEN return 404 Not Found
+    """
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.get(
+        "/api/v1/files/9999/content", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert res.status_code == 404
+    assert res.get_json()["error"] == "File not found"

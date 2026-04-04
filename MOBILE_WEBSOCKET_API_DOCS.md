@@ -80,6 +80,7 @@ Many of the events below utilize a standardized `Message` and `User` object payl
   ],
   "attachments": [
     {
+      "file_id": 42,
       "url": "https://<minio-url>/file.pdf",
       "original_filename": "file.pdf",
       "mime_type": "application/pdf"
@@ -137,6 +138,16 @@ Use this endpoint to pre-upload a file before attaching it to a new message. The
   "mime_type": "application/pdf"
 }
 ```
+
+### Download/View a File
+Use this endpoint to securely access a file's content. This endpoint authenticates your request and streams the binary file data directly to you. It includes a Cache-Control header, so please ensure your networking library respects it to prevent re-downloading images unnecessarily.
+
+**GET** `/api/v1/files/<file_id>/content`
+**Headers:**
+* `Authorization: Bearer <api_token>`
+
+**Response (200 OK):**
+Binary file stream with the appropriate `Content-Type` and `Content-Disposition` headers.
 
 ---
 

@@ -117,6 +117,7 @@ def get_attachments_for_messages(messages):
             attachments_map[mid] = []
         attachments_map[mid].append(
             {
+                "file_id": link.attachment.id,
                 "url": link.attachment.url,
                 "original_filename": link.attachment.original_filename,
                 "mime_type": link.attachment.mime_type,

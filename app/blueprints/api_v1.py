@@ -3,8 +3,17 @@ import os
 import uuid
 from functools import wraps
 
-from flask import Blueprint, current_app, g, jsonify, request
+from flask import (
+    Blueprint,
+    Response,
+    current_app,
+    g,
+    jsonify,
+    request,
+    stream_with_context,
+)
 from itsdangerous import URLSafeTimedSerializer
+from PIL import Image, ImageOps
 from playhouse.shortcuts import model_to_dict
 from werkzeug.utils import secure_filename
 
@@ -157,11 +166,28 @@ ALLOWED_EXTENSIONS = {
     "ts",
     "zip",
 }
-MAX_CONTENT_LENGTH = 10 * 1024 * 1024
+# 50MB upload limit
+MAX_CONTENT_LENGTH = 50 * 1024 * 1024
 
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def optimize_if_image(file_path, mime_type):
+    """Resizes and compresses large images to save bandwidth and storage."""
+    if not mime_type.startswith("image/"):
+        return
+    if "gif" in mime_type.lower():
+        return  # Do not process GIFs, Pillow can break animations
+
+    try:
+        with Image.open(file_path) as img:
+            img = ImageOps.exif_transpose(img)
+            img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
+            img.save(file_path, optimize=True, quality=85)
+    except Exception as e:
+        current_app.logger.warning(f"Image optimization skipped/failed: {e}")
 
 
 @api_v1_bp.route("/files/upload", methods=["POST"])
@@ -188,6 +214,9 @@ def api_upload_file():
         os.makedirs(temp_dir, exist_ok=True)
         temp_path = os.path.join(temp_dir, stored_filename)
         file.save(temp_path)
+
+        # Optimize the image before checking final size and uploading
+        optimize_if_image(temp_path, file.mimetype)
 
         # Get file size
         file_size = os.path.getsize(temp_path)
@@ -228,6 +257,42 @@ def api_upload_file():
             return jsonify({"error": "Failed to upload file to storage"}), 500
 
     return jsonify({"error": "File type not allowed."}), 400
+
+
+@api_v1_bp.route("/files/<int:file_id>/content", methods=["GET"])
+@api_token_required
+def api_get_file_content(file_id):
+    """
+    Proxies a file from Minio to the authenticated mobile client.
+    Streams the bytes directly to avoid local dev DNS issues with presigned URLs.
+    """
+    try:
+        uploaded_file = UploadedFile.get_by_id(file_id)
+    except UploadedFile.DoesNotExist:
+        return jsonify({"error": "File not found"}), 404
+
+    # Use the internal Minio client to stream the object
+    response = minio_service.minio_client_internal.get_object(
+        current_app.config["MINIO_BUCKET_NAME"], uploaded_file.stored_filename
+    )
+
+    # A safe generator to ensure the Minio connection is released back to the pool
+    def generate():
+        try:
+            for chunk in response.stream(32 * 1024):
+                yield chunk
+        finally:
+            response.close()
+            response.release_conn()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype=uploaded_file.mime_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{uploaded_file.original_filename}"',
+            "Cache-Control": "private, max-age=3600",
+        },
+    )
 
 
 # --- Auth Endpoints ---
