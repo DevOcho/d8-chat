@@ -11,6 +11,7 @@ from app.models import (
     Conversation,
     Mention,
     Message,
+    Reaction,
     User,
     UserConversationStatus,
     Workspace,
@@ -558,3 +559,110 @@ def get_thread(parent_message_id):
             ],
         }
     ), 200
+
+
+@api_v1_bp.route("/messages/<int:message_id>/reactions", methods=["POST"])
+@api_token_required
+def toggle_reaction(message_id):
+    """Toggles an emoji reaction on a message for the authenticated user."""
+    from app.chat_manager import chat_manager
+
+    message = Message.get_or_none(Message.id == message_id)
+    if not message:
+        return jsonify({"error": "Message not found"}), 404
+
+    data = request.get_json() or {}
+    emoji = data.get("emoji", "").strip()
+    if not emoji:
+        return jsonify({"error": "emoji is required"}), 400
+
+    existing = Reaction.get_or_none(
+        Reaction.user == g.api_user,
+        Reaction.message == message,
+        Reaction.emoji == emoji,
+    )
+    if existing:
+        existing.delete_instance()
+    else:
+        Reaction.create(user=g.api_user, message=message, emoji=emoji)
+
+    reactions_map = get_reactions_for_messages([message])
+    grouped_reactions = reactions_map.get(message.id, [])
+    conv_id_str = message.conversation.conversation_id_str
+
+    api_data = {
+        "type": "reaction_updated",
+        "data": {
+            "message_id": message.id,
+            "conversation_id_str": conv_id_str,
+            "reactions": grouped_reactions,
+        },
+    }
+    chat_manager.broadcast(conv_id_str, {"api_data": api_data})
+    return jsonify(api_data["data"]), 200
+
+
+@api_v1_bp.route("/messages/<int:message_id>", methods=["PATCH"])
+@api_token_required
+def edit_message(message_id):
+    """Edits the content of a message. Only the author may edit."""
+    from app.chat_manager import chat_manager
+
+    message = Message.get_or_none(Message.id == message_id)
+    if not message:
+        return jsonify({"error": "Message not found"}), 404
+    if message.user.id != g.api_user.id:
+        return jsonify({"error": "Forbidden"}), 403
+
+    data = request.get_json() or {}
+    new_content = (data.get("content") or "").strip()
+    if not new_content:
+        return jsonify({"error": "content is required"}), 400
+
+    message.content = new_content
+    message.is_edited = True
+    message.save()
+
+    reactions_map = get_reactions_for_messages([message])
+    attachments_map = get_attachments_for_messages([message])
+    message_data = serialize_message(message, reactions_map, attachments_map)
+    conv_id_str = message.conversation.conversation_id_str
+
+    api_data = {"type": "message_edited", "data": message_data}
+    chat_manager.broadcast(conv_id_str, {"api_data": api_data})
+    return jsonify(message_data), 200
+
+
+@api_v1_bp.route("/messages/<int:message_id>", methods=["DELETE"])
+@api_token_required
+def delete_message(message_id):
+    """Deletes a message. Only the author may delete."""
+    from app.chat_manager import chat_manager
+    from app.services import minio_service
+
+    message = Message.get_or_none(Message.id == message_id)
+    if not message:
+        return jsonify({"error": "Message not found"}), 404
+    if message.user.id != g.api_user.id:
+        return jsonify({"error": "Forbidden"}), 403
+
+    attachments_to_delete = list(message.attachments)
+    conv_id_str = message.conversation.conversation_id_str
+
+    with db.atomic():
+        message.delete_instance(recursive=True)
+        for attachment in attachments_to_delete:
+            try:
+                minio_service.delete_file(attachment.stored_filename)
+                attachment.delete_instance()
+            except Exception as e:
+                current_app.logger.warning(
+                    f"Attachment cleanup failed for message {message_id}: {e}"
+                )
+
+    api_data = {
+        "type": "message_deleted",
+        "data": {"message_id": message_id, "conversation_id_str": conv_id_str},
+    }
+    chat_manager.broadcast(conv_id_str, {"api_data": api_data})
+    return "", 204
