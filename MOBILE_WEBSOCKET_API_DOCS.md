@@ -88,7 +88,23 @@ Many of the events below utilize a standardized `Message` and `User` object payl
   ],
   "thread_reply_count": 0,
   "last_reply_at": null,
-  "poll": null // or Poll Object if applicable
+  "poll": {
+    "id": 1,
+    "question": "Where should we go for lunch?",
+    "voted_option_id": 4, // null if the current user has not voted
+    "options": [
+      {
+        "id": 4,
+        "text": "Tacos",
+        "count": 3
+      },
+      {
+        "id": 5,
+        "text": "Pizza",
+        "count": 1
+      }
+    ]
+  }
 }
 ```
 
@@ -148,6 +164,55 @@ Use this endpoint to securely access a file's content. This endpoint authenticat
 
 **Response (200 OK):**
 Binary file stream with the appropriate `Content-Type` and `Content-Disposition` headers.
+
+### Fetch Conversation Members
+Returns a list of `User` objects that are participants in a specific conversation. Useful for `@mention` autocomplete interfaces.
+
+**GET** `/api/v1/conversations/<conversation_id_str>/members`
+**Headers:** `Authorization: Bearer <api_token>`
+
+**Response (200 OK):**
+```json
+{
+  "members": [
+    { ...User Object... },
+    { ...User Object... }
+  ]
+}
+```
+
+### Create a Poll
+Creates a new message containing a poll. Broadcasts the standard new_message WebSocket event to all other clients upon success.
+
+**POST** `/api/v1/conversations/<conversation_id_str>/polls`
+**Headers:** `Authorization: Bearer <api_token>`
+
+**Request Body:**
+```json
+{
+  "question": "What's for lunch?",
+  "options": ["Pizza", "Tacos", "Salad"]
+}
+```
+
+**Response (201 Created):**
+Returns the fully serialized Message Object (including the new poll dictionary).
+
+### Vote on a Poll
+Casts, changes, or removes a vote on a poll option. If the user selects the same option they already voted for, their vote is removed. If they select a new option, their vote is switched. This automatically triggers a message_edited WebSocket event for all clients.
+
+**POST** `/api/v1/polls/<poll_id>/vote`
+**Headers:** `Authorization: Bearer <api_token>`
+
+Request Body:
+```json
+{
+  "option_id": 4
+}
+```
+
+**Response (200 OK):**
+Returns the updated Message Object.
 
 ---
 

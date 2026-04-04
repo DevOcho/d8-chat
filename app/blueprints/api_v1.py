@@ -23,10 +23,13 @@ from app.models import (
     Conversation,
     Mention,
     Message,
+    Poll,
+    PollOption,
     Reaction,
     UploadedFile,
     User,
     UserConversationStatus,
+    Vote,
     Workspace,
     WorkspaceMember,
     db,
@@ -81,6 +84,7 @@ def api_token_required(f):
 
         # Store user in g for the request lifecycle
         g.api_user = user
+        g.user = user
         return f(*args, **kwargs)
 
     return decorated
@@ -100,13 +104,26 @@ def user_to_dict(user):
 
 def serialize_message(message, reactions_map, attachments_map):
     """Helper to serialize a Message model for JSON responses."""
+
+    # let's start with Polls since they can be a bit complex
     poll_data = None
-    # Check if the message has a poll (using the backref)
     if hasattr(message, "poll") and message.poll.count() > 0:
         poll = message.poll.get()
+
+        # Fetch current API user's vote if authenticated
+        user_vote = None
+        if hasattr(g, "api_user") and g.api_user:
+            user_vote = (
+                Vote.select(Vote.option_id)
+                .join(PollOption)
+                .where((Vote.user == g.api_user) & (PollOption.poll == poll))
+                .scalar()
+            )
+
         poll_data = {
             "id": poll.id,
             "question": poll.question,
+            "voted_option_id": user_vote,
             "options": list(
                 {"id": opt.id, "text": opt.text, "count": opt.votes.count()}
                 for opt in poll.options
@@ -840,3 +857,172 @@ def delete_message(message_id):
     }
     chat_manager.broadcast(conv_id_str, {"api_data": api_data})
     return "", 204
+
+
+# --- Conversation & Poll Endpoints ---
+
+
+@api_v1_bp.route("/conversations/<conv_id_str>/members", methods=["GET"])
+@api_token_required
+def get_conversation_members(conv_id_str):
+    """Returns a list of users in a conversation for @mention autocomplete."""
+    conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    if conv.type == "channel":
+        channel_id = int(conv_id_str.split("_")[1])
+        has_access = (
+            ChannelMember.select()
+            .where(
+                (ChannelMember.user == g.api_user)
+                & (ChannelMember.channel_id == channel_id)
+            )
+            .exists()
+        )
+        if not has_access:
+            return jsonify({"error": "Access denied"}), 403
+
+        members = (
+            User.select()
+            .join(ChannelMember)
+            .where(ChannelMember.channel_id == channel_id)
+        )
+    elif conv.type == "dm":
+        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
+        if g.api_user.id not in user_ids:
+            return jsonify({"error": "Access denied"}), 403
+        members = User.select().where(User.id.in_(user_ids))
+    else:
+        return jsonify({"error": "Invalid conversation type"}), 400
+
+    return jsonify({"members": [user_to_dict(user) for user in members]}), 200
+
+
+@api_v1_bp.route("/conversations/<conv_id_str>/polls", methods=["POST"])
+@api_token_required
+def create_poll(conv_id_str):
+    """Creates a new poll message in a conversation."""
+    from flask import render_template
+
+    from app.chat_manager import chat_manager
+
+    conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    if conv.type == "channel":
+        channel_id = int(conv_id_str.split("_")[1])
+        has_access = (
+            ChannelMember.select()
+            .where(
+                (ChannelMember.user == g.api_user)
+                & (ChannelMember.channel_id == channel_id)
+            )
+            .exists()
+        )
+    else:
+        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
+        has_access = g.api_user.id in user_ids
+
+    if not has_access:
+        return jsonify({"error": "Access denied"}), 403
+
+    data = request.get_json() or {}
+    question = data.get("question", "").strip()
+    options = [opt.strip() for opt in data.get("options", []) if opt.strip()]
+
+    if not question or len(options) < 2:
+        return jsonify(
+            {"error": "A question and at least two options are required."}
+        ), 400
+
+    with db.atomic():
+        poll_message = Message.create(
+            user=g.api_user, conversation=conv, content=f"[Poll]: {question}"
+        )
+        new_poll = Poll.create(message=poll_message, question=question)
+        for option_text in options:
+            PollOption.create(poll=new_poll, text=option_text)
+
+    reactions_map = get_reactions_for_messages(list([poll_message]))
+    attachments_map = get_attachments_for_messages(list([poll_message]))
+    message_data = serialize_message(poll_message, reactions_map, attachments_map)
+
+    new_message_html = render_template(
+        "partials/message.html",
+        message=poll_message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
+    broadcast_html = (
+        f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
+    )
+
+    api_data = {"type": "new_message", "data": message_data}
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
+
+    return jsonify(message_data), 201
+
+
+@api_v1_bp.route("/polls/<int:poll_id>/vote", methods=["POST"])
+@api_token_required
+def api_vote_on_poll(poll_id):
+    """Casts or changes a vote on a poll."""
+    from flask import render_template
+
+    from app.blueprints.polls import get_poll_context
+    from app.chat_manager import chat_manager
+
+    poll = Poll.get_or_none(Poll.id == poll_id)
+    if not poll:
+        return jsonify({"error": "Poll not found"}), 404
+
+    data = request.get_json() or {}
+    option_id = data.get("option_id")
+
+    option = PollOption.get_or_none(PollOption.id == option_id)
+    if not option or option.poll_id != poll.id:
+        return jsonify({"error": "Invalid option"}), 400
+
+    message = poll.message
+    conv_id_str = message.conversation.conversation_id_str
+
+    with db.atomic():
+        existing_vote = (
+            Vote.select()
+            .join(PollOption)
+            .where((Vote.user == g.api_user) & (PollOption.poll == poll))
+            .first()
+        )
+
+        if existing_vote:
+            if existing_vote.option.id == option.id:
+                existing_vote.delete_instance()  # Un-vote
+            else:
+                existing_vote.delete_instance()  # Switch vote
+                Vote.create(user=g.api_user, option=option)
+        else:
+            Vote.create(user=g.api_user, option=option)
+
+    reactions_map = get_reactions_for_messages(list([message]))
+    attachments_map = get_attachments_for_messages(list([message]))
+    message_data = serialize_message(message, reactions_map, attachments_map)
+
+    # Web client OOB HTML update
+    poll_context = get_poll_context(poll, g.api_user)
+    broadcast_html = render_template(
+        "partials/message_poll_oob_update.html", poll_context=poll_context
+    )
+
+    # Tell mobile clients the message was edited so they re-render the entire poll block
+    api_data = {"type": "message_edited", "data": message_data}
+
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
+
+    return jsonify(message_data), 200

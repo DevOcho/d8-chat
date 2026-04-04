@@ -517,3 +517,88 @@ def test_api_get_file_content_not_found(client):
 
     assert res.status_code == 404
     assert res.get_json()["error"] == "File not found"
+
+
+def test_api_get_conversation_members(client):
+    """
+    GIVEN a valid token and a conversation ID
+    WHEN a GET request is made to the members endpoint
+    THEN it should return the list of users in that conversation
+    """
+    from app.models import Channel, ChannelMember, Conversation
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.get(
+        f"/api/v1/conversations/{conv.conversation_id_str}/members",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 200
+    data = res.get_json()
+    assert "members" in data
+    assert any(member["username"] == "testuser" for member in data["members"])
+
+
+def test_api_create_poll_and_vote(client):
+    """
+    GIVEN a valid token
+    WHEN a poll is created and voted on via the API
+    THEN it returns the proper payload and records the vote
+    """
+    from app.models import Channel, ChannelMember, Conversation, Vote
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    # 1. Create the Poll
+    poll_payload = {"question": "Best IDE?", "options": ["VSCode", "Vim"]}
+    res1 = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/polls",
+        json=poll_payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res1.status_code == 201
+    data = res1.get_json()
+    assert "poll" in data
+    assert data["poll"]["question"] == "Best IDE?"
+    assert len(data["poll"]["options"]) == 2
+    assert data["poll"]["voted_option_id"] is None
+
+    poll_id = data["poll"]["id"]
+    option_id = data["poll"]["options"][0]["id"]
+
+    # 2. Vote on the Poll
+    res2 = client.post(
+        f"/api/v1/polls/{poll_id}/vote",
+        json={"option_id": option_id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res2.status_code == 200
+    vote_data = res2.get_json()
+    assert vote_data["poll"]["voted_option_id"] == option_id
+    assert vote_data["poll"]["options"][0]["count"] == 1
+    assert Vote.select().count() == 1
