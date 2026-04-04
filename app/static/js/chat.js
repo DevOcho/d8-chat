@@ -1349,6 +1349,18 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }, 50);
     };
+    const formatLocalTimes = (container) => {
+        const timeElements = container.querySelectorAll('.local-time:not(.time-processed)');
+        timeElements.forEach(el => {
+            const timestamp = el.dataset.timestamp;
+            if (timestamp) {
+                const date = new Date(timestamp);
+                // Format to match our python output "%I:%M %p" (e.g., "02:42 PM") using the user's browser timezone
+                el.textContent = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+            }
+            el.classList.add('time-processed');
+        });
+    };
     const handleMentionHighlights = (container, conversationId) => {
         const mentions = container.querySelectorAll('.mentioned-message');
         if (mentions.length === 0) return;
@@ -1426,6 +1438,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateReactionHighlights(target);
             initializeReactionPopovers(target);
             processCodeBlocks(target);
+            formatLocalTimes(target);
 
             // If the swapped content is the main chat container,
             // also handle highlighting any new mentions.
@@ -1448,6 +1461,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateReactionHighlights(target);
             initializeReactionPopovers(target);
             processCodeBlocks(target);
+            formatLocalTimes(target);
         }
 
         // --- Scrolling logic for new messages in a thread ---
@@ -1591,6 +1605,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Process new elements in the message list
             initializeReactionPopovers(messagesContainer);
             processCodeBlocks(messagesContainer);
+            formatLocalTimes(target);
+
             const conversationDiv = messagesContainer.querySelector('[data-conversation-db-id]');
             if (conversationDiv) {
                 const conversationId = conversationDiv.dataset.conversationDbId;
@@ -1696,4 +1712,5 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeReactionPopovers(document.body);
     updateReactionHighlights(document.body);
     initializeTooltips(document.body);
+    formatLocalTimes(target);
 });

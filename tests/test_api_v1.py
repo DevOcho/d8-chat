@@ -1,4 +1,5 @@
 # tests/test_api_v1.py
+import io
 
 from app.models import User
 
@@ -381,3 +382,65 @@ def test_api_create_message_access_denied(client):
 
     assert res.status_code == 403
     assert res.get_json()["error"] == "Access denied"
+
+
+def test_api_upload_file_success(client, mocker):
+    """
+    GIVEN a valid api_token
+    WHEN a valid file is posted to /api/v1/files/upload
+    THEN it should upload the file and return a 201 with file details
+    """
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    # Mock the Minio service so we don't actually hit an external server
+    mocker.patch("app.blueprints.api_v1.minio_service.upload_file", return_value=True)
+
+    # Create an in-memory file
+    file_data = {"file": (io.BytesIO(b"dummy image data"), "test_image.png")}
+
+    res = client.post(
+        "/api/v1/files/upload",
+        data=file_data,
+        content_type="multipart/form-data",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 201
+    data = res.get_json()
+    assert "file_id" in data
+    assert data["message"] == "File uploaded successfully"
+    assert data["original_filename"] == "test_image.png"
+    assert data["mime_type"] == "image/png"
+    assert "url" in data
+
+
+def test_api_upload_file_missing_file(client):
+    """
+    WHEN POSTing to the upload endpoint without a file part
+    THEN it should return 400 Bad Request
+    """
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.post(
+        "/api/v1/files/upload",
+        data={},
+        content_type="multipart/form-data",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == "No file part"

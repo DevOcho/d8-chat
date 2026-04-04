@@ -33,6 +33,19 @@ Many of the events below utilize a standardized `Message` and `User` object payl
 }
 ```
 
+### `Channel` object
+```json
+{
+  "id": 5,
+  "name": "project-alpha",
+  "topic": "Discussions about Project Alpha",
+  "description": "Main channel for the Alpha team.",
+  "is_private": true,
+  "unread_count": 3,
+  "mention_count": 1
+}
+```
+
 ### `Message` Object
 ```json
 {
@@ -45,6 +58,18 @@ Many of the events below utilize a standardized `Message` and `User` object payl
   "reply_type": null, // null, "quote", or "thread"
   "parent_message_id": null, // int or null
   "quoted_message_id": null, // int or null
+  "quoted_message": {
+    "id": 100,
+    "content": "The original message text",
+    "user": {
+      "id": 2,
+      "username": "admin",
+      "email": "admin@example.com",
+      "display_name": "Admin User",
+      "avatar_url": "https://...",
+      "presence_status": "away"
+    }
+  },
   "reactions": [
     {
       "emoji": "👍",
@@ -90,6 +115,28 @@ Use this endpoint to send new messages. This automatically broadcasts the real-t
 
 **Response (201 Created):**
 Returns the fully serialized `Message` Object.
+
+### Upload a File
+Use this endpoint to pre-upload a file before attaching it to a new message. The returned `file_id` should be passed into the `attachment_file_ids` string when sending the message.
+
+**POST** `/api/v1/files/upload`
+**Headers:**
+* `Authorization: Bearer <api_token>`
+* `Content-Type: multipart/form-data`
+
+**Request Body:**
+* `file`: The binary file data.
+
+**Response (201 Created):**
+```json
+{
+  "file_id": 42,
+  "message": "File uploaded successfully",
+  "url": "https://<minio-url>/...",
+  "original_filename": "document.pdf",
+  "mime_type": "application/pdf"
+}
+```
 
 ---
 

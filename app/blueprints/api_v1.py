@@ -1,9 +1,12 @@
 import datetime
+import os
+import uuid
 from functools import wraps
 
 from flask import Blueprint, current_app, g, jsonify, request
 from itsdangerous import URLSafeTimedSerializer
 from playhouse.shortcuts import model_to_dict
+from werkzeug.utils import secure_filename
 
 from app.models import (
     Channel,
@@ -12,6 +15,7 @@ from app.models import (
     Mention,
     Message,
     Reaction,
+    UploadedFile,
     User,
     UserConversationStatus,
     Workspace,
@@ -19,6 +23,7 @@ from app.models import (
     db,
 )
 from app.routes import get_attachments_for_messages, get_reactions_for_messages
+from app.services import minio_service
 from app.sso import oauth
 
 api_v1_bp = Blueprint("api_v1", __name__)
@@ -93,10 +98,23 @@ def serialize_message(message, reactions_map, attachments_map):
         poll_data = {
             "id": poll.id,
             "question": poll.question,
-            "options": [
+            "options": list(
                 {"id": opt.id, "text": opt.text, "count": opt.votes.count()}
                 for opt in poll.options
-            ],
+            ),
+        }
+
+    # Handle the quoted message data, supporting both the newer quoted_message
+    # field and the legacy parent_message fallback for quotes
+    quoted_msg_obj = message.quoted_message or (
+        message.parent_message if message.reply_type == "quote" else None
+    )
+    quoted_message_data = None
+    if quoted_msg_obj:
+        quoted_message_data = {
+            "id": quoted_msg_obj.id,
+            "content": quoted_msg_obj.content,
+            "user": user_to_dict(quoted_msg_obj.user) if quoted_msg_obj.user else None,
         }
 
     return {
@@ -109,8 +127,9 @@ def serialize_message(message, reactions_map, attachments_map):
         "reply_type": message.reply_type,
         "parent_message_id": message.parent_message_id,
         "quoted_message_id": message.quoted_message_id,
-        "reactions": reactions_map.get(message.id, []),
-        "attachments": attachments_map.get(message.id, []),
+        "quoted_message": quoted_message_data,
+        "reactions": reactions_map.get(message.id, list()),
+        "attachments": attachments_map.get(message.id, list()),
         "thread_reply_count": message.replies.where(
             Message.reply_type == "thread"
         ).count(),
@@ -119,6 +138,96 @@ def serialize_message(message, reactions_map, attachments_map):
         else None,
         "poll": poll_data,
     }
+
+
+# --- File Upload Utilities ---
+
+ALLOWED_EXTENSIONS = {
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "pdf",
+    "txt",
+    "py",
+    "js",
+    "css",
+    "html",
+    "md",
+    "ts",
+    "zip",
+}
+MAX_CONTENT_LENGTH = 10 * 1024 * 1024
+
+
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@api_v1_bp.route("/files/upload", methods=["POST"])
+@api_token_required
+def api_upload_file():
+    """Uploads a file to Minio via the REST API and returns the file ID."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file part"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "No selected file"}), 400
+
+    if file and allowed_file(file.filename):
+        # Secure the original filename
+        original_filename = secure_filename(file.filename)
+
+        # Generate a unique filename for storage
+        file_ext = original_filename.rsplit(".", 1)[1].lower()
+        stored_filename = f"{uuid.uuid4()}.{file_ext}"
+
+        # Save the file temporarily to the server filesystem for processing
+        temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path = os.path.join(temp_dir, stored_filename)
+        file.save(temp_path)
+
+        # Get file size
+        file_size = os.path.getsize(temp_path)
+        if file_size > MAX_CONTENT_LENGTH:
+            os.remove(temp_path)
+            return jsonify({"error": "File exceeds maximum size limit"}), 400
+
+        # Upload from the temporary path to Minio
+        success = minio_service.upload_file(
+            object_name=stored_filename, file_path=temp_path, content_type=file.mimetype
+        )
+
+        # Clean up the temporary file
+        os.remove(temp_path)
+
+        if success:
+            # Create a record in our database
+            new_file = UploadedFile.create(
+                uploader=g.api_user,
+                original_filename=original_filename,
+                stored_filename=stored_filename,
+                mime_type=file.mimetype,
+                file_size_bytes=file_size,
+            )
+            return (
+                jsonify(
+                    {
+                        "file_id": new_file.id,
+                        "message": "File uploaded successfully",
+                        "url": new_file.url,
+                        "original_filename": new_file.original_filename,
+                        "mime_type": new_file.mime_type,
+                    }
+                ),
+                201,
+            )
+        else:
+            return jsonify({"error": "Failed to upload file to storage"}), 500
+
+    return jsonify({"error": "File type not allowed."}), 400
 
 
 # --- Auth Endpoints ---

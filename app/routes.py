@@ -7,6 +7,7 @@ import functools
 import json
 
 from flask import Blueprint, g, redirect, render_template, request, session, url_for
+from peewee import JOIN, fn
 
 from . import sock
 from .chat_manager import chat_manager
@@ -155,59 +156,91 @@ def check_and_get_read_state_oob(current_user, just_read_conversation):
 
 
 def _get_unread_info(all_conversations):
-    """Calculates unread message and mention counts for a list of conversations."""
-    unread_info = {}
+    """Calculates unread message and mention counts for a list of conversations using bulk queries to avoid N+1 issues."""
+    unread_info = dict()
     if not all_conversations:
         return unread_info
 
-    statuses = list(
-        UserConversationStatus.select().where(
-            UserConversationStatus.user == g.user,
-            UserConversationStatus.conversation.in_(
-                list(c.id for c in all_conversations)
+    conv_ids = list(c.id for c in all_conversations)
+    # Use a safe epoch fallback date for missing conversation statuses
+    fallback_date = datetime.datetime(1970, 1, 1)
+
+    # 1. Bulk query for unread messages per conversation
+    unread_counts = list(
+        Message.select(
+            Message.conversation.alias("conv_id"),
+            fn.COUNT(Message.id).alias("unread_count"),
+        )
+        .join(
+            UserConversationStatus,
+            JOIN.LEFT_OUTER,
+            on=(
+                (UserConversationStatus.conversation == Message.conversation)
+                & (UserConversationStatus.user == g.user)
             ),
         )
+        .where(
+            (Message.conversation.in_(conv_ids))
+            & (Message.user != g.user)
+            & (
+                Message.created_at
+                > fn.COALESCE(UserConversationStatus.last_read_timestamp, fallback_date)
+            )
+        )
+        .group_by(Message.conversation)
+        .dicts()
     )
-    last_read_map = {s.conversation.id: s.last_read_timestamp for s in statuses}
 
+    # 2. Bulk query for explicit mentions in channels
+    mention_counts = list(
+        Message.select(
+            Message.conversation.alias("conv_id"),
+            fn.COUNT(Message.id).alias("mention_count"),
+        )
+        .join(Mention, on=(Mention.message == Message.id))
+        .join(
+            UserConversationStatus,
+            JOIN.LEFT_OUTER,
+            on=(
+                (UserConversationStatus.conversation == Message.conversation)
+                & (UserConversationStatus.user == g.user)
+            ),
+        )
+        .where(
+            (Message.conversation.in_(conv_ids))
+            & (Mention.user == g.user)
+            & (
+                Message.created_at
+                > fn.COALESCE(UserConversationStatus.last_read_timestamp, fallback_date)
+            )
+        )
+        .group_by(Message.conversation)
+        .dicts()
+    )
+
+    # Map the results to fast lookup dictionaries
+    unread_map = dict()
+    for row in unread_counts:
+        unread_map[row["conv_id"]] = row["unread_count"]
+
+    mention_map = dict()
+    for row in mention_counts:
+        mention_map[row["conv_id"]] = row["mention_count"]
+
+    # Assign the grouped counts back to the expected payload format
     for conv in all_conversations:
-        last_read = last_read_map.get(conv.id, datetime.datetime.min)
+        has_unread = unread_map.get(conv.id, 0) > 0
+
         if conv.type == "channel":
-            mentions = (
-                Mention.select()
-                .join(Message)
-                .where(
-                    (Mention.user == g.user)
-                    & (Message.conversation == conv)
-                    & (Message.created_at > last_read)
-                )
-                .count()
-            )
-            has_unread = (
-                mentions > 0
-                or Message.select()
-                .where(
-                    (Message.conversation == conv)
-                    & (Message.created_at > last_read)
-                    & (Message.user != g.user)
-                )
-                .exists()
-            )
+            mentions = mention_map.get(conv.id, 0)
         else:  # DM
-            mentions = (
-                Message.select()
-                .where(
-                    (Message.conversation == conv)
-                    & (Message.created_at > last_read)
-                    & (Message.user != g.user)
-                )
-                .count()
-            )
-            has_unread = mentions > 0
+            mentions = unread_map.get(conv.id, 0)
+
         unread_info[conv.conversation_id_str] = {
             "mentions": mentions,
-            "has_unread": has_unread,
+            "has_unread": has_unread or (mentions > 0),
         }
+
     return unread_info
 
 
@@ -258,19 +291,41 @@ def chat_interface():
     )
     all_conversations = list(dm_convs_query | channel_convs_query)
 
-    dm_partner_ids = {
-        int(uid)
-        for conv in all_conversations
-        if conv.type == "dm"
-        for uid in conv.conversation_id_str.split("_")[1:]
-        if int(uid) != g.user.id
-    }
-    direct_message_users = User.select().where(User.id.in_(list(dm_partner_ids)))
-
+    # Get unread info for ALL conversations first to calculate the global badges
     unread_info = _get_unread_info(all_conversations)
     has_unreads = any(info["has_unread"] for info in unread_info.values())
     last_view_time = g.user.last_threads_view_at or datetime.datetime.min
     has_unread_threads = _has_unread_threads(last_view_time)
+
+    # Only show recent DMs or DMs with unread messages in the sidebar
+    recent_dm_statuses = (
+        UserConversationStatus.select(UserConversationStatus.conversation)
+        .join(Conversation)
+        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
+        .order_by(UserConversationStatus.updated_at.desc())
+        .limit(15)
+    )
+    recent_dm_ids = list(s.conversation_id for s in recent_dm_statuses)
+
+    visible_dm_partner_ids = set()
+    for conv in all_conversations:
+        if conv.type == "dm":
+            is_recent = conv.id in recent_dm_ids
+            has_unread_msg = unread_info.get(conv.conversation_id_str, dict()).get(
+                "has_unread", False
+            )
+
+            if is_recent or has_unread_msg:
+                for uid in conv.conversation_id_str.split("_")[1:]:
+                    if int(uid) != g.user.id:
+                        visible_dm_partner_ids.add(int(uid))
+
+    # Pass only the filtered list of users to the sidebar template
+    direct_message_users = (
+        User.select()
+        .where(User.id.in_(list(visible_dm_partner_ids)))
+        .order_by(User.username)
+    )
 
     workspace_member = WorkspaceMember.get_or_none(user=g.user)
 
