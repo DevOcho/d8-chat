@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block html_theme %}data-bs-theme="{{ theme }}"{% endblock %}
 {% block layout %}
+    <style>
+        /* Hide all author actions globally by default */
+        .message-toolbar .author-only-action {
+            display: none !important;
+        }
+        /* Reveal them ONLY if the message's data-user-id matches the current logged-in user's ID */
+        .message-container[data-user-id="{{ g.user.id }}"] .message-toolbar .author-only-action {
+            display: inline-block !important;
+        }
+    </style>
     <!-- workspaces -->
     <div class="sidebar workspace-sidebar p-2 text-center text-white">
         <!-- Workspace Logo -->

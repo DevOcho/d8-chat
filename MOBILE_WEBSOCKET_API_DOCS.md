@@ -110,8 +110,51 @@ Many of the events below utilize a standardized `Message` and `User` object payl
 
 ---
 
-## 3. REST API (Mutations)
+## 3. REST API
 
+### Get App Configuration
+Returns server configuration and SSO details for the mobile app launch screen. No authentication required.
+
+**GET** `/api/v1/app-config`
+
+**Response (200 OK):**
+```json
+{
+  "server_name": "DevOcho",
+  "logo_url": null,
+  "primary_color": "#ec729c",
+  "password_auth_enabled": true,
+  "sso_enabled": true,
+  "sso_provider_name": "Sign in with SSO",
+  "sso_auth_url": "https://...",
+  "version": "1.0.0"
+}
+```
+
+### SSO Token Exchange
+Exchanges an OIDC authorization code for a d8-chat API token. No authentication required.
+
+**POST** /api/v1/auth/sso/exchange
+**Headers:** Content-Type: application/json
+
+Request Body:
+```json
+{
+  "code": "<authorization_code>",
+  "redirect_uri": "d8chat://auth/callback"
+}
+```
+
+Response (200 OK):
+Returns the api_token and serialized User object.
+```json
+{
+  "api_token": "d8_sec_...",
+  "user": { ...User Object... }
+}
+```
+
+### Messages
 Use this endpoint to send new messages. This automatically broadcasts the real-time WebSocket events to all other active clients.
 
 **POST** `/api/v1/conversations/<conversation_id_str>/messages`
@@ -213,6 +256,130 @@ Request Body:
 
 **Response (200 OK):**
 Returns the updated Message Object.
+
+### Fetch Message History
+Returns a paginated list of messages for a given conversation. By default, it returns the 30 most recent messages. You can use query parameters to paginate backwards or to jump to a specific context window.
+
+**GET** `/api/v1/conversations/<conversation_id_str>/messages`
+**Headers:** `Authorization: Bearer <api_token>`
+
+**Query Parameters:**
+* `before_message_id` (optional, int): Pass the oldest message ID you currently have to fetch the next page of older history.
+* `around_message_id` (optional, int): Pass a specific message ID to fetch a contextual window of messages (15 before, the target message itself, and 15 after). Useful for "jump to message" from search results.
+
+**Response (200 OK):**
+```json
+{
+  "messages": [
+    { ...Message Object... },
+    { ...Message Object... }
+  ]
+}
+```
+
+### Global Search
+Searches across messages, channels, and people within the authenticated user's workspace. Results are scoped to what the user is permitted to see.
+
+**GET** /api/v1/search
+**Headers:** Authorization: Bearer <api_token>
+
+**Query Parameters:**
+q (required, string): Search query string (min 2 chars).
+limit (optional, int): Max results per bucket. Defaults to 20, max 50.
+
+Response (200 OK):
+```json
+{
+  "query": "design",
+  "messages": [
+    {
+      "id": 456,
+      "content": "Has anyone reviewed the new design system docs?",
+      "created_at": "2026-04-02T14:30:00.123456",
+      "conversation_id_str": "channel_3",
+      "conversation_name": "general",
+      "user": { ...User Object... }
+    }
+  ],
+  "channels": [
+    {
+      "id": 7,
+      "name": "design",
+      "description": "Design team discussion",
+      "is_private": false,
+      "conv_id": "channel_7",
+      "member_count": 5
+    }
+  ],
+  "people": [
+    {
+      "id": 4,
+      "username": "designlead",
+      "display_name": "Design Lead",
+      "avatar_url": null,
+      "presence_status": "online",
+      "dm_conv_id": "dm_1_4"
+    }
+  ]
+}
+```
+Note on Search People: `dm_conv_id` provides the existing DM conversation ID between the current user and the found person. If null, no DM exists yet, and the app should call the standard DM creation flow when tapped.
+
+### Update Profile
+Updates the authenticated user's display name.
+
+**PATCH** `/api/v1/users/me`
+**Headers:**
+* `Authorization: Bearer <api_token>`
+* `Content-Type: application/json`
+
+**Request Body:**
+```json
+{
+  "display_name": "New Name"
+}
+```
+Response (200 OK): Returns the updated User object.
+
+### Update Avatar
+Uploads and sets a new avatar for the authenticated user. Automatically broadcasts the change to active clients.
+
+**POST** /api/v1/users/me/avatar
+**Headers:**
+Authorization: Bearer <api_token>
+Content-Type: multipart/form-data
+
+Request Body:
+file: The binary image data.
+
+Response (200 OK):
+```json
+{
+  "avatar_url": "https://<minio-url>/..."
+}
+```
+
+### Update Presence
+Updates the user's presence status and broadcasts the change to all connected clients. Valid values: "online", "away", "busy".
+
+**POST** /api/v1/users/me/presence
+**Headers:**
+Authorization: Bearer <api_token>
+Content-Type: application/json
+
+Request Body:
+```json
+{
+  "status": "busy"
+}
+```
+
+Response (200 OK):
+```json
+{
+  "status": "busy"
+}
+```
 
 ---
 

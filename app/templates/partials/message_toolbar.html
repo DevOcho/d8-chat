@@ -37,38 +37,36 @@
             </button>
         {% endif %}
     {% endif %}
-    {% if g.user.id == message.user.id %}
-        {# Edit Button #}
-        {% if is_in_thread_view %}
-            {# When in a thread, target the thread's input container #}
-            <button class="btn btn-sm btn-light"
-                    hx-get="/chat/message/{{ message.id }}/load_for_thread_edit"
-                    hx-target="#thread-input-container-{{ message.parent_message.id }}"
-                    hx-swap="outerHTML"
-                    data-action="edit"
-                    title="Edit">
-                <i class="bi bi-pencil-square"></i>
-            </button>
-        {% else %}
-            {# When in the main view, target the main chat input container #}
-            <button class="btn btn-sm btn-light"
-                    hx-get="/chat/message/{{ message.id }}/load_for_edit"
-                    hx-target="#chat-input-container"
-                    hx-swap="outerHTML"
-                    data-action="edit"
-                    title="Edit">
-                <i class="bi bi-pencil-square"></i>
-            </button>
-        {% endif %}
-        {# Delete Button #}
-        <button class="btn btn-sm btn-light"
-                hx-delete="/chat/message/{{ message.id }}"
-                hx-target="#message-{{ message.id }}"
+    {# Edit Button #}
+    {% if is_in_thread_view %}
+        {# When in a thread, target the thread's input container #}
+        <button class="btn btn-sm btn-light author-only-action"
+                hx-get="/chat/message/{{ message.id }}/load_for_thread_edit"
+                hx-target="#thread-input-container-{{ message.parent_message.id }}"
                 hx-swap="outerHTML"
-                hx-confirm="Are you sure you want to delete this message?"
-                data-action="delete"
-                title="Delete">
-            <i class="bi bi-trash"></i>
+                data-action="edit"
+                title="Edit">
+            <i class="bi bi-pencil-square"></i>
+        </button>
+    {% else %}
+        {# When in the main view, target the main chat input container #}
+        <button class="btn btn-sm btn-light author-only-action"
+                hx-get="/chat/message/{{ message.id }}/load_for_edit"
+                hx-target="#chat-input-container"
+                hx-swap="outerHTML"
+                data-action="edit"
+                title="Edit">
+            <i class="bi bi-pencil-square"></i>
         </button>
     {% endif %}
+    {# Delete Button #}
+    <button class="btn btn-sm btn-light author-only-action"
+            hx-delete="/chat/message/{{ message.id }}"
+            hx-target="#message-{{ message.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Are you sure you want to delete this message?"
+            data-action="delete"
+            title="Delete">
+        <i class="bi bi-trash"></i>
+    </button>
 </div>

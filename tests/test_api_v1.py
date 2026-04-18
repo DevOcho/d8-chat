@@ -602,3 +602,189 @@ def test_api_create_poll_and_vote(client):
     assert vote_data["poll"]["voted_option_id"] == option_id
     assert vote_data["poll"]["options"][0]["count"] == 1
     assert Vote.select().count() == 1
+
+
+def test_api_search_success(client):
+    """
+    GIVEN a valid query
+    WHEN the search API is called
+    THEN it returns matching messages, channels, and people
+    """
+    from app.models import Channel, ChannelMember, Conversation, Message
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+    Message.create(user=user, conversation=conv, content="Searching for Apollo keyword")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.get(
+        "/api/v1/search?q=Apollo", headers={"Authorization": f"Bearer {token}"}
+    )
+    assert res.status_code == 200
+
+    data = res.get_json()
+    assert data["query"] == "Apollo"
+    assert len(data["messages"]) > 0
+    assert data["messages"][0]["content"] == "Searching for Apollo keyword"
+    assert data["messages"][0]["conversation_name"] == "general"
+
+    assert "channels" in data
+    assert "people" in data
+
+
+def test_api_get_messages_around_id(client):
+    """
+    GIVEN a conversation with multiple messages
+    WHEN calling get_messages with around_message_id
+    THEN it returns messages centered on that ID chronologically
+    """
+    from app.models import Channel, ChannelMember, Conversation, Message
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    Message.create(user=user, conversation=conv, content="First")
+    msg2 = Message.create(user=user, conversation=conv, content="Target")
+    Message.create(user=user, conversation=conv, content="Last")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.get(
+        f"/api/v1/conversations/{conv.conversation_id_str}/messages?around_message_id={msg2.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 200
+    data = res.get_json()
+
+    contents = list((m["content"] for m in data["messages"]))
+    assert "First" in contents
+    assert "Target" in contents
+    assert "Last" in contents
+
+
+def test_api_app_config(client, mocker):
+    """
+    WHEN the /api/v1/app-config endpoint is hit
+    THEN it should return the server branding and SSO flags
+    """
+    # Mock the external Authlib call to prevent real HTTP requests during testing
+    mocker.patch(
+        "app.blueprints.api_v1.oauth.authentik.create_authorization_url",
+        return_value=("https://mock-sso-url.com/auth", "mock_state"),
+    )
+
+    res = client.get("/api/v1/app-config")
+
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["server_name"] == "DevOcho"
+    assert data["primary_color"] == "#ec729c"
+    assert data["password_auth_enabled"] is True
+    assert "sso_enabled" in data
+    # Optional: verify the mocked URL made it through
+    if data["sso_enabled"]:
+        assert data["sso_auth_url"] == "https://mock-sso-url.com/auth"
+
+
+def test_api_sso_exchange_success(client, mocker):
+    """
+    GIVEN an authorization code from an OIDC provider
+    WHEN it is posted to the /auth/sso/exchange endpoint
+    THEN it exchanges the code for a token and creates/returns the user
+    """
+    fake_user_info = {
+        "sub": "fake_sso_id_mobile",
+        "email": "mobile.user@example.com",
+        "given_name": "Mobile User",
+    }
+    mocker.patch(
+        "app.blueprints.api_v1.oauth.authentik.fetch_access_token",
+        return_value={"access_token": "fake_oauth_token"},
+    )
+    mocker.patch(
+        "app.blueprints.api_v1.oauth.authentik.parse_id_token",
+        return_value=fake_user_info,
+    )
+
+    payload = {"code": "auth_code_123", "redirect_uri": "d8chat://auth/callback"}
+    res = client.post("/api/v1/auth/sso/exchange", json=payload)
+
+    assert res.status_code == 200
+    data = res.get_json()
+    assert "api_token" in data
+    assert data["user"]["email"] == "mobile.user@example.com"
+    assert data["user"]["display_name"] == "Mobile User"
+
+
+def test_api_update_me(client):
+    """
+    GIVEN a valid token
+    WHEN a PATCH is made to /api/v1/users/me
+    THEN it updates the user's details
+    """
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.patch(
+        "/api/v1/users/me",
+        json={"display_name": "Updated Name From API"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 200
+    assert res.get_json()["display_name"] == "Updated Name From API"
+
+    updated_user = User.get_by_id(1)
+    assert updated_user.display_name == "Updated Name From API"
+
+
+def test_api_update_presence(client):
+    """
+    GIVEN a valid token
+    WHEN a POST is made to /api/v1/users/me/presence
+    THEN it updates the user's presence status
+    """
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.post(
+        "/api/v1/users/me/presence",
+        json={"status": "busy"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 200
+    assert res.get_json()["status"] == "busy"
+
+    updated_user = User.get_by_id(1)
+    assert updated_user.presence_status == "busy"

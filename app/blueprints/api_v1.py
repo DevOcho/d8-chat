@@ -312,6 +312,32 @@ def api_get_file_content(file_id):
     )
 
 
+@api_v1_bp.route("/app-config", methods=["GET"])
+def get_app_config():
+    """Returns server configuration and SSO details for the mobile app launch screen."""
+    sso_enabled = bool(current_app.config.get("OIDC_CLIENT_ID"))
+    sso_auth_url = None
+
+    if sso_enabled:
+        redirect_uri = "d8chat://auth/callback"
+        # Generate the correct authorization URL and state parameters via Authlib
+        url, _state, *_ = oauth.authentik.create_authorization_url(redirect_uri)
+        sso_auth_url = url
+
+    return jsonify(
+        {
+            "server_name": "DevOcho",
+            "logo_url": None,
+            "primary_color": "#ec729c",  # Syncing with the web app's pink theme
+            "password_auth_enabled": True,
+            "sso_enabled": sso_enabled,
+            "sso_provider_name": "Sign in with SSO" if sso_enabled else None,
+            "sso_auth_url": sso_auth_url,
+            "version": "1.0.0",
+        }
+    ), 200
+
+
 # --- Auth Endpoints ---
 
 
@@ -340,20 +366,26 @@ def get_me():
 
 @api_v1_bp.route("/auth/sso/exchange", methods=["POST"])
 def sso_exchange():
-    """Exchanges an Authentik id_token for our internal API token."""
-    data = request.get_json() or {}
-    id_token = data.get("id_token")
+    """Exchanges an OIDC authorization code for our internal API token."""
+    from app.sso import _create_or_link_sso_user
 
-    if not id_token:
-        return jsonify({"error": "Missing id_token"}), 400
+    data = request.get_json() or dict()
+    code = data.get("code")
+    redirect_uri = data.get("redirect_uri")
+
+    if not code or not redirect_uri:
+        return jsonify({"error": "Missing code or redirect_uri"}), 400
 
     try:
-        # We wrap the id_token in a dict because Authlib expects the token response object
-        # We disable nonce verification here as the mobile flow might not supply the same session context
-        user_info = oauth.authentik.parse_id_token({"id_token": id_token}, nonce=None)
+        # Fetch token using the authorization code and secret (server-side)
+        token_response = oauth.authentik.fetch_access_token(
+            redirect_uri=redirect_uri, code=code
+        )
+        # Parse the ID token claims from the response
+        user_info = oauth.authentik.parse_id_token(token_response, nonce=None)
     except Exception as e:
         current_app.logger.error(f"API SSO Exchange Error: {e}")
-        return jsonify({"error": "Invalid id_token"}), 401
+        return jsonify({"error": "Authorization code is invalid or has expired"}), 401
 
     sso_id = user_info.get("sub")
     email = user_info.get("email")
@@ -362,26 +394,12 @@ def sso_exchange():
     if not sso_id or not email:
         return jsonify({"error": "Invalid id_token payload"}), 401
 
-    # Match user logic (simplified from sso.py for API context)
-    user = User.get_or_none(User.sso_id == sso_id)
+    # Generate a safe base username from the email
+    base_username = email.split("@")[0].lower().replace(".", "_")
 
     with db.atomic():
-        if not user:
-            user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
-            if user:
-                # Link existing user
-                user.sso_id = sso_id
-                user.sso_provider = "authentik"
-                if display_name:
-                    user.display_name = display_name
-                user.save()
-            else:
-                # For safety, require new users to initialize their workspace via the web app first
-                return jsonify(
-                    {
-                        "error": "User account not found. Please log into the web app once to initialize your account."
-                    }
-                ), 403
+        # Leverage existing web SSO logic to link/create the user and auto-join channels
+        user = _create_or_link_sso_user(sso_id, email, base_username, display_name)
 
     token = "d8_sec_" + generate_api_token(user.id)
     return jsonify({"api_token": token, "user": user_to_dict(user)}), 200
@@ -537,35 +555,65 @@ def get_messages(conv_id_str):
             .exists()
         )
     elif conv.type == "dm":
-        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
+        user_ids = list((int(uid) for uid in conv_id_str.split("_")[1:]))
         has_access = g.api_user.id in user_ids
 
     if not has_access:
         return jsonify({"error": "Access denied"}), 403
 
     # Pagination: fetches older messages if before_message_id is provided
+    # Or fetches a window around a specific message if around_message_id is provided
     before_message_id = request.args.get("before_message_id", type=int)
+    around_message_id = request.args.get("around_message_id", type=int)
 
-    # We exclude 'thread' replies here because they only show up in the thread view or as quoted replies
-    # NOTE: We must explicitly allow NULLs because standard messages have a NULL reply_type!
-    query = Message.select().where(
-        (Message.conversation == conv)
-        & ((Message.reply_type != "thread") | (Message.reply_type.is_null()))
+    base_condition = (Message.conversation == conv) & (
+        (Message.reply_type != "thread") | (Message.reply_type.is_null())
     )
-    if before_message_id:
-        query = query.where(Message.id < before_message_id)
 
-    messages = list(query.order_by(Message.created_at.desc()).limit(30))
-    # Reverse to chronological order (oldest to newest)
-    messages.reverse()
+    messages = list()
+
+    if around_message_id:
+        # Fetch 15 messages before the target
+        msgs_before = list(
+            Message.select()
+            .where(base_condition & (Message.id < around_message_id))
+            .order_by(Message.created_at.desc())
+            .limit(15)
+        )
+        msgs_before.reverse()
+
+        # Fetch the target message itself
+        target_msg = Message.get_or_none(Message.id == around_message_id)
+
+        # Fetch 15 messages after the target
+        msgs_after = list(
+            Message.select()
+            .where(base_condition & (Message.id > around_message_id))
+            .order_by(Message.created_at.asc())
+            .limit(15)
+        )
+
+        messages.extend(msgs_before)
+        if target_msg:
+            messages.append(target_msg)
+        messages.extend(msgs_after)
+    else:
+        query = Message.select().where(base_condition)
+        if before_message_id:
+            query = query.where(Message.id < before_message_id)
+
+        fetched_msgs = list(query.order_by(Message.created_at.desc()).limit(30))
+        # Reverse to chronological order (oldest to newest)
+        fetched_msgs.reverse()
+        messages.extend(fetched_msgs)
 
     # Efficiently fetch reactions and attachments in bulk
     reactions_map = get_reactions_for_messages(messages)
     attachments_map = get_attachments_for_messages(messages)
 
-    results = [
-        serialize_message(msg, reactions_map, attachments_map) for msg in messages
-    ]
+    results = list(
+        (serialize_message(msg, reactions_map, attachments_map) for msg in messages)
+    )
     return jsonify({"messages": results}), 200
 
 
@@ -1026,3 +1074,249 @@ def api_vote_on_poll(poll_id):
     )
 
     return jsonify(message_data), 200
+
+
+# --- Search Endpoint ---
+
+
+@api_v1_bp.route("/search", methods=["GET"])
+@api_token_required
+def api_search():
+    """Searches messages, channels, and people across the workspace."""
+    from peewee import JOIN, fn
+
+    from app.blueprints.search import (
+        _get_accessible_conversations,
+        _get_message_context,
+    )
+
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"error": "query parameter 'q' is required"}), 400
+
+    limit = request.args.get("limit", 20, type=int)
+    if limit > 50:
+        limit = 50
+
+    # 1. Search Messages
+    accessible_convs_query = _get_accessible_conversations(g.api_user)
+    message_query = (
+        Message.select(Message, User, Conversation)
+        .join(User)
+        .switch(Message)
+        .join(Conversation)
+        .where(
+            Message.content.ilike(f"%{q}%"),
+            Message.conversation.in_(accessible_convs_query),
+        )
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    )
+    msg_results = list(message_query)
+    msg_context = _get_message_context(msg_results, g.api_user)
+
+    messages_out = list()
+    for msg in msg_results:
+        raw_name = msg_context.get(msg.id, "Unknown")
+        # _get_message_context adds '# ' to channels; we strip it to match the mobile spec
+        clean_name = raw_name.lstrip("# ")
+
+        messages_out.append(
+            {
+                "id": msg.id,
+                "content": msg.content,
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                "conversation_id_str": msg.conversation.conversation_id_str,
+                "conversation_name": clean_name,
+                "user": user_to_dict(msg.user),
+            }
+        )
+
+    # 2. Search Channels
+    user_private_channels_subquery = (
+        Channel.select(Channel.id)
+        .join(ChannelMember)
+        .where((ChannelMember.user == g.api_user) & Channel.is_private)
+    )
+    channel_query = (
+        Channel.select(Channel, fn.COUNT(ChannelMember.id).alias("member_count"))
+        .join(ChannelMember, JOIN.LEFT_OUTER)
+        .where(
+            (Channel.name.ilike(f"%{q}%"))
+            & ((~Channel.is_private) | (Channel.id.in_(user_private_channels_subquery)))
+        )
+        .group_by(Channel.id)
+        .limit(limit)
+    )
+
+    channels_out = list()
+    for ch in channel_query:
+        channels_out.append(
+            {
+                "id": ch.id,
+                "name": ch.name,
+                "description": ch.description,
+                "is_private": ch.is_private,
+                "conv_id": f"channel_{ch.id}",
+                "member_count": ch.member_count,
+            }
+        )
+
+    # 3. Search People
+    user_query = (
+        User.select()
+        .where((User.username.ilike(f"%{q}%")) | (User.display_name.ilike(f"%{q}%")))
+        .limit(limit)
+    )
+
+    # Pre-fetch existing DMs to accurately map dm_conv_id
+    existing_dms = (
+        Conversation.select()
+        .join(UserConversationStatus)
+        .where(
+            (Conversation.type == "dm") & (UserConversationStatus.user == g.api_user)
+        )
+    )
+    dm_set = set(c.conversation_id_str for c in existing_dms)
+
+    people_out = list()
+    for u in user_query:
+        # Construct the expected dm_conv_id string (IDs sorted ascending)
+        user_ids = list((g.api_user.id, u.id))
+        user_ids.sort()
+        expected_dm_str = f"dm_{user_ids[0]}_{user_ids[1]}"
+        dm_conv_id = expected_dm_str if expected_dm_str in dm_set else None
+
+        people_out.append(
+            {
+                "id": u.id,
+                "username": u.username,
+                "display_name": u.display_name,
+                "avatar_url": u.avatar_url,
+                "presence_status": u.presence_status,
+                "dm_conv_id": dm_conv_id,
+            }
+        )
+
+    return jsonify(
+        {
+            "query": q,
+            "messages": messages_out,
+            "channels": channels_out,
+            "people": people_out,
+        }
+    ), 200
+
+
+# --- User Profile Endpoints ---
+
+
+@api_v1_bp.route("/users/me", methods=["PATCH"])
+@api_token_required
+def update_me():
+    """Updates the authenticated user's profile."""
+    data = request.get_json() or dict()
+    display_name = data.get("display_name")
+    if display_name is not None:
+        g.api_user.display_name = display_name
+        g.api_user.save()
+    return jsonify(user_to_dict(g.api_user)), 200
+
+
+@api_v1_bp.route("/users/me/avatar", methods=["POST"])
+@api_token_required
+def update_avatar():
+    """Uploads and sets a new avatar for the authenticated user."""
+    from app.chat_manager import chat_manager
+
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        return jsonify({"error": "No file provided"}), 400
+
+    if file and allowed_file(file.filename):
+        old_avatar_file = g.api_user.avatar
+        original_filename = secure_filename(file.filename)
+        stored_filename = f"{uuid.uuid4()}.png"
+
+        temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path = os.path.join(temp_dir, stored_filename)
+
+        file.save(temp_path)
+
+        # Use the global optimize function from this file
+        optimize_if_image(temp_path, "image/png")
+        file_size = os.path.getsize(temp_path)
+
+        success = minio_service.upload_file(
+            object_name=stored_filename, file_path=temp_path, content_type="image/png"
+        )
+        os.remove(temp_path)
+
+        if success:
+            new_file = UploadedFile.create(
+                uploader=g.api_user,
+                original_filename=original_filename,
+                stored_filename=stored_filename,
+                mime_type="image/png",
+                file_size_bytes=file_size,
+            )
+            g.api_user.avatar = new_file
+            g.api_user.save()
+
+            if old_avatar_file:
+                try:
+                    minio_service.delete_file(old_avatar_file.stored_filename)
+                    old_avatar_file.delete_instance()
+                except Exception as e:
+                    current_app.logger.warning(f"Failed to delete old avatar: {e}")
+
+            # Broadcast to real-time clients to update UI
+            chat_manager.broadcast_to_all(
+                {
+                    "type": "avatar_update",
+                    "user_id": g.api_user.id,
+                    "avatar_url": g.api_user.avatar_url,
+                }
+            )
+
+            return jsonify({"avatar_url": g.api_user.avatar_url}), 200
+        else:
+            return jsonify({"error": "Failed to upload file to storage"}), 500
+
+    return jsonify({"error": "File type not allowed."}), 400
+
+
+@api_v1_bp.route("/users/me/presence", methods=["POST"])
+@api_token_required
+def update_presence():
+    """Updates the user's presence status and broadcasts the change."""
+    from app.chat_manager import chat_manager
+
+    data = request.get_json() or dict()
+    status = data.get("status")
+    valid_statuses = list(("online", "away", "busy"))
+
+    if status not in valid_statuses:
+        return jsonify({"error": "Invalid status"}), 400
+
+    g.api_user.presence_status = status
+    g.api_user.save()
+
+    presence_class_map = {
+        "online": "presence-online",
+        "away": "presence-away",
+        "busy": "presence-busy",
+    }
+    status_class = presence_class_map.get(status)
+
+    chat_manager.broadcast_to_all(
+        {
+            "type": "presence_update",
+            "user_id": g.api_user.id,
+            "status_class": status_class,
+            "status": status,
+        }
+    )
+
+    return jsonify({"status": status}), 200
