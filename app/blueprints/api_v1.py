@@ -320,9 +320,11 @@ def get_app_config():
 
     if sso_enabled:
         redirect_uri = "d8chat://auth/callback"
-        # Generate the correct authorization URL and state parameters via Authlib
-        url, _state, *_ = oauth.authentik.create_authorization_url(redirect_uri)
-        sso_auth_url = url
+        try:
+            url, _state, *_ = oauth.authentik.create_authorization_url(redirect_uri)
+            sso_auth_url = url
+        except Exception as e:
+            current_app.logger.warning(f"Could not generate SSO auth URL: {e}")
 
     return jsonify(
         {
@@ -945,6 +947,56 @@ def get_conversation_members(conv_id_str):
         return jsonify({"error": "Invalid conversation type"}), 400
 
     return jsonify({"members": [user_to_dict(user) for user in members]}), 200
+
+
+@api_v1_bp.route("/conversations/<conv_id_str>/read", methods=["POST"])
+@api_token_required
+def mark_conversation_read(conv_id_str):
+    """Marks a conversation as read and broadcasts the cleared state to the user's other sessions."""
+    from app.chat_manager import chat_manager
+
+    conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
+    if not conv:
+        return jsonify({"error": "Conversation not found"}), 404
+
+    if conv.type == "channel":
+        channel_id = int(conv_id_str.split("_")[1])
+        has_access = (
+            ChannelMember.select()
+            .where(
+                (ChannelMember.user == g.api_user)
+                & (ChannelMember.channel_id == channel_id)
+            )
+            .exists()
+        )
+        if not has_access:
+            return jsonify({"error": "Access denied"}), 403
+    elif conv.type == "dm":
+        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
+        if g.api_user.id not in user_ids:
+            return jsonify({"error": "Access denied"}), 403
+    else:
+        return jsonify({"error": "Invalid conversation type"}), 400
+
+    status, _ = UserConversationStatus.get_or_create(user=g.api_user, conversation=conv)
+    status.last_read_timestamp = datetime.datetime.now()
+    status.save()
+
+    chat_manager.send_to_user(
+        g.api_user.id,
+        {
+            "api_data": {
+                "type": "unread_updated",
+                "data": {
+                    "conversation_id_str": conv_id_str,
+                    "unread_count": 0,
+                    "is_mention": False,
+                },
+            }
+        },
+    )
+
+    return "", 204
 
 
 @api_v1_bp.route("/conversations/<conv_id_str>/polls", methods=["POST"])

@@ -224,6 +224,41 @@ Returns a list of `User` objects that are participants in a specific conversatio
 }
 ```
 
+### Mark Conversation as Read
+
+Marks all messages in a conversation as read for the calling user. Call this when the user opens a conversation or scrolls to the bottom of the message list. Broadcasts an `unread_updated` event to all of the user's other connected sessions (web, other mobile devices) so badges clear everywhere simultaneously.
+
+**POST** `/api/v1/conversations/<conversation_id_str>/read`
+**Headers:** `Authorization: Bearer <api_token>`
+
+**No request body.**
+
+**Response (204 No Content):** No body. On success, the server sends the following event to the user's other sessions via WebSocket:
+
+```json
+{
+  "type": "unread_updated",
+  "data": {
+    "conversation_id_str": "channel_5",
+    "unread_count": 0,
+    "is_mention": false
+  }
+}
+```
+
+**Error Responses:**
+
+| Status | Condition |
+|--------|-----------|
+| `403` | User is not a member of the conversation |
+| `404` | Conversation ID not found |
+
+**Notes:**
+- Idempotent — calling on an already-read conversation is a no-op.
+- The calling session does not receive the `unread_updated` echo; only other sessions do.
+
+---
+
 ### Create a Poll
 Creates a new message containing a poll. Broadcasts the standard new_message WebSocket event to all other clients upon success.
 

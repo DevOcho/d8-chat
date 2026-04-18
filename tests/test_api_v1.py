@@ -704,6 +704,27 @@ def test_api_app_config(client, mocker):
         assert data["sso_auth_url"] == "https://mock-sso-url.com/auth"
 
 
+def test_api_app_config_sso_unreachable(client, mocker):
+    """
+    WHEN the OIDC provider is unreachable (e.g. DNS failure in dev)
+    THEN the endpoint should still return 200 with sso_auth_url: null
+    """
+    mocker.patch(
+        "app.blueprints.api_v1.oauth.authentik.create_authorization_url",
+        side_effect=Exception("DNS resolution failed: authentik.devocho.com"),
+    )
+    mocker.patch.dict(
+        "app.blueprints.api_v1.current_app.config",
+        {"OIDC_CLIENT_ID": "test-client-id"},
+    )
+
+    res = client.get("/api/v1/app-config")
+
+    assert res.status_code == 200
+    data = res.get_json()
+    assert data["sso_auth_url"] is None
+
+
 def test_api_sso_exchange_success(client, mocker):
     """
     GIVEN an authorization code from an OIDC provider
@@ -760,6 +781,87 @@ def test_api_update_me(client):
 
     updated_user = User.get_by_id(1)
     assert updated_user.display_name == "Updated Name From API"
+
+
+def test_api_mark_conversation_read(client, mocker):
+    """
+    GIVEN a valid token and a conversation with unread messages
+    WHEN POST /api/v1/conversations/<conv_id>/read is called
+    THEN it returns 204, updates last_read_timestamp, and broadcasts unread_updated
+    """
+    from app.models import (
+        Channel,
+        ChannelMember,
+        Conversation,
+        Message,
+        UserConversationStatus,
+    )
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+    Message.create(user=user, conversation=conv, content="Unread message")
+
+    mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/read",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 204
+    assert res.data == b""
+
+    status = UserConversationStatus.get(user=user, conversation=conv)
+    assert status.last_read_timestamp is not None
+
+    mock_send.assert_called_once()
+    call_args = mock_send.call_args
+    assert call_args[0][0] == user.id
+    api_data = call_args[0][1]["api_data"]
+    assert api_data["type"] == "unread_updated"
+    assert api_data["data"]["conversation_id_str"] == conv.conversation_id_str
+    assert api_data["data"]["unread_count"] == 0
+    assert api_data["data"]["is_mention"] is False
+
+
+def test_api_mark_conversation_read_non_member(client):
+    """
+    GIVEN a valid token but a channel the user is NOT in
+    WHEN POST /api/v1/conversations/<conv_id>/read is called
+    THEN it returns 403
+    """
+    from app.models import Channel, Conversation
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+
+    channel = Channel.create(workspace_id=1, name="private-read-test", is_private=True)
+    conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel.id}", defaults={"type": "channel"}
+    )
+
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    res = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/read",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 403
 
 
 def test_api_update_presence(client):
