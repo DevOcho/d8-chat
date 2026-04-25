@@ -1,12 +1,20 @@
-import datetime
 from collections import defaultdict
 
-from flask import Blueprint, render_template, g, make_response, url_for
-from app.models import User, Message, Channel, Conversation, UserConversationStatus
+from flask import Blueprint, g, make_response, render_template, url_for
+
+from app.conversation_id import parse_conversation_id
+from app.models import (
+    Channel,
+    Conversation,
+    Message,
+    User,
+    UserConversationStatus,
+    utc_now,
+)
 from app.routes import (
-    login_required,
-    get_reactions_for_messages,
     get_attachments_for_messages,
+    get_reactions_for_messages,
+    login_required,
 )
 
 activity_bp = Blueprint("activity", __name__)
@@ -19,7 +27,7 @@ def view_all_threads():
     Renders a view showing all threads the current user is a participant in,
     ordered by the most recent reply.
     """
-    g.user.last_threads_view_at = datetime.datetime.now()
+    g.user.last_threads_view_at = utc_now()
     g.user.save()
 
     # Get the threads so we can show them
@@ -43,7 +51,7 @@ def view_all_threads():
             )
         )
     channel_ids_to_fetch = {
-        int(t.conversation.conversation_id_str.split("_")[1])
+        parse_conversation_id(t.conversation.conversation_id_str).channel_id
         for t in threads
         if t.conversation.type == "channel"
     }
@@ -115,7 +123,7 @@ def view_all_unreads():
         conversations_to_update = grouped_unreads.keys()
 
         # Update the database in a single query
-        now = datetime.datetime.now()
+        now = utc_now()
         UserConversationStatus.update(last_read_timestamp=now).where(
             (UserConversationStatus.user == g.user)
             & (UserConversationStatus.conversation.in_(list(conversations_to_update)))
@@ -124,14 +132,17 @@ def view_all_unreads():
         # Prepare the OOB swaps to clear the sidebar badges
         clear_badge_fragments = []
         for conv in conversations_to_update:
-            if conv.type == "channel":
-                channel = Channel.get_by_id(conv.conversation_id_str.split("_")[1])
+            try:
+                parsed = parse_conversation_id(conv.conversation_id_str)
+            except ValueError:
+                continue
+            if parsed.type == "channel":
+                channel = Channel.get_by_id(parsed.channel_id)
                 link_text = f"# {channel.name}"
                 hx_get_url = url_for("channels.get_channel_chat", channel_id=channel.id)
             else:  # DM
-                user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
                 other_user_id = next(
-                    (uid for uid in user_ids if uid != g.user.id), g.user.id
+                    (uid for uid in parsed.user_ids if uid != g.user.id), g.user.id
                 )
                 other_user = User.get_by_id(other_user_id)
                 link_text = other_user.display_name or other_user.username
@@ -153,12 +164,15 @@ def view_all_unreads():
         dm_partner_ids_to_find = set()
 
         for conv in grouped_unreads.keys():
-            if conv.type == "channel":
-                channel_ids_to_find.add(int(conv.conversation_id_str.split("_")[1]))
-            elif conv.type == "dm":
-                user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+            try:
+                parsed = parse_conversation_id(conv.conversation_id_str)
+            except ValueError:
+                continue
+            if parsed.type == "channel":
+                channel_ids_to_find.add(parsed.channel_id)
+            elif parsed.type == "dm":
                 partner_id = next(
-                    (uid for uid in user_ids if uid != g.user.id), g.user.id
+                    (uid for uid in parsed.user_ids if uid != g.user.id), g.user.id
                 )
                 dm_partner_ids_to_find.add(partner_id)
 
@@ -172,13 +186,17 @@ def view_all_unreads():
         }
 
         for conv in grouped_unreads.keys():
-            if conv.type == "channel":
-                channel_id = int(conv.conversation_id_str.split("_")[1])
-                context_map[conv.id] = channel_lookup.get(channel_id, "Unknown Channel")
-            elif conv.type == "dm":
-                user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+            try:
+                parsed = parse_conversation_id(conv.conversation_id_str)
+            except ValueError:
+                continue
+            if parsed.type == "channel":
+                context_map[conv.id] = channel_lookup.get(
+                    parsed.channel_id, "Unknown Channel"
+                )
+            elif parsed.type == "dm":
                 partner_id = next(
-                    (uid for uid in user_ids if uid != g.user.id), g.user.id
+                    (uid for uid in parsed.user_ids if uid != g.user.id), g.user.id
                 )
                 context_map[conv.id] = user_lookup.get(partner_id, "Unknown User")
 

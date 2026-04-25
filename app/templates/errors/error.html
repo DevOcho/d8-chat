@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+    <div class="row justify-content-center mt-5">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h1 class="card-title display-4">{{ status_code }}</h1>
+                    <p class="lead">{{ title }}</p>
+                    <p class="text-muted">{{ detail }}</p>
+                    <a href="/" class="btn btn-primary mt-3">Back to chat</a>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

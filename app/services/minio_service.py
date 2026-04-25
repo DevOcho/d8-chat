@@ -54,8 +54,9 @@ def init_app(app):
         if parsed_url.netloc:
             public_endpoint_host = parsed_url.netloc
         else:
-            print(
-                f"WARNING: MINIO_PUBLIC_URL ('{public_endpoint_url}') seems to be invalid. Falling back to internal endpoint for URL generation."
+            app.logger.warning(
+                f"MINIO_PUBLIC_URL ('{public_endpoint_url}') seems to be invalid. "
+                "Falling back to internal endpoint for URL generation."
             )
 
     minio_client_public = Minio(
@@ -73,12 +74,12 @@ def init_app(app):
             found = minio_client_internal.bucket_exists(bucket_name)
             if not found:
                 minio_client_internal.make_bucket(bucket_name)
-                print(f"Minio bucket '{bucket_name}' created.")
+                app.logger.info(f"Minio bucket '{bucket_name}' created.")
             else:
-                print(f"Minio bucket '{bucket_name}' already exists.")
-        except Exception as exc:
-            # Catch all exceptions (including urllib3 connection errors) so DB scripts don't crash
-            print(f"WARNING: Could not connect to Minio during initialization: {exc}")
+                app.logger.info(f"Minio bucket '{bucket_name}' already exists.")
+        except Exception:
+            # Catch all exceptions (incl. urllib3 connection errors) so DB scripts don't crash
+            app.logger.exception("Could not connect to Minio during initialization")
 
 
 def upload_file(object_name, file_path, content_type):
@@ -97,8 +98,8 @@ def upload_file(object_name, file_path, content_type):
                 content_type=content_type,
             )
         return True
-    except S3Error as exc:
-        print("Error uploading file to Minio:", exc)
+    except S3Error:
+        current_app.logger.exception("Error uploading file to Minio")
         return False
 
 
@@ -108,16 +109,18 @@ def get_presigned_url(object_name, response_headers={}):
         raise Exception("Public Minio client not initialized.")
 
     try:
-        # This now correctly generates the URL and signature using the public endpoint
+        # 15 minutes is enough time for the page that embeds the URL to load
+        # the asset, but short enough that a leaked link is rarely useful by
+        # the time it ends up somewhere it shouldn't.
         url = minio_client_public.presigned_get_object(
             bucket_name=current_app.config["MINIO_BUCKET_NAME"],
             object_name=object_name,
-            expires=timedelta(hours=1),
+            expires=timedelta(minutes=15),
             response_headers=response_headers,
         )
         return url
-    except S3Error as exc:
-        print("Error generating presigned URL:", exc)
+    except S3Error:
+        current_app.logger.exception("Error generating presigned URL")
         return None
 
 
@@ -130,8 +133,8 @@ def delete_file(object_name):
         minio_client_internal.remove_object(
             bucket_name=current_app.config["MINIO_BUCKET_NAME"], object_name=object_name
         )
-        print(f"Successfully deleted {object_name} from Minio.")
+        current_app.logger.info(f"Successfully deleted {object_name} from Minio.")
         return True
-    except S3Error as exc:
-        print(f"Error deleting file {object_name} from Minio:", exc)
+    except S3Error:
+        current_app.logger.exception(f"Error deleting file {object_name} from Minio")
         return False

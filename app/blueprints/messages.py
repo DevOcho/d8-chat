@@ -2,9 +2,19 @@
 import re
 
 import markdown
-from flask import Blueprint, g, json, make_response, render_template, request, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    g,
+    json,
+    make_response,
+    render_template,
+    request,
+    url_for,
+)
 
 from app.chat_manager import chat_manager
+from app.conversation_id import parse_conversation_id
 from app.models import (
     Channel,
     ChannelMember,
@@ -104,14 +114,22 @@ def update_message(message_id):
             Message=Message,
             is_in_thread_view=is_in_thread_view,
         )
-        
+
         # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
         broadcast_html = updated_message_html.replace(
-            f'id="message-{message.id}"', 
-            f'id="message-{message.id}" hx-swap-oob="true"', 
-            1
+            f'id="message-{message.id}"',
+            f'id="message-{message.id}" hx-swap-oob="true"',
+            1,
         )
-        chat_manager.broadcast(conv_id_str, broadcast_html)
+        from app.blueprints.api_v1 import serialize_message
+
+        api_data = {
+            "type": "message_edited",
+            "data": serialize_message(message, reactions_map, attachments_map),
+        }
+        chat_manager.broadcast(
+            conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+        )
     return render_template(
         "partials/message.html",
         message=message,
@@ -138,15 +156,21 @@ def delete_message(message_id):
                 try:
                     minio_service.delete_file(attachment.stored_filename)
                     attachment.delete_instance()
-                except Exception as e:
-                    print(
-                        f"Error during attachment cleanup for message {message_id}: {e}"
+                except Exception:
+                    current_app.logger.exception(
+                        f"Error during attachment cleanup for message {message_id}"
                     )
-    except Exception as e:
-        print(f"Error deleting message {message_id}: {e}")
+    except Exception:
+        current_app.logger.exception(f"Error deleting message {message_id}")
         return "Error deleting message", 500
     broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
-    chat_manager.broadcast(conv_id_str, broadcast_html)
+    api_data = {
+        "type": "message_deleted",
+        "data": {"message_id": message_id, "conversation_id_str": conv_id_str},
+    }
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
     return "", 204
 
 
@@ -201,7 +225,9 @@ def view_thread(parent_message_id):
     channel = None
     if parent_message.conversation.type == "channel":
         channel = Channel.get_by_id(
-            int(parent_message.conversation.conversation_id_str.split("_")[1])
+            parse_conversation_id(
+                parent_message.conversation.conversation_id_str
+            ).channel_id
         )
     thread_replies = (
         Message.select()
@@ -370,7 +396,9 @@ def jump_to_message(message_id):
     if conversation.type == "channel":
         from app.models import Channel, ChannelMember
 
-        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(
+            parse_conversation_id(conversation.conversation_id_str).channel_id
+        )
         members_count = (
             ChannelMember.select().where(ChannelMember.channel == channel).count()
         )
@@ -404,7 +432,7 @@ def jump_to_message(message_id):
     else:  # DM
         from app.models import User
 
-        user_ids = [int(uid) for uid in conversation.conversation_id_str.split("_")[1:]]
+        user_ids = parse_conversation_id(conversation.conversation_id_str).user_ids
         other_user_id = next((uid for uid in user_ids if uid != g.user.id), g.user.id)
         other_user = User.get_by_id(other_user_id)
         header_html_content = render_template(
@@ -466,7 +494,17 @@ def toggle_reaction(message_id):
     )
     broadcast_html = f'<div id="reactions-container-{message.id}" hx-swap-oob="innerHTML">{reactions_html_content}</div>'
     conv_id_str = message.conversation.conversation_id_str
-    chat_manager.broadcast(conv_id_str, broadcast_html)
+    api_data = {
+        "type": "reaction_updated",
+        "data": {
+            "message_id": message.id,
+            "conversation_id_str": conv_id_str,
+            "reactions": grouped_reactions,
+        },
+    }
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
     return broadcast_html, 200
 
 @messages_bp.route("/chat/message/<int:message_id>/forward", methods=list(("GET",)))

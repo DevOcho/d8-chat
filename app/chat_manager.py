@@ -3,13 +3,12 @@
 
 # pylint: disable=import-error
 
-import datetime
 import json
 
 import redis
 from flask import current_app
 
-from .models import Conversation, UserConversationStatus
+from .models import Conversation, UserConversationStatus, utc_now
 
 
 class ChatManager:
@@ -35,7 +34,7 @@ class ChatManager:
             self.initialize(current_app)
 
         self.pubsub.psubscribe("chat:*", "user:*", "global:*")
-        print("Subscribed to Valkey/Redis Pub/Sub channels.")
+        current_app.logger.info("Subscribed to Valkey/Redis Pub/Sub channels.")
 
         for message in self.pubsub.listen():
             if message["type"] != "pmessage":
@@ -43,9 +42,6 @@ class ChatManager:
 
             channel_name = message["channel"].decode("utf-8")
             payload_data = json.loads(message["data"])
-
-            # Determine what to send: raw HTML or a JSON object
-            payload_to_send = payload_data.get("_raw_html") or payload_data
 
             # Create a safe copy of clients to iterate over for this pod
             clients_on_this_pod = list(self.clients)
@@ -63,7 +59,7 @@ class ChatManager:
                     ):
                         continue
 
-                    self._send_message(ws, payload_to_send)
+                    self._send_message(ws, payload_data)
                 continue
 
             target_channel = None
@@ -77,22 +73,44 @@ class ChatManager:
                         hasattr(client_ws, "channel_id")
                         and client_ws.channel_id == target_channel
                     ):
-                        self._send_message(client_ws, payload_to_send)
+                        self._send_message(client_ws, payload_data)
                 # For a global message, send to everyone.
                 elif channel_name.startswith("global:"):
-                    self._send_message(client_ws, payload_to_send)
+                    self._send_message(client_ws, payload_data)
 
     def _send_message(self, ws, message):
         try:
-            # The payload from the listener might be a dict (typing) or str (HTML)
+            is_api = getattr(ws, "is_api_client", False)
+
+            # The payload from the listener or tests is usually a dictionary
             if isinstance(message, dict):
-                message.pop("_sender_id", None)
-                payload = json.dumps(message)
+                if is_api:
+                    # API Clients exclusively get the structured JSON data if present
+                    if "api_data" in message:
+                        ws.send(json.dumps(message["api_data"]))
+                    elif "_raw_html" not in message:
+                        # Forward generic events (like typing or presence)
+                        clean_payload = message.copy()
+                        clean_payload.pop("_sender_id", None)
+                        clean_payload.pop("_exclude_channel", None)
+                        ws.send(json.dumps(clean_payload))
+                    return
+
+                # Web clients prefer the HTML payload if provided
+                payload_to_send = message.get("_raw_html") or message
+                if isinstance(payload_to_send, dict):
+                    clean_payload = payload_to_send.copy()
+                    clean_payload.pop("_sender_id", None)
+                    clean_payload.pop("_exclude_channel", None)
+                    clean_payload.pop("api_data", None)
+                    ws.send(json.dumps(clean_payload))
+                else:
+                    ws.send(str(payload_to_send))
             else:
-                payload = str(message)
-            ws.send(payload)
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            print(f"Error sending to client {ws}: {e}")
+                # Fallback for plain string messages (often sent in tests)
+                ws.send(str(message))
+        except Exception:  # pylint: disable=broad-exception-caught
+            current_app.logger.exception(f"Error sending to client {ws}")
             self._handle_disconnect(ws)
 
     def broadcast(self, channel_id, message, sender_ws=None):
@@ -168,29 +186,34 @@ class ChatManager:
         """Subscribes a websocket to a specific conversation channel."""
         self.unsubscribe(ws)
         ws.channel_id = str(channel_id)
-        print(f"Client {ws} subscribed to channel {ws.channel_id}")
+        current_app.logger.debug(f"Client {ws} subscribed to channel {ws.channel_id}")
 
     def unsubscribe(self, ws):
         """Unsubscribes a websocket from its current channel, updating read status."""
-        if hasattr(ws, "channel_id") and ws.channel_id:
-            channel_id = ws.channel_id
-            if hasattr(ws, "user") and ws.user:
-                try:
-                    conv = Conversation.get_or_none(conversation_id_str=channel_id)
-                    if conv:
-                        UserConversationStatus.update(
-                            last_read_timestamp=datetime.datetime.now()
-                        ).where(
-                            (UserConversationStatus.user == ws.user)
-                            & (UserConversationStatus.conversation == conv)
-                        ).execute()
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    print(f"Error updating last_read_timestamp: {e}")
-            print(f"Client {ws} unsubscribed from channel {channel_id}")
-            ws.channel_id = None
+        channel_id = getattr(ws, "channel_id", None)
+        if not channel_id:
+            return
+
         user = getattr(ws, "user", None)
-        if user and hasattr(ws, "channel_id") and ws.channel_id:
-            self.handle_typing_event(ws.channel_id, user, is_typing=False, sender_ws=ws)
+        if user:
+            try:
+                conv = Conversation.get_or_none(conversation_id_str=channel_id)
+                if conv:
+                    UserConversationStatus.update(last_read_timestamp=utc_now()).where(
+                        (UserConversationStatus.user == user)
+                        & (UserConversationStatus.conversation == conv)
+                    ).execute()
+            except Exception:  # pylint: disable=broad-exception-caught
+                current_app.logger.exception("Error updating last_read_timestamp")
+
+            # Broadcast typing-stop *before* clearing channel_id. Previously
+            # this lived after `ws.channel_id = None` and the guard
+            # `if ws.channel_id` was always false — typing indicators got
+            # stuck on after a disconnect.
+            self.handle_typing_event(channel_id, user, is_typing=False, sender_ws=ws)
+
+        current_app.logger.debug(f"Client {ws} unsubscribed from channel {channel_id}")
+        ws.channel_id = None
 
     def handle_typing_event(self, conversation_id, user, is_typing, sender_ws):
         """Handles and broadcasts typing status updates."""
@@ -201,8 +224,12 @@ class ChatManager:
             self.typing_users[conversation_id].add(user.username)
         else:
             self.typing_users[conversation_id].discard(user.username)
-        typists = list(self.typing_users.get(conversation_id, []))
-        payload = {"type": "typing_update", "typists": typists}
+        typists = list(self.typing_users.get(conversation_id, list()))
+        payload = {
+            "type": "typing_update",
+            "conversation_id": conversation_id,
+            "typists": typists,
+        }
         self.broadcast(conversation_id, payload, sender_ws=sender_ws)
 
 

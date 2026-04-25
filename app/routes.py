@@ -6,10 +6,22 @@ import datetime
 import functools
 import json
 
-from flask import Blueprint, g, redirect, render_template, request, session, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    g,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
+from peewee import JOIN, fn
 
 from . import sock
+from .access import user_has_conversation_access
 from .chat_manager import chat_manager
+from .conversation_id import parse_conversation_id
 from .models import (
     Channel,
     ChannelMember,
@@ -22,6 +34,7 @@ from .models import (
     User,
     UserConversationStatus,
     WorkspaceMember,
+    utc_now,
 )
 from .services import chat_service
 
@@ -36,12 +49,14 @@ AVATAR_SIZE = (256, 256)
 # This function runs before every request to load the logged-in user.
 @main_bp.before_app_request
 def load_logged_in_user():
-    """Loads the user from the session into the Flask g object."""
-    user_id = session.get("user_id")
-    if user_id is None:
-        g.user = None
-    else:
-        g.user = User.get_or_none(User.id == user_id)
+    """
+    Loads the user from the session into the Flask g object.
+
+    Resolves through ``User.get_active_by_id`` so that deactivated users with
+    a still-valid session cookie are treated as logged out — every protected
+    route already gates on ``g.user`` being truthy.
+    """
+    g.user = User.get_active_by_id(session.get("user_id"))
 
 
 # Decorator to require login for a route.
@@ -116,6 +131,7 @@ def get_attachments_for_messages(messages):
             attachments_map[mid] = []
         attachments_map[mid].append(
             {
+                "file_id": link.attachment.id,
                 "url": link.attachment.url,
                 "original_filename": link.attachment.original_filename,
                 "mime_type": link.attachment.mime_type,
@@ -155,59 +171,91 @@ def check_and_get_read_state_oob(current_user, just_read_conversation):
 
 
 def _get_unread_info(all_conversations):
-    """Calculates unread message and mention counts for a list of conversations."""
-    unread_info = {}
+    """Calculates unread message and mention counts for a list of conversations using bulk queries to avoid N+1 issues."""
+    unread_info = dict()
     if not all_conversations:
         return unread_info
 
-    statuses = list(
-        UserConversationStatus.select().where(
-            UserConversationStatus.user == g.user,
-            UserConversationStatus.conversation.in_(
-                list(c.id for c in all_conversations)
+    conv_ids = list(c.id for c in all_conversations)
+    # Use a safe epoch fallback date for missing conversation statuses
+    fallback_date = datetime.datetime(1970, 1, 1)
+
+    # 1. Bulk query for unread messages per conversation
+    unread_counts = list(
+        Message.select(
+            Message.conversation.alias("conv_id"),
+            fn.COUNT(Message.id).alias("unread_count"),
+        )
+        .join(
+            UserConversationStatus,
+            JOIN.LEFT_OUTER,
+            on=(
+                (UserConversationStatus.conversation == Message.conversation)
+                & (UserConversationStatus.user == g.user)
             ),
         )
+        .where(
+            (Message.conversation.in_(conv_ids))
+            & (Message.user != g.user)
+            & (
+                Message.created_at
+                > fn.COALESCE(UserConversationStatus.last_read_timestamp, fallback_date)
+            )
+        )
+        .group_by(Message.conversation)
+        .dicts()
     )
-    last_read_map = {s.conversation.id: s.last_read_timestamp for s in statuses}
 
+    # 2. Bulk query for explicit mentions in channels
+    mention_counts = list(
+        Message.select(
+            Message.conversation.alias("conv_id"),
+            fn.COUNT(Message.id).alias("mention_count"),
+        )
+        .join(Mention, on=(Mention.message == Message.id))
+        .join(
+            UserConversationStatus,
+            JOIN.LEFT_OUTER,
+            on=(
+                (UserConversationStatus.conversation == Message.conversation)
+                & (UserConversationStatus.user == g.user)
+            ),
+        )
+        .where(
+            (Message.conversation.in_(conv_ids))
+            & (Mention.user == g.user)
+            & (
+                Message.created_at
+                > fn.COALESCE(UserConversationStatus.last_read_timestamp, fallback_date)
+            )
+        )
+        .group_by(Message.conversation)
+        .dicts()
+    )
+
+    # Map the results to fast lookup dictionaries
+    unread_map = dict()
+    for row in unread_counts:
+        unread_map[row["conv_id"]] = row["unread_count"]
+
+    mention_map = dict()
+    for row in mention_counts:
+        mention_map[row["conv_id"]] = row["mention_count"]
+
+    # Assign the grouped counts back to the expected payload format
     for conv in all_conversations:
-        last_read = last_read_map.get(conv.id, datetime.datetime.min)
+        has_unread = unread_map.get(conv.id, 0) > 0
+
         if conv.type == "channel":
-            mentions = (
-                Mention.select()
-                .join(Message)
-                .where(
-                    (Mention.user == g.user)
-                    & (Message.conversation == conv)
-                    & (Message.created_at > last_read)
-                )
-                .count()
-            )
-            has_unread = (
-                mentions > 0
-                or Message.select()
-                .where(
-                    (Message.conversation == conv)
-                    & (Message.created_at > last_read)
-                    & (Message.user != g.user)
-                )
-                .exists()
-            )
+            mentions = mention_map.get(conv.id, 0)
         else:  # DM
-            mentions = (
-                Message.select()
-                .where(
-                    (Message.conversation == conv)
-                    & (Message.created_at > last_read)
-                    & (Message.user != g.user)
-                )
-                .count()
-            )
-            has_unread = mentions > 0
+            mentions = unread_map.get(conv.id, 0)
+
         unread_info[conv.conversation_id_str] = {
             "mentions": mentions,
-            "has_unread": has_unread,
+            "has_unread": has_unread or (mentions > 0),
         }
+
     return unread_info
 
 
@@ -258,19 +306,45 @@ def chat_interface():
     )
     all_conversations = list(dm_convs_query | channel_convs_query)
 
-    dm_partner_ids = {
-        int(uid)
-        for conv in all_conversations
-        if conv.type == "dm"
-        for uid in conv.conversation_id_str.split("_")[1:]
-        if int(uid) != g.user.id
-    }
-    direct_message_users = User.select().where(User.id.in_(list(dm_partner_ids)))
-
+    # Get unread info for ALL conversations first to calculate the global badges
     unread_info = _get_unread_info(all_conversations)
     has_unreads = any(info["has_unread"] for info in unread_info.values())
     last_view_time = g.user.last_threads_view_at or datetime.datetime.min
     has_unread_threads = _has_unread_threads(last_view_time)
+
+    # Only show recent DMs or DMs with unread messages in the sidebar
+    recent_dm_statuses = (
+        UserConversationStatus.select(UserConversationStatus.conversation)
+        .join(Conversation)
+        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
+        .order_by(UserConversationStatus.updated_at.desc())
+        .limit(15)
+    )
+    recent_dm_ids = list(s.conversation_id for s in recent_dm_statuses)
+
+    visible_dm_partner_ids = set()
+    for conv in all_conversations:
+        if conv.type == "dm":
+            is_recent = conv.id in recent_dm_ids
+            has_unread_msg = unread_info.get(conv.conversation_id_str, dict()).get(
+                "has_unread", False
+            )
+
+            if is_recent or has_unread_msg:
+                try:
+                    user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+                except ValueError:
+                    continue
+                for uid in user_ids:
+                    if uid != g.user.id:
+                        visible_dm_partner_ids.add(uid)
+
+    # Pass only the filtered list of users to the sidebar template
+    direct_message_users = (
+        User.select()
+        .where(User.id.in_(list(visible_dm_partner_ids)))
+        .order_by(User.username)
+    )
 
     workspace_member = WorkspaceMember.get_or_none(user=g.user)
 
@@ -312,7 +386,7 @@ def _notify_all_thread_participants(ws, parent_message, conv_id_str):
     all_participant_ids.update(r.user.id for r in replies)
 
     unread_link_html = render_template("partials/threads_link_unread.html")
-    now = datetime.datetime.now()
+    now = utc_now()
 
     for user_id in list(all_participant_ids):
         if user_id == ws.user.id or not chat_manager.is_user_online_in_cluster(user_id):
@@ -324,12 +398,16 @@ def _notify_all_thread_participants(ws, parent_message, conv_id_str):
             _notify_thread_participant(
                 user_id, parent_message.conversation, now, conv_id_str
             )
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            print(f"Error sending thread notification to user {user_id}: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            current_app.logger.exception(
+                f"Error sending thread notification to user {user_id}"
+            )
 
 
 def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
     """Broadcasts a thread reply to relevant users."""
+    from app.blueprints.api_v1 import serialize_message
+
     reactions_map_for_reply = get_reactions_for_messages(list((new_message,)))
     attachments_map_for_reply = get_attachments_for_messages(list((new_message,)))
     new_reply_html = render_template(
@@ -363,11 +441,27 @@ def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
     # Delegate the notification loop to our new helper function
     _notify_all_thread_participants(ws, parent_message, conv_id_str)
 
-    chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=ws)
+    api_data = {
+        "type": "new_thread_reply",
+        "data": {
+            "parent_message": serialize_message(
+                parent_message, reactions_map_for_parent, attachments_map_for_parent
+            ),
+            "reply": serialize_message(
+                new_message, reactions_map_for_reply, attachments_map_for_reply
+            ),
+        },
+    }
+
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}, sender_ws=ws
+    )
 
 
 def _broadcast_regular_message(ws, new_message, conv_id_str):
     """Broadcasts a regular message or quoted reply."""
+    from app.blueprints.api_v1 import serialize_message
+
     reactions_map = get_reactions_for_messages(list((new_message,)))
     attachments_map = get_attachments_for_messages(list((new_message,)))
     new_message_html = render_template(
@@ -380,13 +474,23 @@ def _broadcast_regular_message(ws, new_message, conv_id_str):
     message_to_broadcast = (
         f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
     )
-    chat_manager.broadcast(conv_id_str, message_to_broadcast, sender_ws=ws)
+
+    api_data = {
+        "type": "new_message",
+        "data": serialize_message(new_message, reactions_map, attachments_map),
+    }
+
+    chat_manager.broadcast(
+        conv_id_str,
+        {"_raw_html": message_to_broadcast, "api_data": api_data},
+        sender_ws=ws,
+    )
 
     if new_message.reply_type == "quote":
         input_html = render_template("partials/chat_input_default.html")
-        reset_payload = (
-            f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
-        )
+        reset_payload = {
+            "_raw_html": f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+        }
         chat_manager.send_to_user(ws.user.id, reset_payload)
 
 
@@ -424,8 +528,22 @@ def _process_ws_event(ws, data):
     if not conversation:
         return
 
+    try:
+        parsed_conv = parse_conversation_id(conversation.conversation_id_str)
+    except ValueError:
+        return
+
+    # Membership gate: REST endpoints validate this, the WS path used to skip
+    # it. Without this check any authenticated client could post into any
+    # conversation by sending a crafted frame with another conv's id.
+    if not user_has_conversation_access(ws.user, parsed_conv):
+        current_app.logger.warning(
+            f"WS send_message blocked: user {ws.user.id} not in {conv_id_str!r}"
+        )
+        return
+
     if conversation.type == "channel":
-        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(parsed_conv.channel_id)
         if channel.posting_restricted_to_admins:
             membership = ChannelMember.get_or_none(user=ws.user, channel=channel)
             if not membership or membership.role != "admin":
@@ -454,22 +572,27 @@ def _process_ws_event(ws, data):
 @sock.route("/ws/chat")
 def chat(ws):
     """Handles all real-time WebSocket communication."""
-    user = session.get("user_id") and User.get_or_none(id=session.get("user_id"))
+    user = User.get_active_by_id(session.get("user_id"))
     if not user:
         ws.close(reason=1008, message="Not authenticated")
         return
 
-    # Origin check to prevent CSWSH
+    # Origin check to prevent Cross-Site WebSocket Hijacking (CSWSH). The
+    # browser supplies the page's Origin in the upgrade handshake; we accept
+    # only origins that match the server's own URL root or the request host
+    # (to cover local dev like http://localhost:5001 and https://d8-chat.local
+    # where Flask's SERVER_NAME may not be set). Anything else is closed.
     origin = request.headers.get("Origin")
     allowed_origin = request.url_root.rstrip("/")
-    # For local dev, Flask may not have the server name configured.
-    if "127.0.0.1" in allowed_origin or "localhost" in allowed_origin:
-        if origin not in (allowed_origin, f"http://{request.host}"):
-            print(
-                f"WARN: WebSocket origin '{origin}' doesn't match allowed '{allowed_origin}'. Allowing for local dev."
-            )
-    elif not origin or origin != allowed_origin:
-        print(f"ERROR: WebSocket connection from invalid origin '{origin}'. Closing.")
+    acceptable = {
+        allowed_origin,
+        f"http://{request.host}",
+        f"https://{request.host}",
+    }
+    if not origin or origin not in acceptable:
+        current_app.logger.warning(
+            f"WebSocket connection rejected: origin {origin!r} not in {sorted(acceptable)!r}"
+        )
         ws.close(reason=1008, message="Invalid origin")
         return
 
@@ -485,6 +608,7 @@ def chat(ws):
         "type": "presence_update",
         "user_id": user.id,
         "status_class": status_class,
+        "status": user.presence_status,
     }
     chat_manager.broadcast_to_all(payload)
 
@@ -500,7 +624,90 @@ def chat(ws):
                 "type": "presence_update",
                 "user_id": user_id,
                 "status_class": "presence-away",
+                "status": "away",
             }
             chat_manager.broadcast_to_all(payload)
             chat_manager.unsubscribe(ws)
-            print(f"INFO: Client connection closed for '{ws.user.username}'.")
+            current_app.logger.info(
+                f"Client connection closed for '{ws.user.username}'."
+            )
+
+
+# --- API JSON WebSocket Handler ---
+@sock.route("/ws/api/v1")
+def api_ws(ws):
+    """Handles JSON WebSocket connections for mobile/API clients."""
+    from app.blueprints.api_v1 import verify_api_token
+
+    # Auth token is delivered via the Sec-WebSocket-Protocol upgrade header to
+    # keep it out of URLs, access logs, and Referer headers. The client must
+    # send TWO comma-separated subprotocol values: the marker "d8_sec" plus the
+    # token itself (with or without the "d8_sec_" prefix). The server echoes
+    # back "d8_sec" to complete the WebSocket subprotocol negotiation.
+    requested = [
+        p.strip()
+        for p in request.headers.get("Sec-WebSocket-Protocol", "").split(",")
+        if p.strip()
+    ]
+    token = next((p for p in requested if p != "d8_sec"), None)
+    if token and token.startswith("d8_sec_"):
+        token = token[len("d8_sec_") :]
+
+    user_id = verify_api_token(token) if token else None
+    if not user_id:
+        ws.close(reason=1008, message="Invalid or missing token")
+        return
+
+    user = User.get_active_by_id(user_id)
+    if not user:
+        ws.close(reason=1008, message="User not found")
+        return
+
+    ws.user = user
+    ws.is_api_client = True  # Tell chat_manager to serve raw JSON to this WS
+
+    chat_manager.set_online(user.id, ws)
+
+    presence_class_map = {
+        "online": "presence-online",
+        "away": "presence-away",
+        "busy": "presence-busy",
+    }
+    status_class = presence_class_map.get(user.presence_status, "presence-away")
+
+    payload = {
+        "type": "presence_update",
+        "user_id": user.id,
+        "status_class": status_class,
+        "status": user.presence_status,
+    }
+    chat_manager.broadcast_to_all(payload)
+
+    try:
+        while True:
+            data = json.loads(ws.receive())
+
+            # Route API events using the exact same flow but without relying on HTML
+            # Mobile app is expected to send {"type": "send_message", "content": "..."}
+            event_type = data.get("type")
+
+            if event_type == "send_message":
+                data["chat_message"] = data.get("content")
+
+            _process_ws_event(ws, data)
+
+    finally:
+        if hasattr(ws, "user") and ws.user:
+            user_id = ws.user.id
+            chat_manager.set_offline(user_id)
+            disconnect_payload = {
+                "type": "presence_update",
+                "user_id": user_id,
+                "status_class": "presence-away",
+                "status": "away",
+            }
+            chat_manager.broadcast_to_all(disconnect_payload)
+            chat_manager.unsubscribe(ws)
+            current_app.logger.info(
+                f"API client connection closed for '{ws.user.username}'."
+            )

@@ -275,4 +275,4 @@ def test_upload_avatar_invalid_type(logged_in_client):
         "/profile/avatar", data=data, content_type="multipart/form-data"
     )
     assert response.status_code == 400
-    assert b"File type not allowed" in response.data
+    assert b".pdf" in response.data

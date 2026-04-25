@@ -14,6 +14,7 @@ from flask import (
 )
 from peewee import JOIN, IntegrityError, fn
 
+from ..audit import audit
 from ..models import (
     Channel,
     ChannelMember,
@@ -27,6 +28,7 @@ from ..models import (
     Workspace,
     WorkspaceMember,
     db,
+    utc_now,
 )
 
 admin_bp = Blueprint("admin", __name__, template_folder="../templates/admin")
@@ -64,7 +66,7 @@ def dashboard():
     total_storage_bytes = (
         UploadedFile.select(fn.SUM(UploadedFile.file_size_bytes)).scalar() or 0
     )
-    seven_days_ago_for_avg = datetime.datetime.now() - datetime.timedelta(days=7)
+    seven_days_ago_for_avg = utc_now() - datetime.timedelta(days=7)
     messages_last_7_days = (
         Message.select().where(Message.created_at > seven_days_ago_for_avg).count()
     )
@@ -77,7 +79,7 @@ def dashboard():
 
     # --- [START OF NEW CHART LOGIC] ---
     # 1. Define the time window for the chart.
-    now = datetime.datetime.now()
+    now = utc_now()
     twenty_four_hours_ago = now - datetime.timedelta(hours=24)
 
     # 2. Initialize a dictionary to hold message counts for every hour in the last 24 hours.
@@ -189,7 +191,7 @@ def create_user():
                 username=username,
                 email=email,
                 display_name=display_name,
-                last_threads_view_at=datetime.datetime.now(),
+                last_threads_view_at=utc_now(),
             )
             new_user.set_password(password)
             new_user.save()
@@ -204,6 +206,7 @@ def create_user():
             ChannelMember.create(user=new_user, channel=general)
             ChannelMember.create(user=new_user, channel=announcements)
 
+            audit("user.created", target=new_user, role=role, email=email)
             flash(f"User '{username}' created successfully.", "success")
     except IntegrityError:
         flash(f"Username or email '{username}' already exists.", "danger")
@@ -235,6 +238,7 @@ def edit_user(user_id):
     workspace_member = WorkspaceMember.get(user=user)
 
     if request.method == "POST":
+        old_role = workspace_member.role
         # Process the form submission
         user.username = request.form.get("username")
         user.display_name = request.form.get("display_name")
@@ -249,6 +253,13 @@ def edit_user(user_id):
             with db.atomic():
                 user.save()
                 workspace_member.save()
+            audit(
+                "user.updated",
+                target=user,
+                role_before=old_role,
+                role_after=workspace_member.role,
+                password_changed=bool(new_password),
+            )
             flash(f"User '{user.username}' updated successfully.", "success")
         except IntegrityError:
             flash("Username or email already exists.", "danger")
@@ -322,7 +333,7 @@ def create_channel():
         try:
             with db.atomic():
                 workspace = Workspace.get(id=1)  # Assuming a single workspace
-                Channel.create(
+                new_channel = Channel.create(
                     workspace=workspace,
                     name=name,
                     topic=topic,
@@ -339,6 +350,12 @@ def create_channel():
                     ).execute()
                     hashtag_to_delete.delete_instance()
 
+            audit(
+                "channel.created",
+                target=new_channel,
+                name=name,
+                is_private=is_private,
+            )
             flash(f"Channel '#{name}' created successfully.", "success")
             return redirect(url_for("admin.list_channels"))
         except IntegrityError:
@@ -377,6 +394,7 @@ def edit_channel(channel_id):
 
         try:
             channel.save()
+            audit("channel.updated", target=channel, name=channel.name)
             flash(f"Channel '#{channel.name}' updated successfully.", "success")
             return redirect(url_for("admin.list_channels"))
         except IntegrityError:
@@ -447,6 +465,11 @@ def admin_add_channel_member(channel_id):
         )
 
         ChannelMember.create(user=user_id_to_add, channel=channel)
+        audit(
+            "channel.member_added",
+            target=channel,
+            added_user_id=user_id_to_add,
+        )
         flash("User added to channel successfully.", "success")
     else:
         flash("User is already a member of this channel.", "warning")
@@ -490,6 +513,11 @@ def remove_channel_member(channel_id, user_id):
             return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
     membership.delete_instance()
+    audit(
+        "channel.member_removed",
+        target=channel,
+        removed_user_id=user_id,
+    )
     flash("User removed from channel successfully.", "success")
     return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
@@ -529,8 +557,16 @@ def update_member_role(channel_id, user_id):
             )
             return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
+    old_role = membership.role
     membership.role = new_role
     membership.save()
+    audit(
+        "channel.member_role_changed",
+        target=channel,
+        target_user_id=user_id,
+        role_before=old_role,
+        role_after=new_role,
+    )
     flash(f"{user_to_update.username}'s role updated to {new_role}.", "success")
 
     return redirect(url_for("admin.edit_channel", channel_id=channel_id))

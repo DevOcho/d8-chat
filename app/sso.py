@@ -3,12 +3,18 @@
 
 # pylint: disable=import-error
 
-import datetime
-
 from authlib.integrations.flask_client import OAuth
 from flask import current_app, redirect, session, url_for
 
-from .models import Channel, ChannelMember, User, Workspace, WorkspaceMember, db
+from .models import (
+    Channel,
+    ChannelMember,
+    User,
+    Workspace,
+    WorkspaceMember,
+    db,
+    utc_now,
+)
 
 oauth = OAuth()
 
@@ -37,10 +43,10 @@ def _setup_new_user_workspace(user):
         WorkspaceMember.get_or_create(
             user=user, workspace=default_workspace, defaults={"role": "member"}
         )
-        print(f"-> Verified '{user.username}' in workspace '{default_workspace.name}'.")
+        current_app.logger.info(
+            f"Verified '{user.username}' in workspace '{default_workspace.name}'."
+        )
 
-        # 2. Add to Default Channels (Idempotent)
-        print("-> Searching for default channels...")
         channel_names = list(("general", "announcements"))
         default_channels = list(
             Channel.select().where(
@@ -50,19 +56,19 @@ def _setup_new_user_workspace(user):
         )
 
         if not default_channels:
-            print(
-                "-> WARNING: Default channels 'general' or 'announcements' not found!"
+            current_app.logger.warning(
+                "Default channels 'general' or 'announcements' not found."
             )
         else:
             for channel in default_channels:
                 # Use get_or_create to prevent 500 errors
                 ChannelMember.get_or_create(user=user, channel=channel)
-                print(
-                    f"-> Verified '{user.username}' in default channel '#{channel.name}'."
+                current_app.logger.info(
+                    f"Verified '{user.username}' in default channel '#{channel.name}'."
                 )
     else:
-        print(
-            f"-> WARNING: Default workspace 'DevOcho' not found. "
+        current_app.logger.warning(
+            f"Default workspace 'DevOcho' not found. "
             f"Could not process new user '{user.username}'."
         )
 
@@ -85,7 +91,7 @@ def _create_or_link_sso_user(sso_id, email, base_username, display_name):
     user = User.get_or_none((User.email == email) & (User.sso_id.is_null()))
 
     if user:  # User exists, link the account
-        print(f"Linking existing user '{user.username}' via SSO.")
+        current_app.logger.info(f"Linking existing user '{user.username}' via SSO.")
         user.sso_id = sso_id
         user.sso_provider = "authentik"
         # Optionally update their name from SSO
@@ -102,7 +108,7 @@ def _create_or_link_sso_user(sso_id, email, base_username, display_name):
         username = f"{base_username}_{counter}"
         counter += 1
 
-    print(f"Creating a new user '{username}' from SSO login.")
+    current_app.logger.info(f"Creating a new user '{username}' from SSO login.")
     user = User.create(
         sso_id=sso_id,
         email=email,
@@ -110,7 +116,7 @@ def _create_or_link_sso_user(sso_id, email, base_username, display_name):
         display_name=display_name,
         sso_provider="authentik",
         is_active=True,
-        last_threads_view_at=datetime.datetime.now(),
+        last_threads_view_at=utc_now(),
     )
 
     # Assign to workspace and default channels
@@ -152,6 +158,16 @@ def handle_auth_callback():
 
     with db.atomic():
         user = _create_or_link_sso_user(sso_id, email, base_username, display_name)
+
+    # Refuse to log in a deactivated account even if the IdP still considers
+    # them valid — we treat is_active as the local source of truth.
+    if not user.is_active:
+        current_app.logger.info(
+            f"SSO login rejected: account for sso_id={sso_id} is deactivated"
+        )
+        return redirect(
+            url_for("auth.index", error="This account has been deactivated.")
+        )
 
     # Store user ID in the session to log them in
     session["user_id"] = user.id

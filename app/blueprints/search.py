@@ -3,6 +3,7 @@
 from flask import Blueprint, g, render_template, request
 from peewee import fn
 
+from ..conversation_id import parse_conversation_id
 from ..models import (
     Channel,
     ChannelMember,
@@ -57,13 +58,16 @@ def _get_message_context(messages, current_user):
     channel_ids_to_find = set()
     dm_partner_ids_to_find = set()
     for msg in messages:
-        conv_str = msg.conversation.conversation_id_str
-        if msg.conversation.type == "channel":
-            channel_ids_to_find.add(int(conv_str.split("_")[1]))
-        elif msg.conversation.type == "dm":
-            user_ids = [int(uid) for uid in conv_str.split("_")[1:]]
+        try:
+            parsed = parse_conversation_id(msg.conversation.conversation_id_str)
+        except ValueError:
+            continue
+        if parsed.type == "channel":
+            channel_ids_to_find.add(parsed.channel_id)
+        elif parsed.type == "dm":
             partner_id = next(
-                (uid for uid in user_ids if uid != current_user.id), current_user.id
+                (uid for uid in parsed.user_ids if uid != current_user.id),
+                current_user.id,
             )
             dm_partner_ids_to_find.add(partner_id)
 
@@ -79,16 +83,18 @@ def _get_message_context(messages, current_user):
 
     # 3. Build the final context map for the template.
     for msg in messages:
-        conv_str = msg.conversation.conversation_id_str
-        if msg.conversation.type == "channel":
-            channel_id = int(conv_str.split("_")[1])
+        try:
+            parsed = parse_conversation_id(msg.conversation.conversation_id_str)
+        except ValueError:
+            continue
+        if parsed.type == "channel":
             context_map[msg.id] = (
-                f"# {channel_lookup.get(channel_id, 'unknown-channel')}"
+                f"# {channel_lookup.get(parsed.channel_id, 'unknown-channel')}"
             )
-        elif msg.conversation.type == "dm":
-            user_ids = [int(uid) for uid in conv_str.split("_")[1:]]
+        elif parsed.type == "dm":
             partner_id = next(
-                (uid for uid in user_ids if uid != current_user.id), current_user.id
+                (uid for uid in parsed.user_ids if uid != current_user.id),
+                current_user.id,
             )
             partner_name = user_lookup.get(partner_id, "Unknown User")
             # Handle DMs with self

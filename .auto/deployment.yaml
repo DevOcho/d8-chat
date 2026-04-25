@@ -103,6 +103,8 @@ kind: Ingress
 metadata:
   name: d8-chat
   namespace: default
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
 spec:
   ingressClassName: nginx
   rules:

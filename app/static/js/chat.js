@@ -843,12 +843,21 @@ const createEditor = function(idSuffix = '') {
                 return;
             }
             if (e.key === 'Enter') {
+                // Check if there are any successfully uploaded attachments
+                const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
+
                 if (state.isMarkdownMode && !e.shiftKey) {
                     e.preventDefault();
-                    if (state.markdownView.value.trim() !== '') state.messageForm.requestSubmit();
+                    // Submit if there is text OR an attachment
+                    if (state.markdownView.value.trim() !== '' || hasAttachment) {
+                        state.messageForm.requestSubmit();
+                    }
                 } else if (!state.isMarkdownMode && e.ctrlKey) {
                     e.preventDefault();
-                    if (state.editor.innerText.trim() !== '') state.messageForm.requestSubmit();
+                    // Submit if there is text OR an attachment
+                    if (state.editor.innerText.trim() !== '' || hasAttachment) {
+                        state.messageForm.requestSubmit();
+                    }
                 }
             }
         };
@@ -1340,6 +1349,18 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }, 50);
     };
+    const formatLocalTimes = (container) => {
+        const timeElements = container.querySelectorAll('.local-time:not(.time-processed)');
+        timeElements.forEach(el => {
+            const timestamp = el.dataset.timestamp;
+            if (timestamp) {
+                const date = new Date(timestamp);
+                // Format to match our python output "%I:%M %p" (e.g., "02:42 PM") using the user's browser timezone
+                el.textContent = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+            }
+            el.classList.add('time-processed');
+        });
+    };
     const handleMentionHighlights = (container, conversationId) => {
         const mentions = container.querySelectorAll('.mentioned-message');
         if (mentions.length === 0) return;
@@ -1417,6 +1438,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateReactionHighlights(target);
             initializeReactionPopovers(target);
             processCodeBlocks(target);
+            formatLocalTimes(target);
 
             // If the swapped content is the main chat container,
             // also handle highlighting any new mentions.
@@ -1439,6 +1461,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateReactionHighlights(target);
             initializeReactionPopovers(target);
             processCodeBlocks(target);
+            formatLocalTimes(target);
         }
 
         // --- Scrolling logic for new messages in a thread ---
@@ -1447,17 +1470,22 @@ document.addEventListener('DOMContentLoaded', () => {
             if (scrollableContainer) {
                 const isNearBottom = scrollableContainer.scrollHeight - scrollableContainer.clientHeight - scrollableContainer.scrollTop < 150;
                 if (isNearBottom) {
-                    scrollableContainer.scrollTo({
-                        top: scrollableContainer.scrollHeight,
-                        behavior: 'smooth'
-                    });
+                    const scrollThread = () => {
+                        scrollableContainer.scrollTo({
+                            top: scrollableContainer.scrollHeight,
+                            behavior: 'smooth'
+                        });
+                    };
+                    scrollThread();
+
+                    // NEW: Wait for images to load, then scroll again
+                    if (target.lastElementChild) {
+                        const images = target.lastElementChild.querySelectorAll('img:not(.avatar-image)');
+                        images.forEach(img => {
+                            img.addEventListener('load', scrollThread);
+                        });
+                    }
                 }
-            }
-            // Initialize dynamic elements on the newly added message
-            const lastMessageInThread = target.lastElementChild;
-            if(lastMessageInThread) {
-                initializeReactionPopovers(lastMessageInThread);
-                processCodeBlocks(lastMessageInThread);
             }
         }
 
@@ -1467,22 +1495,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const mainContent = document.querySelector('main.main-content');
             const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
             const currentUserId = mainContent.dataset.currentUserId;
-            // The OOB swap added content. The target IS the message-list.
             const lastMessage = target.querySelector('.message-container:last-child, .system-message:last-child');
 
             if (lastMessage && messagesContainer) {
                 const messageAuthorId = lastMessage.dataset.userId;
 
-                if (messageAuthorId === currentUserId) {
-                // Always scroll for our own messages
+                if (messageAuthorId === currentUserId || userWasNearBottom) {
                     setTimeout(scrollLastMessageIntoView, 0);
+
+                    // Wait for images to load, then scroll again (we don't know how tall it will be)
+                    const images = lastMessage.querySelectorAll('img:not(.avatar-image)');
+                    images.forEach(img => {
+                        img.addEventListener('load', scrollLastMessageIntoView);
+                    });
                 } else {
-                    // For messages from others (or system messages)
-                    if (userWasNearBottom) {
-                        setTimeout(scrollLastMessageIntoView, 0);
-                    } else {
-                        if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
-                    }
+                    if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
                 }
 
                 // Since a new message was added, initialize its dynamic elements.
@@ -1563,18 +1590,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (lastMessage && messagesContainer) {
             const messageAuthorId = lastMessage.dataset.userId;
-            if (messageAuthorId === currentUserId) {
-                setTimeout(scrollLastMessageIntoView, 0); // Always scroll for our own messages
+
+            if (messageAuthorId === currentUserId || userWasNearBottom) {
+                setTimeout(scrollLastMessageIntoView, 0);
+
+                // Wait for images to load, then scroll again
+                const images = lastMessage.querySelectorAll('img:not(.avatar-image)');
+                images.forEach(img => {
+                    img.addEventListener('load', scrollLastMessageIntoView);
+                });
             } else {
-                if (userWasNearBottom) {
-                    setTimeout(scrollLastMessageIntoView, 0); // Scroll if we were already at the bottom
-                } else {
-                    if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block'; // Show the button if we were scrolled up
-                }
+                if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block'; // Show the button if we were scrolled up
             }
             // Process new elements in the message list
             initializeReactionPopovers(messagesContainer);
             processCodeBlocks(messagesContainer);
+            formatLocalTimes(target);
+
             const conversationDiv = messagesContainer.querySelector('[data-conversation-db-id]');
             if (conversationDiv) {
                 const conversationId = conversationDiv.dataset.conversationDbId;
@@ -1680,4 +1712,5 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeReactionPopovers(document.body);
     updateReactionHighlights(document.body);
     initializeTooltips(document.body);
+    formatLocalTimes(target);
 });

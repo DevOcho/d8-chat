@@ -40,6 +40,11 @@ def test_subscribe_and_unsubscribe(chat_manager):
     """Tests that subscribing and unsubscribing sets the channel_id on the websocket object."""
     mock_ws = Mock()
     mock_ws.channel_id = None
+    # unsubscribe now correctly fires a typing-stop broadcast, which serializes
+    # user.username via JSON. Give the mock a real string username so the
+    # broadcast doesn't fail with TypeError on the Mock attribute.
+    mock_ws.user.username = "testuser"
+    mock_ws.user.id = 1
     conv_id = "channel_123"
 
     chat_manager.subscribe(conv_id, mock_ws)
@@ -47,6 +52,23 @@ def test_subscribe_and_unsubscribe(chat_manager):
 
     chat_manager.unsubscribe(mock_ws)
     assert mock_ws.channel_id is None
+
+
+def test_unsubscribe_broadcasts_typing_stop(chat_manager):
+    """Regression: unsubscribe must broadcast a typing-stop while channel_id is
+    still set, otherwise typing indicators get stuck on after a disconnect."""
+    mock_ws = Mock()
+    mock_ws.channel_id = "channel_42"
+    mock_ws.user.username = "alice"
+    mock_ws.user.id = 7
+
+    # Pre-populate the typing set so we can assert it's cleared.
+    chat_manager.typing_users["channel_42"] = {"alice"}
+
+    chat_manager.unsubscribe(mock_ws)
+
+    assert "alice" not in chat_manager.typing_users.get("channel_42", set())
+    chat_manager.redis_client.publish.assert_called()  # typing-stop was broadcast
 
 
 def test_broadcast_to_channel(chat_manager):
@@ -115,6 +137,9 @@ def test_is_user_online_in_cluster(chat_manager):
 def test_handle_disconnect(chat_manager):
     """Tests the cleanup when a client disconnects."""
     mock_ws = Mock()
+    mock_ws.channel_id = None  # otherwise auto-Mock makes it truthy
+    mock_ws.user.username = "testuser"
+    mock_ws.user.id = 1
     chat_manager.all_clients[1] = mock_ws
     chat_manager.clients.add(mock_ws)
 
@@ -127,17 +152,49 @@ def test_handle_disconnect(chat_manager):
 def test_send_message_success(chat_manager):
     """Tests _send_message safely strips internal keys and dispatches."""
     mock_ws = Mock()
-    payload = {"type": "test", "_sender_id": 1}
+    mock_ws.is_api_client = False
+    # Add api_data to ensure it gets stripped for web clients
+    payload = {"type": "test", "_sender_id": 1, "api_data": {"foo": "bar"}}
 
     chat_manager._send_message(mock_ws, payload)
 
-    # ensure _sender_id was stripped
+    # ensure _sender_id and api_data were stripped for non-API clients
     mock_ws.send.assert_called_once_with('{"type": "test"}')
+
+
+def test_send_message_api_client(chat_manager):
+    """Tests that API clients get the api_data dictionary."""
+    mock_ws = Mock()
+    mock_ws.is_api_client = True
+    payload = {
+        "_raw_html": "<p>Hello</p>",
+        "api_data": {"type": "new_message", "data": "Hello"},
+    }
+
+    chat_manager._send_message(mock_ws, payload)
+
+    # ensure the API client only receives the JSON representation
+    mock_ws.send.assert_called_once_with('{"type": "new_message", "data": "Hello"}')
+
+
+def test_send_message_api_client_generic_event(chat_manager):
+    """Tests that API clients receive generic events without _raw_html."""
+    mock_ws = Mock()
+    mock_ws.is_api_client = True
+    payload = {"type": "typing_start", "_sender_id": 1}
+
+    chat_manager._send_message(mock_ws, payload)
+
+    # ensure internal tracking keys are stripped but the generic payload remains
+    mock_ws.send.assert_called_once_with('{"type": "typing_start"}')
 
 
 def test_send_message_exception(chat_manager):
     """Tests _send_message failing correctly calls _handle_disconnect."""
     mock_ws = Mock()
+    mock_ws.channel_id = None  # otherwise auto-Mock makes it truthy
+    mock_ws.user.username = "testuser"
+    mock_ws.user.id = 1
     mock_ws.send.side_effect = Exception("Socket Closed")
 
     chat_manager.all_clients[1] = mock_ws

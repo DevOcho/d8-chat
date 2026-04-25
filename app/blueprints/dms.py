@@ -1,11 +1,11 @@
 # app/blueprints/dms.py
 
-import datetime
 
 from flask import Blueprint, g, make_response, render_template, request, url_for
 
 from app.chat_manager import chat_manager
-from app.models import Conversation, Message, User, UserConversationStatus
+from app.conversation_id import parse_conversation_id
+from app.models import Conversation, Message, User, UserConversationStatus, utc_now
 from app.routes import (
     PAGE_SIZE,
     check_and_get_read_state_oob,
@@ -37,7 +37,10 @@ def get_start_dm_form():
     )
     existing_partner_ids = {g.user.id}
     for conv in dm_conversations:
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+        try:
+            user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+        except ValueError:
+            continue
         partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
         if partner_id:
             existing_partner_ids.add(partner_id)
@@ -80,7 +83,10 @@ def search_users_for_dm():
     )
     existing_partner_ids = {g.user.id}
     for conv in dm_conversations:
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+        try:
+            user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+        except ValueError:
+            continue
         partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
         if partner_id:
             existing_partner_ids.add(partner_id)
@@ -138,7 +144,7 @@ def get_dm_chat(other_user_id):
     last_read_timestamp = status.last_read_timestamp
 
     # Now, update the timestamp for ONLY the current user to mark messages as read.
-    status.last_read_timestamp = datetime.datetime.now()
+    status.last_read_timestamp = utc_now()
     status.save()
 
     messages = list(
@@ -175,7 +181,8 @@ def get_dm_chat(other_user_id):
             link_text=other_user.display_name or other_user.username,
         )
     elif created and other_user.id != g.user.id:
-        # [THE FIX] This block now renders the correct partial for the initiator
+        from app.blueprints.api_v1 import user_to_dict
+
         add_to_sidebar_html = render_template(
             "partials/dm_list_item_oob.html",
             user=other_user,
@@ -183,24 +190,29 @@ def get_dm_chat(other_user_id):
             is_online=other_user.id in chat_manager.online_users,
         )
 
-        if other_user.id in chat_manager.all_clients:
-            try:
-                recipient_ws = chat_manager.all_clients[other_user.id]
-                # And this renders the correct partial for the recipient
-                new_contact_html = render_template(
-                    "partials/dm_list_item_oob.html",
-                    user=g.user,
-                    conv_id_str=conv_id_str,
-                    is_online=g.user.id in chat_manager.online_users,
-                )
-                # Also render the partial that will force them to subscribe
-                subscription_html = render_template(
-                    "partials/subscribe_oob.html", conv_id_str=conv_id_str
-                )
-                # Send both HTML fragments at once. HTMX will process both OOB swaps.
-                recipient_ws.send(new_contact_html + subscription_html)
-            except Exception as e:
-                print(f"Could not send real-time DM add to user {other_user.id}: {e}")
+        # Render the correct partials for the recipient
+        new_contact_html = render_template(
+            "partials/dm_list_item_oob.html",
+            user=g.user,
+            conv_id_str=conv_id_str,
+            is_online=g.user.id in chat_manager.online_users,
+        )
+        subscription_html = render_template(
+            "partials/subscribe_oob.html", conv_id_str=conv_id_str
+        )
+
+        payload = {
+            "_raw_html": new_contact_html + subscription_html,
+            "api_data": {
+                "type": "dm_created",
+                "data": {
+                    "conversation_id_str": conv_id_str,
+                    "other_user": user_to_dict(g.user),
+                },
+            },
+        }
+
+        chat_manager.send_to_user(other_user.id, payload)
 
     chat_input_html = render_template("partials/chat_input_default.html")
     chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'

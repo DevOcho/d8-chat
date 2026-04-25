@@ -4,7 +4,17 @@ import io
 
 from app.models import UploadedFile
 
-# We use this to simulate a file upload in our tests
+# Real magic-byte payloads used by tests. The content-sniffing layer rejects
+# bytes that don't match the claimed extension, so test fixtures need real
+# minimal headers — `b"dummy data"` won't sniff as anything sensible.
+TINY_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+    b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+TINY_PDF = (
+    b"%PDF-1.4\n1 0 obj<<>>endobj\nxref\n0 1\n0000000000 65535 f \ntrailer<<>>\n%%EOF\n"
+)
 
 
 def test_upload_file_success(logged_in_client, mocker):
@@ -20,8 +30,9 @@ def test_upload_file_success(logged_in_client, mocker):
         "app.blueprints.files.minio_service.upload_file", return_value=True
     )
 
-    # 2. Create an in-memory "file" to upload.
-    file_data = {"file": (io.BytesIO(b"this is a test file"), "test.png")}
+    # 2. Create an in-memory "file" to upload — must be a real PNG so the
+    #    content sniffer accepts it.
+    file_data = {"file": (io.BytesIO(TINY_PNG), "test.png")}
 
     # Act: Post the file data to the upload endpoint.
     response = logged_in_client.post(
@@ -111,8 +122,8 @@ def test_upload_minio_failure(logged_in_client, mocker):
     # Add this mock to simulate the upload service returning False
     mocker.patch("app.blueprints.files.minio_service.upload_file", return_value=False)
 
-    # Prepare a valid file.
-    file_data = {"file": (io.BytesIO(b"this is a test file"), "test.pdf")}
+    # Prepare a valid file (real PDF header so content sniffing passes).
+    file_data = {"file": (io.BytesIO(TINY_PDF), "test.pdf")}
 
     # Act & Assert:
     response = logged_in_client.post(
