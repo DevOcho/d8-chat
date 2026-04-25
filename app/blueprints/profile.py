@@ -11,6 +11,11 @@ from app.chat_manager import chat_manager
 from app.models import UploadedFile, User
 from app.routes import AVATAR_SIZE, login_required
 from app.services import minio_service
+from app.services.upload_validation import (
+    AVATAR_EXTENSIONS,
+    ValidationError,
+    validate_upload,
+)
 
 profile_bp = Blueprint("profile", __name__)
 
@@ -42,67 +47,76 @@ def upload_avatar():
     file = request.files["avatar"]
     if file.filename == "":
         return "No selected file", 400
-    allowed_extensions = {"png", "jpg", "jpeg", "gif"}
-    if (
-        "." not in file.filename
-        or file.filename.rsplit(".", 1)[1].lower() not in allowed_extensions
-    ):
-        return "File type not allowed", 400
 
-    old_avatar_file = g.user.avatar
     original_filename = secure_filename(file.filename)
     stored_filename = f"{uuid.uuid4()}.png"
-
     temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
     os.makedirs(temp_dir, exist_ok=True)
     temp_path = os.path.join(temp_dir, stored_filename)
 
     try:
         file.save(temp_path)
-        with Image.open(temp_path) as img:
-            img.thumbnail(AVATAR_SIZE)
-            img.save(temp_path, format="PNG")
+
+        # Sniff the bytes; only raster images are accepted as avatars.
+        try:
+            validate_upload(
+                temp_path,
+                original_filename,
+                allowed_extensions=AVATAR_EXTENSIONS,
+            )
+        except ValidationError as exc:
+            return str(exc), 400
+
+        try:
+            with Image.open(temp_path) as img:
+                img.thumbnail(AVATAR_SIZE)
+                img.save(temp_path, format="PNG")
+        except Exception as exc:
+            current_app.logger.warning(f"Avatar re-encode failed: {exc}")
+            return "Could not process image.", 400
+
         file_size = os.path.getsize(temp_path)
         success = minio_service.upload_file(
             object_name=stored_filename, file_path=temp_path, content_type="image/png"
         )
+        if not success:
+            return "Failed to upload file to storage", 500
 
-        if success:
-            new_file = UploadedFile.create(
-                uploader=g.user,
-                original_filename=original_filename,
-                stored_filename=stored_filename,
-                mime_type="image/png",
-                file_size_bytes=file_size,
-            )
-            g.user.avatar = new_file
-            g.user.save()
-            if old_avatar_file:
-                try:
-                    minio_service.delete_file(old_avatar_file.stored_filename)
-                    old_avatar_file.delete_instance()
-                except Exception as e:  # pylint: disable=broad-exception-caught
-                    print(f"Error during old avatar cleanup: {e}")
+        old_avatar_file = g.user.avatar
+        new_file = UploadedFile.create(
+            uploader=g.user,
+            original_filename=original_filename,
+            stored_filename=stored_filename,
+            mime_type="image/png",
+            file_size_bytes=file_size,
+        )
+        g.user.avatar = new_file
+        g.user.save()
 
-            payload = {
+        if old_avatar_file:
+            try:
+                minio_service.delete_file(old_avatar_file.stored_filename)
+                old_avatar_file.delete_instance()
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                current_app.logger.warning(f"Error during old avatar cleanup: {e}")
+
+        chat_manager.broadcast_to_all(
+            {
                 "type": "avatar_update",
                 "user_id": g.user.id,
                 "avatar_url": g.user.avatar_url,
             }
-            chat_manager.broadcast_to_all(payload)
+        )
 
-            profile_header_html = render_template(
-                "partials/profile_header.html", user=g.user
-            )
-            sidebar_button_html = render_template(
-                "partials/_sidebar_profile_button.html"
-            )
-            sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
-            return make_response(profile_header_html + sidebar_oob_swap)
+        profile_header_html = render_template(
+            "partials/profile_header.html", user=g.user
+        )
+        sidebar_button_html = render_template("partials/_sidebar_profile_button.html")
+        sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
+        return make_response(profile_header_html + sidebar_oob_swap)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-    return render_template("partials/profile_header.html", user=g.user)
 
 
 @profile_bp.route("/profile/address/edit", methods=["GET"])

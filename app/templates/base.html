@@ -4,6 +4,7 @@
         <!-- Required meta tags -->
         <meta charset="utf--8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="csrf-token" content="{{ csrf_token() }}">
         <!-- CSS & Icons -->
         <link rel="stylesheet" href="/css/local/bootstrap.min.css">
         <link rel="stylesheet" href="/css/local/bootstrap-icons.css">
@@ -37,6 +38,19 @@
         <script src="/js/local/htmx.min.js"></script>
         <script src="/js/local/htmx-ws.js"></script>
         <script src="/js/local/turndown.js"></script>
+        <script>
+      // Attach the CSRF token to every state-changing HTMX request.
+      (function () {
+        const token = document.querySelector('meta[name="csrf-token"]')?.content;
+        if (!token) return;
+        document.body.addEventListener('htmx:configRequest', function (evt) {
+          const method = (evt.detail.verb || '').toLowerCase();
+          if (method && method !== 'get' && method !== 'head') {
+            evt.detail.headers['X-CSRFToken'] = token;
+          }
+        });
+      })();
+        </script>
         {# Dark or Light Theme #}
         <script>
       // IIFE to handle system theme preference

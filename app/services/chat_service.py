@@ -6,6 +6,7 @@ import re
 from flask import render_template, url_for
 
 from app.chat_manager import chat_manager
+from app.conversation_id import parse_conversation_id
 from app.models import (
     Channel,
     ChannelMember,
@@ -18,6 +19,7 @@ from app.models import (
     User,
     UserConversationStatus,
     db,
+    utc_now,
 )
 
 
@@ -89,7 +91,9 @@ def handle_new_message(
 
         # 2. Handle @channel and @here mentions (only applies to channels)
         if conversation.type == "channel":
-            channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+            channel = Channel.get_by_id(
+                parse_conversation_id(conversation.conversation_id_str).channel_id
+            )
             target_users_for_mention = set()
 
             # Handle @channel - all members
@@ -152,16 +156,16 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
     """
     conversation = new_message.conversation
     conv_id_str = conversation.conversation_id_str
+    parsed_conv = parse_conversation_id(conv_id_str)
 
     # Determine who the members of the conversation are
     if conversation.type == "channel":
-        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(parsed_conv.channel_id)
         members = (
             User.select().join(ChannelMember).where(ChannelMember.channel == channel)
         )
     else:  # DM
-        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
-        members = User.select().where(User.id.in_(user_ids))
+        members = User.select().where(User.id.in_(list(parsed_conv.user_ids)))
 
     # Loop through every member to see if they need a notification
     for member in members:
@@ -179,9 +183,7 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
         notification_html = None
 
         if conversation.type == "channel":
-            channel_model = Channel.get_by_id(
-                conversation.conversation_id_str.split("_")[1]
-            )
+            channel_model = Channel.get_by_id(parsed_conv.channel_id)
             link_text = f"# {channel_model.name}"
             hx_get_url = url_for(
                 "channels.get_channel_chat", channel_id=channel_model.id
@@ -272,7 +274,7 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
             )
 
         # Sound and Desktop Notification Logic (remains the same)
-        now = datetime.datetime.now()
+        now = utc_now()
         is_a_mention = (
             Mention.select()
             .where((Mention.message == new_message) & (Mention.user == member))

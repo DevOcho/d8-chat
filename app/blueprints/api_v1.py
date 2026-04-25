@@ -12,17 +12,22 @@ from flask import (
     request,
     stream_with_context,
 )
+from flask_limiter.util import get_remote_address
 from itsdangerous import URLSafeTimedSerializer
 from PIL import Image, ImageOps
 from playhouse.shortcuts import model_to_dict
 from werkzeug.utils import secure_filename
 
+from app import limiter, login_username_key
+from app.access import user_has_conversation_access
+from app.conversation_id import parse_conversation_id
 from app.models import (
     Channel,
     ChannelMember,
     Conversation,
     Mention,
     Message,
+    MessageAttachment,
     Poll,
     PollOption,
     Reaction,
@@ -33,12 +38,41 @@ from app.models import (
     Workspace,
     WorkspaceMember,
     db,
+    utc_now,
 )
 from app.routes import get_attachments_for_messages, get_reactions_for_messages
 from app.services import minio_service
+from app.services.upload_validation import (
+    ALLOWED_EXTENSIONS,
+    AVATAR_EXTENSIONS,
+    ValidationError,
+    validate_upload,
+)
 from app.sso import oauth
 
 api_v1_bp = Blueprint("api_v1", __name__)
+
+# Whitelist of redirect URIs accepted by /auth/sso/exchange. Mobile clients use
+# the custom scheme; web clients exchange via the regular SSO callback. Anything
+# outside this set is rejected to prevent OAuth code interception.
+ALLOWED_SSO_REDIRECT_URIS = frozenset({"d8chat://auth/callback"})
+
+
+def _api_user_key():
+    """
+    Per-user rate-limit key for authenticated API endpoints.
+
+    Used as the `key_func` on `@limiter.limit` decorators that are placed
+    *below* `@api_token_required`, so `g.api_user` is populated by the time
+    this runs. Falls back to the client's remote address if no user is
+    attached — that fallback only matters for misconfigured routes since the
+    auth decorator runs first.
+    """
+    user = getattr(g, "api_user", None)
+    if user is not None:
+        return f"api_user:{user.id}"
+    return get_remote_address()
+
 
 # --- Token Utilities ---
 
@@ -78,7 +112,7 @@ def api_token_required(f):
         if not user_id:
             return jsonify({"error": "Invalid or expired token"}), 401
 
-        user = User.get_or_none(User.id == user_id)
+        user = User.get_active_by_id(user_id)
         if not user:
             return jsonify({"error": "User not found"}), 401
 
@@ -168,27 +202,8 @@ def serialize_message(message, reactions_map, attachments_map):
 
 # --- File Upload Utilities ---
 
-ALLOWED_EXTENSIONS = {
-    "png",
-    "jpg",
-    "jpeg",
-    "gif",
-    "pdf",
-    "txt",
-    "py",
-    "js",
-    "css",
-    "html",
-    "md",
-    "ts",
-    "zip",
-}
 # 50MB upload limit
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024
-
-
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def optimize_if_image(file_path, mime_type):
@@ -209,6 +224,7 @@ def optimize_if_image(file_path, mime_type):
 
 @api_v1_bp.route("/files/upload", methods=["POST"])
 @api_token_required
+@limiter.limit("20 per minute", key_func=_api_user_key)
 def api_upload_file():
     """Uploads a file to Minio via the REST API and returns the file ID."""
     if "file" not in request.files:
@@ -218,62 +234,109 @@ def api_upload_file():
     if file.filename == "":
         return jsonify({"error": "No selected file"}), 400
 
-    if file and allowed_file(file.filename):
-        # Secure the original filename
-        original_filename = secure_filename(file.filename)
+    original_filename = secure_filename(file.filename)
+    if "." not in original_filename:
+        return jsonify({"error": "File must have an extension."}), 400
 
-        # Generate a unique filename for storage
-        file_ext = original_filename.rsplit(".", 1)[1].lower()
-        stored_filename = f"{uuid.uuid4()}.{file_ext}"
+    file_ext = original_filename.rsplit(".", 1)[1].lower()
+    if file_ext not in ALLOWED_EXTENSIONS:
+        return jsonify({"error": "File type not allowed."}), 400
 
-        # Save the file temporarily to the server filesystem for processing
-        temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
-        os.makedirs(temp_dir, exist_ok=True)
-        temp_path = os.path.join(temp_dir, stored_filename)
-        file.save(temp_path)
+    stored_filename = f"{uuid.uuid4()}.{file_ext}"
+    temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, stored_filename)
+    file.save(temp_path)
 
-        # Optimize the image before checking final size and uploading
-        optimize_if_image(temp_path, file.mimetype)
+    try:
+        # Sniff actual content; reject if the bytes don't match the extension.
+        # Persisted MIME is the libmagic-detected one — never the client value.
+        try:
+            validated = validate_upload(temp_path, original_filename)
+        except ValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
 
-        # Get file size
+        # Re-encode images to strip embedded payloads / EXIF / oversize.
+        optimize_if_image(temp_path, validated.sniffed_mime)
+
         file_size = os.path.getsize(temp_path)
         if file_size > MAX_CONTENT_LENGTH:
-            os.remove(temp_path)
             return jsonify({"error": "File exceeds maximum size limit"}), 400
 
-        # Upload from the temporary path to Minio
         success = minio_service.upload_file(
-            object_name=stored_filename, file_path=temp_path, content_type=file.mimetype
+            object_name=stored_filename,
+            file_path=temp_path,
+            content_type=validated.sniffed_mime,
         )
-
-        # Clean up the temporary file
-        os.remove(temp_path)
-
-        if success:
-            # Create a record in our database
-            new_file = UploadedFile.create(
-                uploader=g.api_user,
-                original_filename=original_filename,
-                stored_filename=stored_filename,
-                mime_type=file.mimetype,
-                file_size_bytes=file_size,
-            )
-            return (
-                jsonify(
-                    {
-                        "file_id": new_file.id,
-                        "message": "File uploaded successfully",
-                        "url": new_file.url,
-                        "original_filename": new_file.original_filename,
-                        "mime_type": new_file.mime_type,
-                    }
-                ),
-                201,
-            )
-        else:
+        if not success:
             return jsonify({"error": "Failed to upload file to storage"}), 500
 
-    return jsonify({"error": "File type not allowed."}), 400
+        new_file = UploadedFile.create(
+            uploader=g.api_user,
+            original_filename=original_filename,
+            stored_filename=stored_filename,
+            mime_type=validated.sniffed_mime,
+            file_size_bytes=file_size,
+        )
+        return (
+            jsonify(
+                {
+                    "file_id": new_file.id,
+                    "message": "File uploaded successfully",
+                    "url": new_file.url,
+                    "original_filename": new_file.original_filename,
+                    "mime_type": new_file.mime_type,
+                }
+            ),
+            201,
+        )
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+def _user_can_access_file(user, uploaded_file):
+    """
+    Returns True if `user` is allowed to read `uploaded_file`. Access is granted
+    when the user uploaded the file, when the file is set as any user's avatar
+    (avatars are public), or when the file is attached to a message in a
+    conversation the user is a member of.
+    """
+    if uploaded_file.uploader_id == user.id:
+        return True
+
+    if User.select().where(User.avatar == uploaded_file).exists():
+        return True
+
+    attached_message_ids = MessageAttachment.select(MessageAttachment.message).where(
+        MessageAttachment.attachment == uploaded_file
+    )
+    conversations = (
+        Conversation.select()
+        .join(Message, on=(Message.conversation == Conversation.id))
+        .where(Message.id.in_(attached_message_ids))
+        .distinct()
+    )
+    for conv in conversations:
+        try:
+            parsed = parse_conversation_id(conv.conversation_id_str)
+        except ValueError:
+            continue
+        if parsed.type == "channel":
+            if (
+                ChannelMember.select()
+                .where(
+                    (ChannelMember.user == user)
+                    & (ChannelMember.channel_id == parsed.channel_id)
+                )
+                .exists()
+            ):
+                return True
+        elif parsed.type == "dm":
+            if user.id in parsed.user_ids:
+                return True
+
+    return False
 
 
 @api_v1_bp.route("/files/<int:file_id>/content", methods=["GET"])
@@ -286,6 +349,9 @@ def api_get_file_content(file_id):
     try:
         uploaded_file = UploadedFile.get_by_id(file_id)
     except UploadedFile.DoesNotExist:
+        return jsonify({"error": "File not found"}), 404
+
+    if not _user_can_access_file(g.api_user, uploaded_file):
         return jsonify({"error": "File not found"}), 404
 
     # Use the internal Minio client to stream the object
@@ -313,13 +379,14 @@ def api_get_file_content(file_id):
 
 
 @api_v1_bp.route("/app-config", methods=["GET"])
+@limiter.limit("60 per minute")
 def get_app_config():
     """Returns server configuration and SSO details for the mobile app launch screen."""
     sso_enabled = bool(current_app.config.get("OIDC_CLIENT_ID"))
     sso_auth_url = None
 
     if sso_enabled:
-        redirect_uri = "d8chat://auth/callback"
+        redirect_uri = next(iter(ALLOWED_SSO_REDIRECT_URIS))
         try:
             url, _state, *_ = oauth.authentik.create_authorization_url(redirect_uri)
             sso_auth_url = url
@@ -328,12 +395,14 @@ def get_app_config():
 
     return jsonify(
         {
-            "server_name": "DevOcho",
-            "logo_url": None,
-            "primary_color": "#ec729c",  # Syncing with the web app's pink theme
+            "server_name": current_app.config["BRAND_SERVER_NAME"],
+            "logo_url": current_app.config.get("BRAND_LOGO_URL"),
+            "primary_color": current_app.config["BRAND_PRIMARY_COLOR"],
             "password_auth_enabled": True,
             "sso_enabled": sso_enabled,
-            "sso_provider_name": "Sign in with SSO" if sso_enabled else None,
+            "sso_provider_name": (
+                current_app.config["BRAND_SSO_PROVIDER_NAME"] if sso_enabled else None
+            ),
             "sso_auth_url": sso_auth_url,
             "version": "1.0.0",
         }
@@ -344,6 +413,8 @@ def get_app_config():
 
 
 @api_v1_bp.route("/auth/login", methods=["POST"])
+@limiter.limit("5 per minute; 50 per hour")
+@limiter.limit("10 per minute; 50 per hour", key_func=login_username_key)
 def api_login():
     """Standard username/password login for the API."""
     data = request.get_json() or {}
@@ -351,7 +422,9 @@ def api_login():
     password = data.get("password")
 
     user = User.get_or_none((User.username == username) | (User.email == username))
-    if user and user.check_password(password):
+    # Treat deactivated accounts the same as wrong credentials — same response
+    # body and status code so the API doesn't reveal account-status info.
+    if user and user.is_active and user.check_password(password):
         # Prepend the requested identifier format
         token = "d8_sec_" + generate_api_token(user.id)
         return jsonify({"api_token": token, "user": user_to_dict(user)}), 200
@@ -367,6 +440,7 @@ def get_me():
 
 
 @api_v1_bp.route("/auth/sso/exchange", methods=["POST"])
+@limiter.limit("20 per minute")
 def sso_exchange():
     """Exchanges an OIDC authorization code for our internal API token."""
     from app.sso import _create_or_link_sso_user
@@ -377,6 +451,12 @@ def sso_exchange():
 
     if not code or not redirect_uri:
         return jsonify({"error": "Missing code or redirect_uri"}), 400
+
+    if redirect_uri not in ALLOWED_SSO_REDIRECT_URIS:
+        current_app.logger.warning(
+            f"SSO exchange rejected: disallowed redirect_uri {redirect_uri!r}"
+        )
+        return jsonify({"error": "redirect_uri is not allowed"}), 400
 
     try:
         # Fetch token using the authorization code and secret (server-side)
@@ -503,7 +583,10 @@ def get_dms():
     results = []
     for conv in dm_convs:
         # Extract the partner ID from the string, handling self-DMs correctly
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+        try:
+            user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+        except ValueError:
+            continue
         partner_id = next(
             (uid for uid in user_ids if uid != g.api_user.id), g.api_user.id
         )
@@ -544,23 +627,12 @@ def get_messages(conv_id_str):
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
 
-    # Access check: is the user a part of this conversation?
-    has_access = False
-    if conv.type == "channel":
-        channel_id = int(conv_id_str.split("_")[1])
-        has_access = (
-            ChannelMember.select()
-            .where(
-                (ChannelMember.user == g.api_user)
-                & (ChannelMember.channel_id == channel_id)
-            )
-            .exists()
-        )
-    elif conv.type == "dm":
-        user_ids = list((int(uid) for uid in conv_id_str.split("_")[1:]))
-        has_access = g.api_user.id in user_ids
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return jsonify({"error": "Malformed conversation id"}), 400
 
-    if not has_access:
+    if not user_has_conversation_access(g.api_user, parsed):
         return jsonify({"error": "Access denied"}), 403
 
     # Pagination: fetches older messages if before_message_id is provided
@@ -621,6 +693,7 @@ def get_messages(conv_id_str):
 
 @api_v1_bp.route("/conversations/<conv_id_str>/messages", methods=["POST"])
 @api_token_required
+@limiter.limit("60 per minute", key_func=_api_user_key)
 def create_message(conv_id_str):
     """Creates a new message in a conversation via REST API."""
     from flask import render_template
@@ -632,23 +705,12 @@ def create_message(conv_id_str):
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
 
-    # 1. Access Check
-    has_access = False
-    if conv.type == "channel":
-        channel_id = int(conv_id_str.split("_")[1])
-        has_access = (
-            ChannelMember.select()
-            .where(
-                (ChannelMember.user == g.api_user)
-                & (ChannelMember.channel_id == channel_id)
-            )
-            .exists()
-        )
-    elif conv.type == "dm":
-        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
-        has_access = g.api_user.id in user_ids
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return jsonify({"error": "Malformed conversation id"}), 400
 
-    if not has_access:
+    if not user_has_conversation_access(g.api_user, parsed):
         return jsonify({"error": "Access denied"}), 403
 
     # 2. Parse incoming JSON
@@ -757,23 +819,12 @@ def get_thread(parent_message_id):
 
     conv = parent_msg.conversation
 
-    # Access check
-    has_access = False
-    if conv.type == "channel":
-        channel_id = int(conv.conversation_id_str.split("_")[1])
-        has_access = (
-            ChannelMember.select()
-            .where(
-                (ChannelMember.user == g.api_user)
-                & (ChannelMember.channel_id == channel_id)
-            )
-            .exists()
-        )
-    elif conv.type == "dm":
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
-        has_access = g.api_user.id in user_ids
+    try:
+        parsed = parse_conversation_id(conv.conversation_id_str)
+    except ValueError:
+        return jsonify({"error": "Malformed conversation id"}), 400
 
-    if not has_access:
+    if not user_has_conversation_access(g.api_user, parsed):
         return jsonify({"error": "Access denied"}), 403
 
     # Fetch thread replies chronologically
@@ -804,6 +855,7 @@ def get_thread(parent_message_id):
 
 @api_v1_bp.route("/messages/<int:message_id>/reactions", methods=["POST"])
 @api_token_required
+@limiter.limit("60 per minute", key_func=_api_user_key)
 def toggle_reaction(message_id):
     """Toggles an emoji reaction on a message for the authenticated user."""
     from app.chat_manager import chat_manager
@@ -845,6 +897,7 @@ def toggle_reaction(message_id):
 
 @api_v1_bp.route("/messages/<int:message_id>", methods=["PATCH"])
 @api_token_required
+@limiter.limit("30 per minute", key_func=_api_user_key)
 def edit_message(message_id):
     """Edits the content of a message. Only the author may edit."""
     from app.chat_manager import chat_manager
@@ -920,29 +973,22 @@ def get_conversation_members(conv_id_str):
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
 
-    if conv.type == "channel":
-        channel_id = int(conv_id_str.split("_")[1])
-        has_access = (
-            ChannelMember.select()
-            .where(
-                (ChannelMember.user == g.api_user)
-                & (ChannelMember.channel_id == channel_id)
-            )
-            .exists()
-        )
-        if not has_access:
-            return jsonify({"error": "Access denied"}), 403
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return jsonify({"error": "Malformed conversation id"}), 400
 
+    if not user_has_conversation_access(g.api_user, parsed):
+        return jsonify({"error": "Access denied"}), 403
+
+    if parsed.type == "channel":
         members = (
             User.select()
             .join(ChannelMember)
-            .where(ChannelMember.channel_id == channel_id)
+            .where(ChannelMember.channel_id == parsed.channel_id)
         )
-    elif conv.type == "dm":
-        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
-        if g.api_user.id not in user_ids:
-            return jsonify({"error": "Access denied"}), 403
-        members = User.select().where(User.id.in_(user_ids))
+    elif parsed.type == "dm":
+        members = User.select().where(User.id.in_(list(parsed.user_ids)))
     else:
         return jsonify({"error": "Invalid conversation type"}), 400
 
@@ -959,27 +1005,16 @@ def mark_conversation_read(conv_id_str):
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
 
-    if conv.type == "channel":
-        channel_id = int(conv_id_str.split("_")[1])
-        has_access = (
-            ChannelMember.select()
-            .where(
-                (ChannelMember.user == g.api_user)
-                & (ChannelMember.channel_id == channel_id)
-            )
-            .exists()
-        )
-        if not has_access:
-            return jsonify({"error": "Access denied"}), 403
-    elif conv.type == "dm":
-        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
-        if g.api_user.id not in user_ids:
-            return jsonify({"error": "Access denied"}), 403
-    else:
-        return jsonify({"error": "Invalid conversation type"}), 400
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return jsonify({"error": "Malformed conversation id"}), 400
+
+    if not user_has_conversation_access(g.api_user, parsed):
+        return jsonify({"error": "Access denied"}), 403
 
     status, _ = UserConversationStatus.get_or_create(user=g.api_user, conversation=conv)
-    status.last_read_timestamp = datetime.datetime.now()
+    status.last_read_timestamp = utc_now()
     status.save()
 
     chat_manager.send_to_user(
@@ -1001,6 +1036,7 @@ def mark_conversation_read(conv_id_str):
 
 @api_v1_bp.route("/conversations/<conv_id_str>/polls", methods=["POST"])
 @api_token_required
+@limiter.limit("10 per minute", key_func=_api_user_key)
 def create_poll(conv_id_str):
     """Creates a new poll message in a conversation."""
     from flask import render_template
@@ -1011,21 +1047,12 @@ def create_poll(conv_id_str):
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
 
-    if conv.type == "channel":
-        channel_id = int(conv_id_str.split("_")[1])
-        has_access = (
-            ChannelMember.select()
-            .where(
-                (ChannelMember.user == g.api_user)
-                & (ChannelMember.channel_id == channel_id)
-            )
-            .exists()
-        )
-    else:
-        user_ids = [int(uid) for uid in conv_id_str.split("_")[1:]]
-        has_access = g.api_user.id in user_ids
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return jsonify({"error": "Malformed conversation id"}), 400
 
-    if not has_access:
+    if not user_has_conversation_access(g.api_user, parsed):
         return jsonify({"error": "Access denied"}), 403
 
     data = request.get_json() or {}
@@ -1070,6 +1097,7 @@ def create_poll(conv_id_str):
 
 @api_v1_bp.route("/polls/<int:poll_id>/vote", methods=["POST"])
 @api_token_required
+@limiter.limit("30 per minute", key_func=_api_user_key)
 def api_vote_on_poll(poll_id):
     """Casts or changes a vote on a poll."""
     from flask import render_template
@@ -1277,6 +1305,7 @@ def update_me():
 
 @api_v1_bp.route("/users/me/avatar", methods=["POST"])
 @api_token_required
+@limiter.limit("10 per minute", key_func=_api_user_key)
 def update_avatar():
     """Uploads and sets a new avatar for the authenticated user."""
     from app.chat_manager import chat_manager
@@ -1285,58 +1314,74 @@ def update_avatar():
     if not file or file.filename == "":
         return jsonify({"error": "No file provided"}), 400
 
-    if file and allowed_file(file.filename):
-        old_avatar_file = g.api_user.avatar
-        original_filename = secure_filename(file.filename)
-        stored_filename = f"{uuid.uuid4()}.png"
+    original_filename = secure_filename(file.filename)
+    stored_filename = f"{uuid.uuid4()}.png"
+    temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_path = os.path.join(temp_dir, stored_filename)
+    file.save(temp_path)
 
-        temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
-        os.makedirs(temp_dir, exist_ok=True)
-        temp_path = os.path.join(temp_dir, stored_filename)
+    try:
+        # Avatars must be raster images; sniff the bytes to reject anything
+        # else even if the extension and Content-Type lie.
+        try:
+            validate_upload(
+                temp_path,
+                original_filename,
+                allowed_extensions=AVATAR_EXTENSIONS,
+            )
+        except ValidationError as exc:
+            return jsonify({"error": str(exc)}), 400
 
-        file.save(temp_path)
+        # Re-encode to PNG. If Pillow can't open it, refuse — don't fall
+        # through to storing the raw bytes as before.
+        try:
+            with Image.open(temp_path) as img:
+                img = ImageOps.exif_transpose(img)
+                img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
+                img.save(temp_path, format="PNG", optimize=True)
+        except Exception as exc:
+            current_app.logger.warning(f"Avatar re-encode failed: {exc}")
+            return jsonify({"error": "Could not process image."}), 400
 
-        # Use the global optimize function from this file
-        optimize_if_image(temp_path, "image/png")
         file_size = os.path.getsize(temp_path)
 
         success = minio_service.upload_file(
             object_name=stored_filename, file_path=temp_path, content_type="image/png"
         )
-        os.remove(temp_path)
-
-        if success:
-            new_file = UploadedFile.create(
-                uploader=g.api_user,
-                original_filename=original_filename,
-                stored_filename=stored_filename,
-                mime_type="image/png",
-                file_size_bytes=file_size,
-            )
-            g.api_user.avatar = new_file
-            g.api_user.save()
-
-            if old_avatar_file:
-                try:
-                    minio_service.delete_file(old_avatar_file.stored_filename)
-                    old_avatar_file.delete_instance()
-                except Exception as e:
-                    current_app.logger.warning(f"Failed to delete old avatar: {e}")
-
-            # Broadcast to real-time clients to update UI
-            chat_manager.broadcast_to_all(
-                {
-                    "type": "avatar_update",
-                    "user_id": g.api_user.id,
-                    "avatar_url": g.api_user.avatar_url,
-                }
-            )
-
-            return jsonify({"avatar_url": g.api_user.avatar_url}), 200
-        else:
+        if not success:
             return jsonify({"error": "Failed to upload file to storage"}), 500
 
-    return jsonify({"error": "File type not allowed."}), 400
+        old_avatar_file = g.api_user.avatar
+        new_file = UploadedFile.create(
+            uploader=g.api_user,
+            original_filename=original_filename,
+            stored_filename=stored_filename,
+            mime_type="image/png",
+            file_size_bytes=file_size,
+        )
+        g.api_user.avatar = new_file
+        g.api_user.save()
+
+        if old_avatar_file:
+            try:
+                minio_service.delete_file(old_avatar_file.stored_filename)
+                old_avatar_file.delete_instance()
+            except Exception as e:
+                current_app.logger.warning(f"Failed to delete old avatar: {e}")
+
+        chat_manager.broadcast_to_all(
+            {
+                "type": "avatar_update",
+                "user_id": g.api_user.id,
+                "avatar_url": g.api_user.avatar_url,
+            }
+        )
+
+        return jsonify({"avatar_url": g.api_user.avatar_url}), 200
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
 
 
 @api_v1_bp.route("/users/me/presence", methods=["POST"])

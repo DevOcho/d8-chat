@@ -1,11 +1,11 @@
 # app/blueprints/dms.py
 
-import datetime
 
 from flask import Blueprint, g, make_response, render_template, request, url_for
 
 from app.chat_manager import chat_manager
-from app.models import Conversation, Message, User, UserConversationStatus
+from app.conversation_id import parse_conversation_id
+from app.models import Conversation, Message, User, UserConversationStatus, utc_now
 from app.routes import (
     PAGE_SIZE,
     check_and_get_read_state_oob,
@@ -37,7 +37,10 @@ def get_start_dm_form():
     )
     existing_partner_ids = {g.user.id}
     for conv in dm_conversations:
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+        try:
+            user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+        except ValueError:
+            continue
         partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
         if partner_id:
             existing_partner_ids.add(partner_id)
@@ -80,7 +83,10 @@ def search_users_for_dm():
     )
     existing_partner_ids = {g.user.id}
     for conv in dm_conversations:
-        user_ids = [int(uid) for uid in conv.conversation_id_str.split("_")[1:]]
+        try:
+            user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+        except ValueError:
+            continue
         partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
         if partner_id:
             existing_partner_ids.add(partner_id)
@@ -138,7 +144,7 @@ def get_dm_chat(other_user_id):
     last_read_timestamp = status.last_read_timestamp
 
     # Now, update the timestamp for ONLY the current user to mark messages as read.
-    status.last_read_timestamp = datetime.datetime.now()
+    status.last_read_timestamp = utc_now()
     status.save()
 
     messages = list(

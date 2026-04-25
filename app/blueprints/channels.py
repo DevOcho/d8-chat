@@ -1,12 +1,20 @@
 # app/blueprints/channels.py
-import datetime
 import json
 import re
 
-from flask import Blueprint, g, make_response, render_template, request, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    g,
+    make_response,
+    render_template,
+    request,
+    url_for,
+)
 from peewee import JOIN, IntegrityError
 
 from app.chat_manager import chat_manager
+from app.conversation_id import parse_conversation_id
 from app.models import (
     Channel,
     ChannelMember,
@@ -19,6 +27,7 @@ from app.models import (
     UserConversationStatus,
     WorkspaceMember,
     db,
+    utc_now,
 )
 from app.routes import (
     PAGE_SIZE,
@@ -64,7 +73,7 @@ def get_channel_chat(channel_id):
     )
     last_read_timestamp = status.last_read_timestamp
     last_seen_mention = status.last_seen_mention_id or 0
-    status.last_read_timestamp = datetime.datetime.now()
+    status.last_read_timestamp = utc_now()
     status.save()
 
     # Get the latest messages
@@ -374,8 +383,10 @@ def add_channel_member(channel_id):
                 "partials/channel_list_item.html", channel=channel
             )
             recipient_ws.send(new_channel_html)
-        except Exception as e:
-            print(f"Could not send real-time channel add to user {user_id_to_add}: {e}")
+        except Exception:
+            current_app.logger.exception(
+                f"Could not send real-time channel add to user {user_id_to_add}"
+            )
 
     admins = list(
         ChannelMember.select()
@@ -513,9 +524,9 @@ def remove_channel_member(channel_id, user_id_to_remove):
                 recipient_ws = chat_manager.all_clients[user_id_to_remove]
                 recipient_ws.send(remove_html)
                 recipient_ws.send(json.dumps(notification))
-            except Exception as e:
-                print(
-                    f"Could not send removal notification to user {user_id_to_remove}: {e}"
+            except Exception:
+                current_app.logger.exception(
+                    f"Could not send removal notification to user {user_id_to_remove}"
                 )
 
     admins = list(
@@ -642,7 +653,7 @@ def create_channel():
         "partials/channel_messages.html",
         channel=new_channel,
         messages=messages,
-        last_read_timestamp=datetime.datetime.now(),
+        last_read_timestamp=utc_now(),
         mention_message_ids=set(),
         PAGE_SIZE=PAGE_SIZE,
     )
@@ -746,7 +757,7 @@ def leave_channel(channel_id):
         "partials/dm_messages.html",
         messages=messages_self,
         other_user=user_self,
-        last_read_timestamp=datetime.datetime.now(),
+        last_read_timestamp=utc_now(),
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
         attachments_map=attachments_map,
@@ -1015,7 +1026,9 @@ def mention_search(conversation_id_str):
         return "", 404
 
     if conversation.type == "channel":
-        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(
+            parse_conversation_id(conversation.conversation_id_str).channel_id
+        )
         channel_member_count = (
             ChannelMember.select().where(ChannelMember.channel == channel).count()
         )
@@ -1063,7 +1076,9 @@ def mention_search(conversation_id_str):
         members = list(members_query)
 
     elif conversation.type == "dm":
-        user_ids = [int(uid) for uid in conversation.conversation_id_str.split("_")[1:]]
+        user_ids = list(
+            parse_conversation_id(conversation.conversation_id_str).user_ids
+        )
         members_query = User.select().where(
             (User.id.in_(user_ids))
             & (

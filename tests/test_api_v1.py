@@ -402,8 +402,14 @@ def test_api_upload_file_success(client, mocker):
     # Mock the Minio service so we don't actually hit an external server
     mocker.patch("app.blueprints.api_v1.minio_service.upload_file", return_value=True)
 
-    # Create an in-memory file
-    file_data = {"file": (io.BytesIO(b"dummy image data"), "test_image.png")}
+    # Create an in-memory file — real PNG bytes so the content sniffer accepts
+    # it; the upload pipeline now rejects bytes that don't match the extension.
+    tiny_png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+    file_data = {"file": (io.BytesIO(tiny_png), "test_image.png")}
 
     res = client.post(
         "/api/v1/files/upload",
@@ -419,6 +425,44 @@ def test_api_upload_file_success(client, mocker):
     assert data["original_filename"] == "test_image.png"
     assert data["mime_type"] == "image/png"
     assert "url" in data
+
+
+def test_api_upload_file_too_large(client, mocker):
+    """
+    Files larger than MAX_CONTENT_LENGTH are rejected before they reach
+    Minio. The test forces the limit down to a few bytes so we don't have
+    to upload 50MB of fake content.
+    """
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+    login_res = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    )
+    token = login_res.get_json()["api_token"]
+
+    upload_mock = mocker.patch(
+        "app.blueprints.api_v1.minio_service.upload_file", return_value=True
+    )
+    mocker.patch("app.blueprints.api_v1.MAX_CONTENT_LENGTH", 16)
+
+    # Real PNG bytes — content sniff passes, then size check fails.
+    tiny_png = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+        b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+        b"\x00\x00\x05\x00\x01\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    res = client.post(
+        "/api/v1/files/upload",
+        data={"file": (io.BytesIO(tiny_png), "big.png")},
+        content_type="multipart/form-data",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 400
+    assert "exceeds" in res.get_json()["error"]
+    upload_mock.assert_not_called()
 
 
 def test_api_upload_file_missing_file(client):
@@ -781,6 +825,33 @@ def test_api_update_me(client):
 
     updated_user = User.get_by_id(1)
     assert updated_user.display_name == "Updated Name From API"
+
+
+def test_rate_limit_returns_json(app):
+    """
+    GIVEN rate limiting is enabled
+    WHEN a client exceeds the login rate limit
+    THEN the 429 response should be JSON, not HTML
+    """
+    from app import limiter
+
+    app.config["RATELIMIT_ENABLED"] = True
+    app.config["RATELIMIT_STORAGE_URI"] = "memory://"
+    limiter.init_app(app)
+
+    with app.test_client() as client:
+        for _ in range(10):
+            client.post("/api/v1/auth/login", json={"username": "x", "password": "y"})
+
+        res = client.post("/api/v1/auth/login", json={"username": "x", "password": "y"})
+
+    app.config["RATELIMIT_ENABLED"] = False
+
+    assert res.status_code == 429
+    data = res.get_json()
+    assert data is not None, "429 response must be JSON, not HTML"
+    assert data["error"] == "Rate limit exceeded"
+    assert "detail" in data
 
 
 def test_api_mark_conversation_read(client, mocker):

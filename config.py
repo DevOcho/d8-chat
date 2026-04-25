@@ -9,7 +9,17 @@ load_dotenv()
 class Config:
     """Base configuration."""
 
-    SECRET_KEY = os.environ.get("SECRET_KEY", "a_default_secret_key")
+    SECRET_KEY = os.environ.get("SECRET_KEY")
+    if not SECRET_KEY:
+        raise ValueError(
+            "SECRET_KEY environment variable must be set. "
+            "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+        )
+    if len(SECRET_KEY) < 32:
+        raise ValueError(
+            "SECRET_KEY must be at least 32 characters. "
+            "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+        )
 
     # Check if a full URI is provided. If not, build it from components.
     DATABASE_URI = os.environ.get("DATABASE_URI")
@@ -42,6 +52,30 @@ class Config:
     # Valkey Config for message broker
     VALKEY_URL = os.environ.get("VALKEY_URL")
 
+    # flask-sock passes these to simple_websocket.Server. Listing "d8_sec" as a
+    # known subprotocol lets the API WebSocket route negotiate it back to the
+    # client when the client offers it via the Sec-WebSocket-Protocol header.
+    # The /ws/chat web route never offers a subprotocol, so this is a no-op
+    # there.
+    SOCK_SERVER_OPTIONS = {"subprotocols": ["d8_sec"]}
+
+    # Session cookie hardening. The primary local dev workflow runs through k3s
+    # at https://d8-chat.local, so SECURE=True is fine. If you need to run the
+    # app over plain HTTP (e.g. `python3 run.py` direct), override
+    # SESSION_COOKIE_SECURE=False locally.
+    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+
+    # Branding shown to mobile clients via /api/v1/app-config. Override per
+    # deployment without a code change.
+    BRAND_SERVER_NAME = os.environ.get("BRAND_SERVER_NAME", "DevOcho")
+    BRAND_LOGO_URL = os.environ.get("BRAND_LOGO_URL")
+    BRAND_PRIMARY_COLOR = os.environ.get("BRAND_PRIMARY_COLOR", "#ec729c")
+    BRAND_SSO_PROVIDER_NAME = os.environ.get(
+        "BRAND_SSO_PROVIDER_NAME", "Sign in with SSO"
+    )
+
 
 class TestConfig(Config):
     """Configuration for testing."""
@@ -51,8 +85,8 @@ class TestConfig(Config):
     DATABASE_URI = "sqlite:///:memory:"
     # Disable CSRF protection in testing forms
     WTF_CSRF_ENABLED = False
-    # Use a dummy secret key for tests
-    SECRET_KEY = "my-test-secret-key"
+    # Use a dummy secret key for tests (must be ≥32 chars per the validator)
+    SECRET_KEY = "test-secret-key-at-least-32-chars-long"
     # Make login easier for tests
     LOGIN_DISABLED = False
 
@@ -62,3 +96,10 @@ class TestConfig(Config):
     MINIO_SECRET_KEY = "test-secret"
     MINIO_ENDPOINT = "testhost:9000"
     MINIO_PUBLIC_URL = "http://testhost:9000"
+
+    # Disable rate limiting in tests so requests are never blocked
+    RATELIMIT_ENABLED = False
+    RATELIMIT_STORAGE_URI = "memory://"
+
+    # Test client uses HTTP, so a Secure-only cookie would never be sent back.
+    SESSION_COOKIE_SECURE = False

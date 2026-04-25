@@ -9,11 +9,47 @@ We use **REST (HTTP)** for mutations (sending messages) to utilize standard HTTP
 
 ## 1. Connection & Authentication
 
-**WebSocket Endpoint:** `wss://<your-domain.com>/ws/api/v1?token=<api_token>`
+**WebSocket Endpoint:** `wss://<your-domain.com>/ws/api/v1`
 
-To connect to the WebSocket, the mobile client must pass a valid API token in the query string.
-* The token can optionally include the `d8_sec_` prefix.
-* If the token is missing, invalid, or expired, the server will close the connection immediately with **Close Code 1008** and the message `"Invalid or missing token"`.
+The API token is sent via the `Sec-WebSocket-Protocol` upgrade header — **never** as a URL query parameter, since query strings leak into reverse-proxy access logs, browser history, and Referer headers.
+
+The client must request **two** subprotocols, comma-separated:
+
+1. `d8_sec` — the marker telling the server this is a D8-Chat authenticated connection.
+2. The API token itself. The token *may* include the `d8_sec_` prefix (e.g. `d8_sec_abc123…`) or be sent without it.
+
+The server completes the WebSocket handshake by echoing back `Sec-WebSocket-Protocol: d8_sec`.
+
+### Examples
+
+**JavaScript (browser / React Native):**
+```js
+const token = "d8_sec_abc123…"; // from POST /api/v1/auth/login
+const ws = new WebSocket("wss://example.com/ws/api/v1", ["d8_sec", token]);
+```
+
+**Swift (iOS, URLSessionWebSocketTask):**
+```swift
+var request = URLRequest(url: URL(string: "wss://example.com/ws/api/v1")!)
+request.setValue("d8_sec, \(token)", forHTTPHeaderField: "Sec-WebSocket-Protocol")
+let task = URLSession.shared.webSocketTask(with: request)
+task.resume()
+```
+
+**Kotlin (Android, OkHttp):**
+```kotlin
+val request = Request.Builder()
+    .url("wss://example.com/ws/api/v1")
+    .header("Sec-WebSocket-Protocol", "d8_sec, $token")
+    .build()
+val ws = client.newWebSocket(request, listener)
+```
+
+### Failure modes
+* If the `Sec-WebSocket-Protocol` header is missing, doesn't include a token, or the token is invalid/expired, the server closes the connection immediately with **Close Code 1008** and message `"Invalid or missing token"`.
+* The server will not echo back `d8_sec` if the client did not offer it; well-behaved clients will treat the missing echo as a handshake failure and disconnect.
+
+> **Migration note:** Earlier drafts of this document showed `?token=…` in the URL. That mechanism has been removed and is no longer accepted. Update any client built against the older spec.
 
 ---
 

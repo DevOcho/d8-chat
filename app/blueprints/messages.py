@@ -2,9 +2,19 @@
 import re
 
 import markdown
-from flask import Blueprint, g, json, make_response, render_template, request, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    g,
+    json,
+    make_response,
+    render_template,
+    request,
+    url_for,
+)
 
 from app.chat_manager import chat_manager
+from app.conversation_id import parse_conversation_id
 from app.models import (
     Channel,
     Conversation,
@@ -145,12 +155,12 @@ def delete_message(message_id):
                 try:
                     minio_service.delete_file(attachment.stored_filename)
                     attachment.delete_instance()
-                except Exception as e:
-                    print(
-                        f"Error during attachment cleanup for message {message_id}: {e}"
+                except Exception:
+                    current_app.logger.exception(
+                        f"Error during attachment cleanup for message {message_id}"
                     )
-    except Exception as e:
-        print(f"Error deleting message {message_id}: {e}")
+    except Exception:
+        current_app.logger.exception(f"Error deleting message {message_id}")
         return "Error deleting message", 500
     broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
     api_data = {
@@ -214,7 +224,9 @@ def view_thread(parent_message_id):
     channel = None
     if parent_message.conversation.type == "channel":
         channel = Channel.get_by_id(
-            int(parent_message.conversation.conversation_id_str.split("_")[1])
+            parse_conversation_id(
+                parent_message.conversation.conversation_id_str
+            ).channel_id
         )
     thread_replies = (
         Message.select()
@@ -383,7 +395,9 @@ def jump_to_message(message_id):
     if conversation.type == "channel":
         from app.models import Channel, ChannelMember
 
-        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(
+            parse_conversation_id(conversation.conversation_id_str).channel_id
+        )
         members_count = (
             ChannelMember.select().where(ChannelMember.channel == channel).count()
         )
@@ -417,7 +431,7 @@ def jump_to_message(message_id):
     else:  # DM
         from app.models import User
 
-        user_ids = [int(uid) for uid in conversation.conversation_id_str.split("_")[1:]]
+        user_ids = parse_conversation_id(conversation.conversation_id_str).user_ids
         other_user_id = next((uid for uid in user_ids if uid != g.user.id), g.user.id)
         other_user = User.get_by_id(other_user_id)
         header_html_content = render_template(

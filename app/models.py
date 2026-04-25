@@ -28,6 +28,21 @@ from playhouse.db_url import connect
 
 from app.services import minio_service
 
+
+def utc_now() -> datetime.datetime:
+    """
+    Project-wide "now" helper — naive UTC.
+
+    Every timestamp stored or compared in this app should funnel through here
+    instead of calling ``datetime.datetime.now()`` (which returns the server's
+    local time and silently breaks if you redeploy to a different timezone).
+    Naive (no ``tzinfo``) so it round-trips cleanly through Peewee's
+    ``DateTimeField`` — switching to timezone-aware datetimes later only
+    requires changing this function and the field type.
+    """
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
 db = Proxy()
 
 IS_RUNNING_TESTS = "PYTEST_CURRENT_TEST" in os.environ
@@ -37,20 +52,23 @@ PrimaryKeyField = AutoField if IS_RUNNING_TESTS else IdentityField
 def initialize_db(app):
     """
     Initializes the database connection using the URI from the app's config.
-    This function should be called from the app factory.
+    Uses a connection pool for PostgreSQL to prevent connection exhaustion.
     """
     db_url = app.config["DATABASE_URI"]
-    # The `connect` function from playhouse correctly handles different
-    # database schemes (postgres, sqlite, etc.)
-    database = connect(db_url)
+    if db_url.startswith(("postgresql://", "postgres://")):
+        scheme = db_url.split("://")[0]
+        pool_url = db_url.replace(f"{scheme}://", f"{scheme}+pool://", 1)
+        database = connect(pool_url, max_connections=15, stale_timeout=300)
+    else:
+        database = connect(db_url)
     db.initialize(database)
 
 
 class BaseModel(Model):
     """Base model providing created_at and updated_at fields."""
 
-    created_at = DateTimeField(default=datetime.datetime.now)
-    updated_at = DateTimeField(default=datetime.datetime.now)
+    created_at = DateTimeField(default=utc_now)
+    updated_at = DateTimeField(default=utc_now)
 
     class Meta:
         """Peewee Meta class."""
@@ -58,7 +76,7 @@ class BaseModel(Model):
         database = db
 
     def save(self, *args, **kwargs):
-        self.updated_at = datetime.datetime.now()
+        self.updated_at = utc_now()
         return super().save(*args, **kwargs)
 
 
@@ -83,13 +101,36 @@ class User(BaseModel, UserMixin):
     profile_picture_url = CharField(null=True)
     country = CharField(null=True)
     city = CharField(null=True)
-    timezone = CharField(null=True, default="AST")
+    # Free-text label displayed on the profile page (e.g. "EST", "Europe/Paris").
+    # Not wired into any datetime rendering — message timestamps are always
+    # formatted in the viewer's browser timezone via JS in chat.js. Default is
+    # None so new users see "Not set" rather than a misleading hardcoded TLA.
+    timezone = CharField(null=True, default=None)
     presence_status = CharField(default="online")  # 'online', 'away', or 'busy'
     theme = CharField(default="system")  # 'light', 'dark', or 'system'
     wysiwyg_enabled = BooleanField(default=False, null=False)
     last_threads_view_at = DateTimeField(null=True)
     avatar = DeferredForeignKey("UploadedFile", backref="user_avatar", null=True)
     notification_sound = CharField(default="d8-notification.mp3")
+
+    @classmethod
+    def get_active_by_id(cls, user_id):
+        """
+        Look up a user by primary key, returning ``None`` if the row is missing
+        or the account has been deactivated.
+
+        This is the canonical hook every auth entry point should use when
+        rehydrating a session: a deactivated user must not continue an
+        existing session even if they still hold a valid session cookie or
+        API token. Returning ``None`` instead of raising lets the caller
+        fold this into existing "unauthenticated" handling.
+        """
+        if user_id is None:
+            return None
+        user = cls.get_or_none(cls.id == user_id)
+        if user is None or not user.is_active:
+            return None
+        return user
 
     def set_password(self, password):
         """Hashes the password and stores it."""
@@ -254,7 +295,7 @@ class UserConversationStatus(BaseModel):
 
     user = ForeignKeyField(User, backref="conversation_statuses")
     conversation = ForeignKeyField(Conversation, backref="user_statuses")
-    last_read_timestamp = DateTimeField(default=datetime.datetime.now)
+    last_read_timestamp = DateTimeField(default=utc_now)
     last_notified_timestamp = DateTimeField(null=True)
     last_seen_mention_id = BigIntegerField(null=True)
 
@@ -328,3 +369,34 @@ class Vote(BaseModel):
         """Peewee Meta class."""
 
         primary_key = CompositeKey("user", "option")
+
+
+class AuditLog(BaseModel):
+    """
+    Append-only record of security- and compliance-relevant actions.
+
+    The ``actor`` is whoever ``g.user`` was at the time of the request (null
+    for system events). ``action`` is a short dotted identifier like
+    ``user.deactivated`` or ``channel.member_role_changed``. ``target_type`` /
+    ``target_id`` point at the affected row when applicable. ``details`` is a
+    JSON string for anything else worth keeping (old/new values, parameters,
+    etc.) — kept as TextField so it works on SQLite as well as Postgres.
+
+    Append-only by convention, not by DB constraint. Don't expose mutation
+    routes; queries should be read-only.
+    """
+
+    id = PrimaryKeyField()
+    actor = ForeignKeyField(User, backref="audit_actions", null=True)
+    action = CharField(max_length=80, index=True)
+    target_type = CharField(null=True)
+    target_id = BigIntegerField(null=True)
+    details = TextField(null=True)
+    ip = CharField(null=True)
+
+    class Meta:
+        """Peewee Meta class."""
+
+        # Index on (actor, created_at) for "what did this admin do recently"
+        # lookups, and on action for "who triggered X" lookups.
+        indexes = ((("actor", "created_at"), False),)

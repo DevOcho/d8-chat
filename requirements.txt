@@ -2,12 +2,14 @@ Authlib
 bcrypt
 bleach
 boto3
+click
 emoji
 Faker
 Flask
 Flask-Limiter==3.13
 flask-login
 flask-sock
+flask-wtf
 gevent
 gunicorn
 Markdown
@@ -23,6 +25,9 @@ pytest-cov
 pytest-flask
 pytest-mock
 python-dotenv
+python-magic
 redis
 requests
+rich
+sentry-sdk[flask]
 simple-websocket

@@ -2,10 +2,13 @@
 
 import argparse
 import datetime
+import os
 import secrets
+import stat
 
 from app import create_app
 from app.models import (
+    AuditLog,
     Channel,
     ChannelMember,
     Conversation,
@@ -44,6 +47,7 @@ ALL_MODELS = [
     Poll,
     PollOption,
     Vote,
+    AuditLog,
 ]
 
 
@@ -107,8 +111,15 @@ def seed_initial_data():
     )
 
     if created:
-        # Generate a secure, random password
-        temp_password = secrets.token_urlsafe(16)
+        # Source of the password, in priority order:
+        #   1. INITIAL_ADMIN_PASSWORD env var — operator-controlled, deterministic
+        #   2. Generated 16-byte URL-safe token, written to a 0600 file in
+        #      ``instance/admin_credentials.txt`` so the operator has a
+        #      recovery path if they miss the stdout output.
+        env_password = os.environ.get("INITIAL_ADMIN_PASSWORD")
+        from_env = bool(env_password)
+        temp_password = env_password or secrets.token_urlsafe(16)
+
         admin_user.set_password(temp_password)
         admin_user.save()
 
@@ -119,13 +130,31 @@ def seed_initial_data():
         ChannelMember.create(user=admin_user, channel=general_channel)
         ChannelMember.create(user=admin_user, channel=announcements_channel)
 
+        creds_path = None
+        if not from_env:
+            from flask import current_app
+
+            instance_dir = current_app.instance_path
+            os.makedirs(instance_dir, exist_ok=True)
+            creds_path = os.path.join(instance_dir, "admin_credentials.txt")
+            with open(creds_path, "w", encoding="utf-8") as fh:
+                fh.write(
+                    f"username: {admin_user.username}\npassword: {temp_password}\n"
+                )
+            os.chmod(creds_path, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+
         print("\n" + "=" * 50)
         print("  ADMIN USER CREATED  ".center(50, "="))
         print("=" * 50)
         print(f"  Username: {admin_user.username}")
-        print(f"  Password: {temp_password}")
+        if from_env:
+            print("  Password: (from $INITIAL_ADMIN_PASSWORD)")
+        else:
+            print(f"  Password: {temp_password}")
+            print(f"  Also written to: {creds_path} (mode 0600)")
         print("=" * 50)
-        print("  Please use these credentials to log in for the first time.  \n")
+        print("  Use these credentials to log in for the first time. ")
+        print("  Change the password from the admin UI immediately after.\n")
     else:
         print("Admin user already exists, skipping creation.")
 

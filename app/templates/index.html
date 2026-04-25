@@ -51,6 +51,7 @@
                 {% endif %}
                 <!-- Update the form tag and remove 'disabled' from inputs/button -->
                 <form action="{{ url_for('auth.login') }}" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="mb-3">
                         <label for="username" class="form-label">Username or Email</label>
                         <input type="text"
@@ -76,6 +77,10 @@
                         </div>
                     </div>
                     <button type="submit" class="btn btn-pink w-100">Login</button>
+                    <p class="text-end mt-2 mb-0">
+                        <a href="{{ url_for('auth.forgot_password_form') }}"
+                           class="small text-muted">Forgot password?</a>
+                    </p>
                 </form>
                 <div class="sso-divider">
                     <span>OR</span>

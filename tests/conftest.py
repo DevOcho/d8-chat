@@ -3,6 +3,7 @@
 import os
 
 os.environ["PYTEST_CURRENT_TEST"] = "true"
+os.environ.setdefault("SECRET_KEY", "test-secret-key-at-least-32-chars-long")
 
 from unittest.mock import Mock
 
@@ -11,6 +12,7 @@ import pytest
 from app import create_app
 from app.chat_manager import chat_manager
 from app.models import (
+    AuditLog,
     Channel,
     ChannelMember,
     Conversation,
@@ -95,6 +97,7 @@ def test_db(app):
             Poll,
             PollOption,
             Vote,
+            AuditLog,
         ]
 
         db.create_tables(tables)

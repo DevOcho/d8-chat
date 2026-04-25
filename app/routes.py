@@ -6,11 +6,22 @@ import datetime
 import functools
 import json
 
-from flask import Blueprint, g, redirect, render_template, request, session, url_for
+from flask import (
+    Blueprint,
+    current_app,
+    g,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from peewee import JOIN, fn
 
 from . import sock
+from .access import user_has_conversation_access
 from .chat_manager import chat_manager
+from .conversation_id import parse_conversation_id
 from .models import (
     Channel,
     ChannelMember,
@@ -23,6 +34,7 @@ from .models import (
     User,
     UserConversationStatus,
     WorkspaceMember,
+    utc_now,
 )
 from .services import chat_service
 
@@ -37,12 +49,14 @@ AVATAR_SIZE = (256, 256)
 # This function runs before every request to load the logged-in user.
 @main_bp.before_app_request
 def load_logged_in_user():
-    """Loads the user from the session into the Flask g object."""
-    user_id = session.get("user_id")
-    if user_id is None:
-        g.user = None
-    else:
-        g.user = User.get_or_none(User.id == user_id)
+    """
+    Loads the user from the session into the Flask g object.
+
+    Resolves through ``User.get_active_by_id`` so that deactivated users with
+    a still-valid session cookie are treated as logged out — every protected
+    route already gates on ``g.user`` being truthy.
+    """
+    g.user = User.get_active_by_id(session.get("user_id"))
 
 
 # Decorator to require login for a route.
@@ -317,9 +331,13 @@ def chat_interface():
             )
 
             if is_recent or has_unread_msg:
-                for uid in conv.conversation_id_str.split("_")[1:]:
-                    if int(uid) != g.user.id:
-                        visible_dm_partner_ids.add(int(uid))
+                try:
+                    user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+                except ValueError:
+                    continue
+                for uid in user_ids:
+                    if uid != g.user.id:
+                        visible_dm_partner_ids.add(uid)
 
     # Pass only the filtered list of users to the sidebar template
     direct_message_users = (
@@ -368,7 +386,7 @@ def _notify_all_thread_participants(ws, parent_message, conv_id_str):
     all_participant_ids.update(r.user.id for r in replies)
 
     unread_link_html = render_template("partials/threads_link_unread.html")
-    now = datetime.datetime.now()
+    now = utc_now()
 
     for user_id in list(all_participant_ids):
         if user_id == ws.user.id or not chat_manager.is_user_online_in_cluster(user_id):
@@ -380,8 +398,10 @@ def _notify_all_thread_participants(ws, parent_message, conv_id_str):
             _notify_thread_participant(
                 user_id, parent_message.conversation, now, conv_id_str
             )
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            print(f"Error sending thread notification to user {user_id}: {e}")
+        except Exception:  # pylint: disable=broad-exception-caught
+            current_app.logger.exception(
+                f"Error sending thread notification to user {user_id}"
+            )
 
 
 def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
@@ -508,8 +528,22 @@ def _process_ws_event(ws, data):
     if not conversation:
         return
 
+    try:
+        parsed_conv = parse_conversation_id(conversation.conversation_id_str)
+    except ValueError:
+        return
+
+    # Membership gate: REST endpoints validate this, the WS path used to skip
+    # it. Without this check any authenticated client could post into any
+    # conversation by sending a crafted frame with another conv's id.
+    if not user_has_conversation_access(ws.user, parsed_conv):
+        current_app.logger.warning(
+            f"WS send_message blocked: user {ws.user.id} not in {conv_id_str!r}"
+        )
+        return
+
     if conversation.type == "channel":
-        channel = Channel.get_by_id(conversation.conversation_id_str.split("_")[1])
+        channel = Channel.get_by_id(parsed_conv.channel_id)
         if channel.posting_restricted_to_admins:
             membership = ChannelMember.get_or_none(user=ws.user, channel=channel)
             if not membership or membership.role != "admin":
@@ -538,22 +572,27 @@ def _process_ws_event(ws, data):
 @sock.route("/ws/chat")
 def chat(ws):
     """Handles all real-time WebSocket communication."""
-    user = session.get("user_id") and User.get_or_none(id=session.get("user_id"))
+    user = User.get_active_by_id(session.get("user_id"))
     if not user:
         ws.close(reason=1008, message="Not authenticated")
         return
 
-    # Origin check to prevent CSWSH
+    # Origin check to prevent Cross-Site WebSocket Hijacking (CSWSH). The
+    # browser supplies the page's Origin in the upgrade handshake; we accept
+    # only origins that match the server's own URL root or the request host
+    # (to cover local dev like http://localhost:5001 and https://d8-chat.local
+    # where Flask's SERVER_NAME may not be set). Anything else is closed.
     origin = request.headers.get("Origin")
     allowed_origin = request.url_root.rstrip("/")
-    # For local dev, Flask may not have the server name configured.
-    if "127.0.0.1" in allowed_origin or "localhost" in allowed_origin:
-        if origin not in (allowed_origin, f"http://{request.host}"):
-            print(
-                f"WARN: WebSocket origin '{origin}' doesn't match allowed '{allowed_origin}'. Allowing for local dev."
-            )
-    elif not origin or origin != allowed_origin:
-        print(f"ERROR: WebSocket connection from invalid origin '{origin}'. Closing.")
+    acceptable = {
+        allowed_origin,
+        f"http://{request.host}",
+        f"https://{request.host}",
+    }
+    if not origin or origin not in acceptable:
+        current_app.logger.warning(
+            f"WebSocket connection rejected: origin {origin!r} not in {sorted(acceptable)!r}"
+        )
         ws.close(reason=1008, message="Invalid origin")
         return
 
@@ -589,7 +628,9 @@ def chat(ws):
             }
             chat_manager.broadcast_to_all(payload)
             chat_manager.unsubscribe(ws)
-            print(f"INFO: Client connection closed for '{ws.user.username}'.")
+            current_app.logger.info(
+                f"Client connection closed for '{ws.user.username}'."
+            )
 
 
 # --- API JSON WebSocket Handler ---
@@ -598,17 +639,26 @@ def api_ws(ws):
     """Handles JSON WebSocket connections for mobile/API clients."""
     from app.blueprints.api_v1 import verify_api_token
 
-    # We grab the token directly out of the initial connection URL params
-    token = request.args.get("token")
+    # Auth token is delivered via the Sec-WebSocket-Protocol upgrade header to
+    # keep it out of URLs, access logs, and Referer headers. The client must
+    # send TWO comma-separated subprotocol values: the marker "d8_sec" plus the
+    # token itself (with or without the "d8_sec_" prefix). The server echoes
+    # back "d8_sec" to complete the WebSocket subprotocol negotiation.
+    requested = [
+        p.strip()
+        for p in request.headers.get("Sec-WebSocket-Protocol", "").split(",")
+        if p.strip()
+    ]
+    token = next((p for p in requested if p != "d8_sec"), None)
     if token and token.startswith("d8_sec_"):
-        token = token[7:]
+        token = token[len("d8_sec_") :]
 
-    user_id = verify_api_token(token)
+    user_id = verify_api_token(token) if token else None
     if not user_id:
         ws.close(reason=1008, message="Invalid or missing token")
         return
 
-    user = User.get_or_none(id=user_id)
+    user = User.get_active_by_id(user_id)
     if not user:
         ws.close(reason=1008, message="User not found")
         return
@@ -658,4 +708,6 @@ def api_ws(ws):
             }
             chat_manager.broadcast_to_all(disconnect_payload)
             chat_manager.unsubscribe(ws)
-            print(f"INFO: API Client connection closed for '{ws.user.username}'.")
+            current_app.logger.info(
+                f"API client connection closed for '{ws.user.username}'."
+            )
