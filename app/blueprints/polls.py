@@ -2,6 +2,7 @@
 from flask import Blueprint, g, make_response, render_template, request
 
 from app.chat_manager import chat_manager
+from app.htmx_oob import oob_to_selector
 from app.models import Conversation, Message, Poll, PollOption, Vote, db
 from app.routes import (
     get_attachments_for_messages,
@@ -100,9 +101,7 @@ def create_poll():
         attachments_map=attachments_map,
         Message=Message,
     )
-    broadcast_html = (
-        f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-    )
+    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
 
     # Broadcast the new poll to everyone in the channel
     chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=None)

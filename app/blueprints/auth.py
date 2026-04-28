@@ -13,18 +13,13 @@ from flask import (
 )
 from flask_login import login_user, logout_user
 
-from app import limiter, login_username_key
+from app import external_url_for, limiter, login_username_key
 from app.auth_tokens import make_password_reset_token, verify_password_reset_token
 from app.models import User
+from app.password_policy import validate_password
 from app.sso import oauth
 
 auth_bp = Blueprint("auth", __name__)
-
-
-# Minimum length for self-service password resets. Doesn't apply to
-# admin-set passwords (those go through admin.py and are deliberately
-# under-validated for ops-driven first-time provisioning).
-MIN_PASSWORD_LENGTH = 12
 
 
 @auth_bp.route("/")
@@ -61,7 +56,7 @@ def login():
 @auth_bp.route("/sso-login")
 def sso_login():
     """Redirects to the SSO provider for login."""
-    redirect_uri = url_for("auth.authorize", _external=True)
+    redirect_uri = external_url_for("auth.authorize")
     nonce = secrets.token_urlsafe(16)
     session["nonce"] = nonce
     current_app.logger.info(
@@ -111,7 +106,7 @@ def forgot_password():
         user = User.get_or_none(User.email == email)
         if user and user.is_active and user.password_hash:
             token = make_password_reset_token(current_app.config["SECRET_KEY"], user)
-            reset_url = url_for("auth.reset_password", token=token, _external=True)
+            reset_url = external_url_for("auth.reset_password", token=token)
             current_app.logger.info(
                 f"Password reset link for user {user.id} ({user.email}): {reset_url}"
             )
@@ -159,11 +154,12 @@ def reset_password(token: str):
             token=token,
             error="The two passwords don't match.",
         ), 400
-    if len(password) < MIN_PASSWORD_LENGTH:
+    error = validate_password(password)
+    if error:
         return render_template(
             "reset_password.html",
             token=token,
-            error=f"Password must be at least {MIN_PASSWORD_LENGTH} characters.",
+            error=error,
         ), 400
 
     user.set_password(password)

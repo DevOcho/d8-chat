@@ -13,8 +13,10 @@ from flask import (
 )
 from peewee import JOIN, IntegrityError
 
+from app import external_url_for
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
+from app.htmx_oob import oob_by_id, oob_to_selector
 from app.models import (
     Channel,
     ChannelMember,
@@ -370,7 +372,7 @@ def add_channel_member(channel_id):
     )
     # Render and broadcast the new system message
     message_html = render_template("partials/message.html", message=join_message)
-    broadcast_html = f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
+    broadcast_html = oob_to_selector("beforeend", "#message-list", message_html)
     chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     UserConversationStatus.get_or_create(
@@ -410,10 +412,12 @@ def add_channel_member(channel_id):
     )
 
     members_count = len(admins) + len(members)
-    count_swap_html = (
-        f'<span id="channel-members-count-{channel_id}" hx-swap-oob="true" class="badge bg-secondary rounded-pill">'
-        f"{members_count}"
-        f"</span>"
+    count_swap_html = oob_by_id(
+        f"channel-members-count-{int(channel_id)}",
+        "true",
+        str(members_count),
+        tag="span",
+        css_class="badge bg-secondary rounded-pill",
     )
 
     return make_response(members_tab_html + count_swap_html)
@@ -505,21 +509,17 @@ def remove_channel_member(channel_id, user_id_to_remove):
         )
         # Render and broadcast the new system message
         message_html = render_template("partials/message.html", message=removed_message)
-        broadcast_html = (
-            f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
-        )
+        broadcast_html = oob_to_selector("beforeend", "#message-list", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
         if user_id_to_remove in chat_manager.all_clients:
             try:
-                remove_html = (
-                    f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
-                )
+                remove_html = oob_by_id(f"channel-item-{int(channel_id)}", "delete")
                 notification = {
                     "type": "notification",
                     "title": "Removed from Channel",
                     "body": f"You have been removed from #{channel.name} by {g.user.username}.",
-                    "icon": url_for("static", filename="favicon.ico", _external=True),
+                    "icon": external_url_for("static", filename="favicon.ico"),
                 }
                 recipient_ws = chat_manager.all_clients[user_id_to_remove]
                 recipient_ws.send(remove_html)
@@ -551,10 +551,12 @@ def remove_channel_member(channel_id, user_id_to_remove):
     )
 
     members_count = len(admins) + len(members)
-    count_swap_html = (
-        f'<span id="channel-members-count-{channel_id}" hx-swap-oob="true" class="badge bg-secondary rounded-pill">'
-        f"{members_count}"
-        f"</span>"
+    count_swap_html = oob_by_id(
+        f"channel-members-count-{int(channel_id)}",
+        "true",
+        str(members_count),
+        tag="span",
+        css_class="badge bg-secondary rounded-pill",
     )
 
     return make_response(members_tab_html + count_swap_html)
@@ -658,10 +660,10 @@ def create_channel():
         PAGE_SIZE=PAGE_SIZE,
     )
 
-    header_swap_html = (
-        f'<div id="chat-header-container" hx-swap-oob="innerHTML">{header_html}</div>'
+    header_swap_html = oob_by_id("chat-header-container", "innerHTML", header_html)
+    messages_swap_html = oob_by_id(
+        "chat-messages-container", "innerHTML", messages_html
     )
-    messages_swap_html = f'<div id="chat-messages-container" hx-swap-oob="innerHTML">{messages_html}</div>'
 
     full_response_html = (
         new_sidebar_item_html
@@ -725,14 +727,10 @@ def leave_channel(channel_id):
         )
         # Render and broadcast the new system message
         message_html = render_template("partials/message.html", message=leave_message)
-        broadcast_html = (
-            f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
-        )
+        broadcast_html = oob_to_selector("beforeend", "#message-list", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
-    remove_from_list_html = (
-        f'<div id="channel-item-{channel_id}" hx-swap-oob="delete"></div>'
-    )
+    remove_from_list_html = oob_by_id(f"channel-item-{int(channel_id)}", "delete")
 
     user_self = g.user
     conv_id_str_self = f"dm_{user_self.id}_{user_self.id}"

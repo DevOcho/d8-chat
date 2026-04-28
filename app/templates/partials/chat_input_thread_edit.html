@@ -116,6 +116,6 @@
 </div>
 <script>
     document.body.dispatchEvent(new CustomEvent('initializeEditor', {
-        detail: { idSuffix: '-thread-{{ message.parent_message.id }}' }
+        detail: { idSuffix: '-thread-' + {{ message.parent_message.id|tojson }} }
     }));
 </script>

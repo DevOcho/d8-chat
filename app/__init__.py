@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import bleach
 import emoji
 import markdown
-from flask import Flask, jsonify, render_template, request, url_for
+from flask import Flask, current_app, jsonify, render_template, request, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
@@ -36,6 +36,22 @@ limiter = Limiter(
     swallow_errors=True,  # fail open if storage is unavailable
     headers_enabled=True,
 )
+
+
+def external_url_for(endpoint, **values):
+    """Build an external URL for ``endpoint`` using a config-pinned base.
+
+    Prefers ``PUBLIC_BASE_URL`` (a hardcoded canonical origin like
+    ``https://chat.example.com``) so password-reset emails, OIDC redirect
+    URIs, and push-notification icons can't be poisoned by a forged Host
+    header. Falls back to ``url_for(..., _external=True)`` for local dev
+    where ``PUBLIC_BASE_URL`` is unset.
+    """
+    base = (current_app.config.get("PUBLIC_BASE_URL") or "").rstrip("/")
+    if base:
+        path = url_for(endpoint, **values)
+        return f"{base}{path}"
+    return url_for(endpoint, _external=True, **values)
 
 
 def login_username_key():
@@ -460,6 +476,19 @@ def register_template_filters(app):
             size /= power
             n += 1
         return f"{size:.2f} {power_labels[n]}B"
+
+    @app.template_filter("safe_url")
+    def safe_url_filter(url):
+        # Defense-in-depth for hrefs built from model fields: collapse anything
+        # that isn't an http(s) absolute URL or a same-origin path to "#" so a
+        # `javascript:` (or `data:`, etc.) URI can never reach a rendered link.
+        if not url:
+            return "#"
+        s = str(url).strip()
+        lower = s.lower()
+        if lower.startswith(("http://", "https://", "/")):
+            return s
+        return "#"
 
 
 def register_blueprints(app):

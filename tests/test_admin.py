@@ -60,7 +60,7 @@ def test_admin_create_user(admin_client):
         data={
             "username": "new_admin_user",
             "email": "new@admin.com",
-            "password": "securepassword",
+            "password": "securepassword99",
             "role": "admin",
             "display_name": "New Admin",
         },
@@ -106,7 +106,7 @@ def test_admin_create_duplicate_user(admin_client):
         data={
             "username": "testuser",  # Already exists from conftest
             "email": "test@example.com",
-            "password": "securepassword",
+            "password": "securepassword99",
             "role": "admin",
             "display_name": "Duplicate",
         },

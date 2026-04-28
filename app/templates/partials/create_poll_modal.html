@@ -54,7 +54,7 @@
   (function() {
     const container = document.getElementById('poll-options-container');
     const addButton = document.getElementById('add-poll-option-btn');
-    const existingOptions = {{ options | tojson | safe if options else '[]' }};
+    const existingOptions = {{ (options if options else []) | tojson }};
     const maxOptions = 10;
     let optionCount = 0;
 

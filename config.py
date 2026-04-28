@@ -73,6 +73,13 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
 
+    # Canonical base URL used when generating links that leave the request
+    # cycle (password reset emails, OIDC redirect_uri, push notifications). Set
+    # this in production; if unset we fall back to url_for(_external=True),
+    # which trusts the request Host header and is vulnerable to host-header
+    # injection. Should not include a trailing slash, e.g. "https://chat.example.com".
+    PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL")
+
     # Branding shown to mobile clients via /api/v1/app-config. Override per
     # deployment without a code change.
     BRAND_SERVER_NAME = os.environ.get("BRAND_SERVER_NAME", "DevOcho")

@@ -116,6 +116,6 @@
 {# This script triggers a NEW, dedicated initializer in chat.js #}
 <script>
     document.body.dispatchEvent(new CustomEvent('initializeEditor', {
-        detail: { idSuffix: '-thread-{{ parent_message.id }}' }
+        detail: { idSuffix: '-thread-' + {{ parent_message.id|tojson }} }
     }));
 </script>

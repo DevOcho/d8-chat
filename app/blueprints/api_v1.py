@@ -22,6 +22,7 @@ from werkzeug.utils import secure_filename
 from app import limiter, login_username_key
 from app.access import user_has_conversation_access
 from app.conversation_id import parse_conversation_id
+from app.htmx_oob import oob_to_selector
 from app.models import (
     Channel,
     ChannelMember,
@@ -755,7 +756,9 @@ def create_message(conv_id_str):
             Message=Message,
             is_in_thread_view=True,
         )
-        broadcast_html = f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
+        broadcast_html = oob_to_selector(
+            "beforeend", f"#thread-replies-list-{int(parent_id)}", new_reply_html
+        )
 
         parent_html = render_template(
             "partials/message.html",
@@ -793,9 +796,7 @@ def create_message(conv_id_str):
             attachments_map=attachments_map,
             Message=Message,
         )
-        broadcast_html = (
-            f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-        )
+        broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
 
         api_data = {"type": "new_message", "data": message_data}
 
@@ -1084,9 +1085,7 @@ def create_poll(conv_id_str):
         attachments_map=attachments_map,
         Message=Message,
     )
-    broadcast_html = (
-        f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-    )
+    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
 
     api_data = {"type": "new_message", "data": message_data}
     chat_manager.broadcast(
@@ -1466,9 +1465,7 @@ def internal_notify():
         attachments_map=attachments_map,
         Message=Message,
     )
-    broadcast_html = (
-        f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-    )
+    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
     api_data = {"type": "new_message", "data": message_data}
     chat_manager.broadcast(
         conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}

@@ -8,6 +8,7 @@ from PIL import Image
 from werkzeug.utils import secure_filename
 
 from app.chat_manager import chat_manager
+from app.htmx_oob import oob_by_id
 from app.models import UploadedFile, User
 from app.routes import AVATAR_SIZE, login_required
 from app.services import minio_service
@@ -137,7 +138,7 @@ def update_address():
     user.save()
     display_html = render_template("partials/address_display.html", user=user)
     header_html_content = render_template("partials/profile_header.html", user=user)
-    header_oob_swap = f'<div id="profile-header-card" hx-swap-oob="outerHTML">{header_html_content}</div>'
+    header_oob_swap = oob_by_id("profile-header-card", "outerHTML", header_html_content)
     return make_response(display_html + header_oob_swap)
 
 

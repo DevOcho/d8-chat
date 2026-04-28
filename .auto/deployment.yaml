@@ -20,6 +20,10 @@ spec:
         image: k3d-registry.local:12345/d8-chat:0.0.2
         imagePullPolicy: Always
         workingDir: /mnt/code/d8-chat
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
         ports:
         - containerPort: 5001
         resources:

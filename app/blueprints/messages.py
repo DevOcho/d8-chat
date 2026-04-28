@@ -13,8 +13,10 @@ from flask import (
     url_for,
 )
 
+from app import _sanitize_and_linkify
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
+from app.htmx_oob import oob_by_id
 from app.models import (
     Channel,
     Conversation,
@@ -38,7 +40,9 @@ messages_bp = Blueprint("messages", __name__)
 
 def to_html(text):
     """Converts markdown text to HTML."""
-    return markdown.markdown(text, extensions=["extra", "codehilite", "pymdownx.tilde"])
+    raw = markdown.markdown(text, extensions=["extra", "codehilite", "pymdownx.tilde"])
+    # bleach-sanitize before this string lands in a Jinja `| safe` block.
+    return _sanitize_and_linkify(raw)
 
 
 @messages_bp.route("/chat/utility/markdown-to-html", methods=["POST"])
@@ -162,7 +166,7 @@ def delete_message(message_id):
     except Exception:
         current_app.logger.exception(f"Error deleting message {message_id}")
         return "Error deleting message", 500
-    broadcast_html = f'<div id="message-{message_id}" hx-swap-oob="delete"></div>'
+    broadcast_html = oob_by_id(f"message-{int(message_id)}", "delete")
     api_data = {
         "type": "message_deleted",
         "data": {"message_id": message_id, "conversation_id_str": conv_id_str},
@@ -491,7 +495,9 @@ def toggle_reaction(message_id):
     reactions_html_content = render_template(
         "partials/reactions.html", message=message, grouped_reactions=grouped_reactions
     )
-    broadcast_html = f'<div id="reactions-container-{message.id}" hx-swap-oob="innerHTML">{reactions_html_content}</div>'
+    broadcast_html = oob_by_id(
+        f"reactions-container-{int(message.id)}", "innerHTML", reactions_html_content
+    )
     conv_id_str = message.conversation.conversation_id_str
     api_data = {
         "type": "reaction_updated",

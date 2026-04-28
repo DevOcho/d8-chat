@@ -34,5 +34,10 @@ EXPOSE 5001
 # This will be passed as arguments to the entrypoint script.
 #CMD ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "--access-logfile", "-", "--forwarded-allow-ips", "*", "run:app"]
 
+# Run as a non-root user to limit blast radius of a process compromise.
+RUN groupadd --system --gid 1000 app \
+    && useradd --system --uid 1000 --gid app --no-create-home app
+USER app
+
 # Use the Flask development server for local dev (supports auto-reload)
 CMD ["python", "run.py"]

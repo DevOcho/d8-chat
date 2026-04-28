@@ -30,6 +30,7 @@ from ..models import (
     db,
     utc_now,
 )
+from ..password_policy import validate_password
 
 admin_bp = Blueprint("admin", __name__, template_folder="../templates/admin")
 
@@ -184,6 +185,11 @@ def create_user():
         flash("Username, email, and password are required.", "danger")
         return render_template("admin/create_user_content.html")
 
+    pw_error = validate_password(password)
+    if pw_error:
+        flash(pw_error, "danger")
+        return render_template("admin/create_user_content.html")
+
     try:
         with db.atomic():
             # Create the User
@@ -247,6 +253,14 @@ def edit_user(user_id):
 
         new_password = request.form.get("password")
         if new_password:
+            pw_error = validate_password(new_password)
+            if pw_error:
+                flash(pw_error, "danger")
+                return render_template(
+                    "admin/edit_user_content.html",
+                    user=user,
+                    workspace_member=workspace_member,
+                )
             user.set_password(new_password)
 
         try:
