@@ -70,6 +70,11 @@ spec:
           value: "vFzRoVLOVydE2AfRUVtOzTWESqwwwJuUZTIjMb5OpuwM6U9zhVOnwpl4qmFY7qOJA69dVHv3gHJjSxD1VYUVoNs1nycYiQyav2mJZRaGN4058v5xmUzOohSl5qu1BMaN"
         - name: OIDC_ISSUER_URL
           value: "https://authentik.devocho.com/application/o/d8-chat/"
+        # Shared secret for POST /api/v1/internal/notify. Internal callers
+        # (helpdesk → #helpdesk channel) must send this value as X-Internal-Key.
+        # Mirrored on the new-d8 side as [helpdesk] chat_internal_key.
+        - name: INTERNAL_NOTIFY_KEY
+          value: "dev-helpdesk-notify-shared-secret"
         livenessProbe:
           httpGet:
             path: /

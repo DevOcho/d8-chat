@@ -1,4 +1,5 @@
 import datetime
+import hmac
 import os
 import uuid
 from functools import wraps
@@ -1382,6 +1383,100 @@ def update_avatar():
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+HELPDESK_BOT_USERNAME = "helpdesk-bot"
+
+
+@api_v1_bp.route("/internal/notify", methods=["POST"])
+@limiter.limit("120 per minute", key_func=get_remote_address)
+def internal_notify():
+    """Service-to-service hook that posts a message into a channel.
+
+    Auth: shared secret in the ``X-Internal-Key`` header, compared in
+    constant time against ``INTERNAL_NOTIFY_KEY`` from config. There is no
+    logged-in user; the message is authored by a dedicated ``helpdesk-bot``
+    User row (created by migration 0003 / ``init_db.py``).
+
+    Body:
+        ``{"channel_name": "<name>", "message": "<text>"}``
+
+    Behaviour mirrors the user-facing message-create path so the message
+    is persisted, mention/hashtag extraction runs, the message is
+    broadcast over the WebSocket Pub/Sub layer, and unread
+    badges/notifications fire for offline channel members.
+    """
+    from flask import render_template
+
+    from app.chat_manager import chat_manager
+    from app.services import chat_service
+
+    expected_key = current_app.config.get("INTERNAL_NOTIFY_KEY")
+    provided_key = request.headers.get("X-Internal-Key", "")
+    if not expected_key or not hmac.compare_digest(expected_key, provided_key):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True) or {}
+    channel_name = data.get("channel_name")
+    message_text = data.get("message")
+    if (
+        not isinstance(channel_name, str)
+        or not channel_name
+        or not isinstance(message_text, str)
+        or not message_text
+    ):
+        return jsonify({"error": "channel_name and message are required"}), 400
+
+    # Channel names are unique per workspace, not globally. For the
+    # current single-workspace deployment this picks the only match;
+    # if multiple workspaces ever exist we'd extend the payload with a
+    # workspace identifier rather than guess here.
+    channel = (
+        Channel.select()
+        .where(Channel.name == channel_name)
+        .order_by(Channel.id)
+        .first()
+    )
+    if channel is None:
+        return jsonify({"error": "Channel not found"}), 404
+
+    conv_id_str = f"channel_{channel.id}"
+    conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
+    if conv is None:
+        return jsonify({"error": "Channel conversation missing"}), 500
+
+    bot_user = User.get_or_none(User.username == HELPDESK_BOT_USERNAME)
+    if bot_user is None:
+        return jsonify({"error": "Helpdesk bot user not provisioned"}), 500
+
+    new_message = chat_service.handle_new_message(
+        sender=bot_user,
+        conversation=conv,
+        chat_text=message_text,
+    )
+
+    reactions_map = get_reactions_for_messages([new_message])
+    attachments_map = get_attachments_for_messages([new_message])
+    message_data = serialize_message(new_message, reactions_map, attachments_map)
+
+    new_message_html = render_template(
+        "partials/message.html",
+        message=new_message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
+    broadcast_html = (
+        f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
+    )
+    api_data = {"type": "new_message", "data": message_data}
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
+
+    chat_service.send_notifications_for_new_message(new_message, bot_user)
+
+    return jsonify({"ok": True}), 200
 
 
 @api_v1_bp.route("/users/me/presence", methods=["POST"])

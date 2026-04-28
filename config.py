@@ -52,6 +52,12 @@ class Config:
     # Valkey Config for message broker
     VALKEY_URL = os.environ.get("VALKEY_URL")
 
+    # Shared secret for the service-to-service /api/v1/internal/notify
+    # endpoint. The helpdesk service (and any other internal caller) sends
+    # this value in the X-Internal-Key header. If unset, the endpoint
+    # rejects every request with 401.
+    INTERNAL_NOTIFY_KEY = os.environ.get("INTERNAL_NOTIFY_KEY")
+
     # flask-sock passes these to simple_websocket.Server. Listing "d8_sec" as a
     # known subprotocol lets the API WebSocket route negotiate it back to the
     # client when the client offers it via the Sec-WebSocket-Protocol header.
@@ -103,3 +109,6 @@ class TestConfig(Config):
 
     # Test client uses HTTP, so a Secure-only cookie would never be sent back.
     SESSION_COOKIE_SECURE = False
+
+    # Fixed shared secret for the internal notify endpoint in tests.
+    INTERNAL_NOTIFY_KEY = "test-internal-notify-key"

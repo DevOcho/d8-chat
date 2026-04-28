@@ -99,6 +99,37 @@ def seed_initial_data():
         defaults={"type": "channel"},
     )
 
+    # Helpdesk channel + bot user used by POST /api/v1/internal/notify.
+    # Mirrored in migration 0003 for existing prod databases.
+    helpdesk_bot, _ = User.get_or_create(
+        username="helpdesk-bot",
+        defaults={
+            "email": "helpdesk-bot@d8chat.local",
+            "display_name": "Helpdesk Bot",
+            "is_active": False,
+        },
+    )
+    WorkspaceMember.get_or_create(
+        user=helpdesk_bot, workspace=workspace, defaults={"role": "member"}
+    )
+    helpdesk_channel, _ = Channel.get_or_create(
+        workspace=workspace,
+        name="helpdesk",
+        defaults={
+            "is_private": False,
+            "topic": "Helpdesk ticket activity.",
+            "description": (
+                "Automated notifications from the office helpdesk. "
+                "Admins manage who is in this channel."
+            ),
+        },
+    )
+    Conversation.get_or_create(
+        conversation_id_str=f"channel_{helpdesk_channel.id}",
+        defaults={"type": "channel"},
+    )
+    ChannelMember.get_or_create(user=helpdesk_bot, channel=helpdesk_channel)
+
     # Create the default admin user if they don't exist
     admin_user, created = User.get_or_create(
         username="admin",
