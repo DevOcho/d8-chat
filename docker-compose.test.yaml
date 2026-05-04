@@ -1,60 +1,98 @@
-# docker-compose.dev.yaml
-# For local development and quick testing.
+# docker-compose.test.yaml
+#
+# Hermetic stack for end-to-end testing. Differs from docker-compose.dev.yaml:
+#
+#   * No host volume mount on the app — the image is the source of truth, no
+#     hot-reload, no risk of half-applied local edits affecting the run.
+#   * Postgres runs with `tmpfs` for its data dir so each `up` starts on a
+#     clean schema. No risk of test data leaking between runs.
+#   * MinIO data is also tmpfs-backed.
+#   * `INITIAL_ADMIN_PASSWORD` is set so init_db.py creates a deterministic
+#     admin login the e2e tests can use without parsing stdout or
+#     instance/admin_credentials.txt.
+#   * Smalls migrations run as part of the entrypoint after init_db so the
+#     schema is up-to-date before tests start.
+#
+# Usage:
+#
+#   docker compose -f docker-compose.test.yaml up -d --build
+#   # wait for the app health endpoint to come up...
+#   E2E_BASE_URL=http://localhost:5001 \
+#   E2E_ADMIN_USERNAME=admin \
+#   E2E_ADMIN_PASSWORD=test-admin-password-please-change \
+#       bin/python -m pytest -m e2e tests/e2e/
+#   docker compose -f docker-compose.test.yaml down -v
+
 services:
   app:
     build: .
-    restart: always
+    restart: "no"
     ports:
-      - "5001:5001" # Expose the app directly to the host
-    env_file:
-      - .env
+      - "5001:5001"
     environment:
-      - POSTGRES_HOST=db
-    volumes:
-      # Mounts local code for hot-reloading during development
-      - .:/app
+      # Required by config.py — at least 32 chars per the validator.
+      SECRET_KEY: test-only-secret-key-do-not-use-in-prod-32chars
+      FLASK_ENV: testing
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+      POSTGRES_HOST: db
+      DATABASE_URI: postgresql://test_user:test_password@db:5432/test_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: test_minio_user
+      MINIO_ROOT_PASSWORD: test_minio_password
+      MINIO_BUCKET_NAME: d8chat-test
+      MINIO_PUBLIC_URL: http://localhost:9000
+      VALKEY_URL: redis://valkey:6379/0
+      # Deterministic admin password for the e2e tests.
+      INITIAL_ADMIN_PASSWORD: test-admin-password-please-change
+      # Disable the cookie SECURE flag since we're serving over plain HTTP.
+      SESSION_COOKIE_SECURE: "False"
     depends_on:
       db:
         condition: service_healthy
       minio:
         condition: service_healthy
-    entrypoint: ["/app/entrypoint.sh"]
-    command: ["gunicorn", "--worker-class", "gevent", "--workers", "4", "--bind", "0.0.0.0:5001", "run:app"]
+      valkey:
+        condition: service_started
+    # Re-init the DB and run migrations on every container start.
+    # The Postgres tmpfs makes "fresh DB" the default state.
+    command: >
+      sh -c "python init_db.py --reset-db &&
+             ./smalls.py migrate &&
+             gunicorn --worker-class gevent --workers 2 --bind 0.0.0.0:5001 run:app"
 
   db:
     image: postgres:15
-    restart: always
+    restart: "no"
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-    ports:
-      - "5432:5432" # Expose DB port for local access if needed
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_DB: test_db
+    tmpfs:
+      - /var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U test_user -d test_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000" # API Port
-      - "9001:9001" # Web Console Port
     environment:
-      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
-      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
-    volumes:
-      - minio_data:/data
+      MINIO_ROOT_USER: test_minio_user
+      MINIO_ROOT_PASSWORD: test_minio_password
+    ports:
+      - "9000:9000"
+    tmpfs:
+      - /data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-volumes:
-  postgres_data: {}
-  minio_data: {}
+  valkey:
+    image: valkey/valkey:7
+    restart: "no"

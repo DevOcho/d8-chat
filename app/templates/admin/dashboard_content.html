@@ -105,8 +105,8 @@
         </div>
     </div>
 </div>
-<!-- Chart.js from CDN -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<!-- Chart.js (vendored locally — see static/js/local/chart.umd.min.js) -->
+<script src="{{ url_for('static', filename='js/local/chart.umd.min.js') }}"></script>
 <script>
     // No DOMContentLoaded wrapper needed, this will run when the partial is loaded.
     (function() {

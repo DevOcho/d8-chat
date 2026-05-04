@@ -24,6 +24,7 @@ pytest
 pytest-cov
 pytest-flask
 pytest-mock
+pytest-playwright
 python-dotenv
 python-magic
 redis

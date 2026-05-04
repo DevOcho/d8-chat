@@ -278,22 +278,36 @@ def _build_csp(minio_origin):
     """
     Build the Content-Security-Policy for HTML responses.
 
-    `'unsafe-inline'` is unfortunately required for both scripts and styles
-    because the templates use a handful of inline `<script>` blocks (theme
-    handler, CSRF/HTMX wiring, login form helper) and ~30 elements with inline
-    `style="..."`, plus `onclick`/`onsubmit`/`onchange` attributes. Tightening
-    this further means refactoring those out and switching to nonces or hashes;
-    tracked as a follow-up enhancement.
+    Two deliberate looseness points are documented inline below — both are
+    known costs of legacy template choices and could be tightened by
+    refactoring.
     """
     img_src = "'self' data: blob:"
     if minio_origin:
         img_src += f" {minio_origin}"
+
+    # `'unsafe-inline'` for scripts and styles: ~30 elements with inline
+    # `style="..."`, plus several inline `<script>` blocks and a few
+    # `onclick`/`onsubmit`/`onchange` attributes in admin templates. Drop by
+    # refactoring to nonces/hashes — tracked as a follow-up.
+    #
+    # `'unsafe-eval'` for scripts: htmx evaluates `hx-on:`, `hx-on::*`, and
+    # `hx-vals` JS expressions via `new Function()`. Several templates use
+    # these. Drop by rewriting those handlers into addEventListener calls.
+    #
+    # No third-party origins are allowed — emoji-picker-element, chart.js,
+    # and their data bundles are all vendored under `static/js/local/`.
+    script_src = "'self' 'unsafe-inline' 'unsafe-eval'"
+
     directives = [
         "default-src 'self'",
-        "script-src 'self' 'unsafe-inline'",
+        f"script-src {script_src}",
         "style-src 'self' 'unsafe-inline'",
         f"img-src {img_src}",
         "font-src 'self' data:",
+        # `data:` for the base64-encoded silent WAV used to prime audio
+        # playback for notification sounds (chat.js:1100ish).
+        "media-src 'self' data:",
         "connect-src 'self'",
         "frame-ancestors 'none'",
         "base-uri 'self'",

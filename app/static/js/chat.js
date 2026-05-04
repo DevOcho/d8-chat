@@ -310,7 +310,13 @@ const createAttachmentManager = function(editorState) {
         const formData = new FormData();
         formData.append('file', file);
 
-        fetch('/files/upload', { method: 'POST', body: formData })
+        // CSRF token — this fetch bypasses HTMX so the global
+        // `htmx:configRequest` hook doesn't run. Read directly from the meta
+        // tag we set in base.html and attach manually.
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+        const headers = csrfToken ? { 'X-CSRFToken': csrfToken } : {};
+
+        fetch('/files/upload', { method: 'POST', body: formData, headers })
             .then(response => {
                 const spinner = thumbnailDiv.querySelector('.spinner-border');
                 if (spinner) spinner.remove();
@@ -971,6 +977,42 @@ const createEditor = function(idSuffix = '') {
 // --- Event Listeners to initialize editors ---
 const emojiPickerReady = customElements.whenDefined('emoji-picker');
 
+// Defensive: every <emoji-picker> in this app must use the locally-vendored
+// emoji data bundle, never the library's hardcoded jsdelivr default. The
+// templates set `data-source="/js/local/emoji.json"` explicitly, but if any
+// future template forgets it (or a popover injects a picker dynamically),
+// this fallback ensures we still don't reach out to a CDN. The CSP would
+// block the CDN fetch anyway, but the picker would silently fail to load
+// any emojis — set the attribute *before* the element connects so its
+// initial fetch points at our local bundle.
+const LOCAL_EMOJI_DATA_SOURCE = '/js/local/emoji.json';
+
+function _ensureLocalEmojiDataSource(node) {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
+    if (node.tagName === 'EMOJI-PICKER' && !node.hasAttribute('data-source')) {
+        node.setAttribute('data-source', LOCAL_EMOJI_DATA_SOURCE);
+    }
+    // Also fix up any descendants — covers HTMX swaps that bring in a
+    // template fragment containing a picker.
+    if (node.querySelectorAll) {
+        node.querySelectorAll('emoji-picker:not([data-source])').forEach((el) => {
+            el.setAttribute('data-source', LOCAL_EMOJI_DATA_SOURCE);
+        });
+    }
+}
+
+// Patch any pickers already in the DOM at script load time.
+_ensureLocalEmojiDataSource(document.body);
+
+// Watch for new pickers added by HTMX swaps, popover injections, etc.
+new MutationObserver((mutations) => {
+    for (const m of mutations) {
+        for (const added of m.addedNodes) {
+            _ensureLocalEmojiDataSource(added);
+        }
+    }
+}).observe(document.body, { childList: true, subtree: true });
+
 document.body.addEventListener('initializeEditor', (event) => {
     emojiPickerReady.then(() => {
         const { idSuffix } = event.detail;
@@ -1305,7 +1347,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (popoverTriggerEl.dataset.popoverInitialized) return;
             const messageId = popoverTriggerEl.dataset.messageId;
             if (!messageId) return;
-            const popoverOptions = { html: true, sanitize: false, content: `<emoji-picker class="light"></emoji-picker>`, placement: 'top', customClass: 'emoji-popover' };
+            const popoverOptions = { html: true, sanitize: false, content: `<emoji-picker class="light" data-source="/js/local/emoji.json"></emoji-picker>`, placement: 'top', customClass: 'emoji-popover' };
             if (popoverTriggerEl.closest('#right-panel-offcanvas')) {
                 popoverOptions.container = '#right-panel-offcanvas';
             }
@@ -1712,5 +1754,5 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeReactionPopovers(document.body);
     updateReactionHighlights(document.body);
     initializeTooltips(document.body);
-    formatLocalTimes(target);
+    formatLocalTimes(document.body);
 });

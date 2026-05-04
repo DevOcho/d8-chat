@@ -961,3 +961,115 @@ def test_api_update_presence(client):
 
     updated_user = User.get_by_id(1)
     assert updated_user.presence_status == "busy"
+
+
+def _seed_helpdesk(workspace=None):
+    """Create the helpdesk-bot user and #helpdesk channel for internal-notify tests."""
+    from app.models import (
+        Channel,
+        ChannelMember,
+        Conversation,
+        User,
+        Workspace,
+        WorkspaceMember,
+    )
+
+    if workspace is None:
+        workspace = Workspace.get(Workspace.name == "DevOcho")
+    bot, _ = User.get_or_create(
+        username="helpdesk-bot",
+        defaults={
+            "email": "helpdesk-bot@d8chat.local",
+            "display_name": "Helpdesk Bot",
+            "is_active": False,
+        },
+    )
+    WorkspaceMember.get_or_create(user=bot, workspace=workspace)
+    channel, _ = Channel.get_or_create(workspace=workspace, name="helpdesk")
+    Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel.id}",
+        defaults={"type": "channel"},
+    )
+    ChannelMember.get_or_create(user=bot, channel=channel)
+    return bot, channel
+
+
+def test_internal_notify_success(client):
+    """
+    GIVEN the correct shared secret and a known channel
+    WHEN POSTing to /api/v1/internal/notify
+    THEN it should return 200, persist the message, and author it as helpdesk-bot
+    """
+    from app.models import Conversation, Message
+
+    bot, channel = _seed_helpdesk()
+
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={
+            "channel_name": "helpdesk",
+            "message": "[NEW] Ticket #42 — ACME Corp: 'Login button broken'",
+        },
+        headers={"X-Internal-Key": "test-internal-notify-key"},
+    )
+
+    assert res.status_code == 200
+    assert res.get_json() == {"ok": True}
+
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+    msg = Message.get(Message.conversation == conv)
+    assert msg.user_id == bot.id
+    assert "Ticket #42" in msg.content
+
+
+def test_internal_notify_bad_key(client):
+    """A wrong/missing X-Internal-Key returns 401 and creates no message."""
+    from app.models import Conversation, Message
+
+    _bot, channel = _seed_helpdesk()
+
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={"channel_name": "helpdesk", "message": "should not post"},
+        headers={"X-Internal-Key": "wrong-key"},
+    )
+    assert res.status_code == 401
+
+    res_missing = client.post(
+        "/api/v1/internal/notify",
+        json={"channel_name": "helpdesk", "message": "should not post"},
+    )
+    assert res_missing.status_code == 401
+
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+    assert Message.select().where(Message.conversation == conv).count() == 0
+
+
+def test_internal_notify_unknown_channel(client):
+    """An unknown channel_name returns 404."""
+    _seed_helpdesk()
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={"channel_name": "does-not-exist", "message": "hi"},
+        headers={"X-Internal-Key": "test-internal-notify-key"},
+    )
+    assert res.status_code == 404
+
+
+def test_internal_notify_bad_payload(client):
+    """Missing channel_name or message returns 400."""
+    _seed_helpdesk()
+
+    res_no_msg = client.post(
+        "/api/v1/internal/notify",
+        json={"channel_name": "helpdesk"},
+        headers={"X-Internal-Key": "test-internal-notify-key"},
+    )
+    assert res_no_msg.status_code == 400
+
+    res_no_channel = client.post(
+        "/api/v1/internal/notify",
+        json={"message": "hi"},
+        headers={"X-Internal-Key": "test-internal-notify-key"},
+    )
+    assert res_no_channel.status_code == 400
