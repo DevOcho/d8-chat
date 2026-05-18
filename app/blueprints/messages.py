@@ -25,6 +25,7 @@ from app.models import (
     Message,
     MessageHashtag,
     Reaction,
+    User,
     UserConversationStatus,
     db,
 )
@@ -34,7 +35,7 @@ from app.routes import (
     get_reactions_for_messages,
     login_required,
 )
-from app.services import minio_service, chat_service
+from app.services import chat_service, minio_service
 
 messages_bp = Blueprint("messages", __name__)
 
@@ -513,6 +514,7 @@ def toggle_reaction(message_id):
     )
     return broadcast_html, 200
 
+
 @messages_bp.route("/chat/message/<int:message_id>/forward", methods=list(("GET",)))
 @login_required
 def get_forward_message_modal(message_id):
@@ -543,13 +545,15 @@ def get_forward_message_modal(message_id):
         partner_id = next((uid for uid in user_ids if uid != g.user.id), g.user.id)
         partner = User.get_or_none(id=partner_id)
         if partner:
-            dm_list.append({"conv_id_str": conv.conversation_id_str, "partner": partner})
+            dm_list.append(
+                {"conv_id_str": conv.conversation_id_str, "partner": partner}
+            )
 
     return render_template(
         "partials/forward_message_modal.html",
         message=message,
         channels=user_channels,
-        dms=dm_list
+        dms=dm_list,
     )
 
 
@@ -574,9 +578,14 @@ def forward_message(message_id):
     # Verify access to the target conversation
     if target_conv.type == "channel":
         channel_id = int(target_conv_id_str.split("_")[1])
-        is_member = ChannelMember.select().where(
-            (ChannelMember.user == g.user) & (ChannelMember.channel_id == channel_id)
-        ).exists()
+        is_member = (
+            ChannelMember.select()
+            .where(
+                (ChannelMember.user == g.user)
+                & (ChannelMember.channel_id == channel_id)
+            )
+            .exists()
+        )
         if not is_member:
             return "You are not a member of the target channel", 403
     else:
@@ -593,7 +602,7 @@ def forward_message(message_id):
         sender=g.user,
         conversation=target_conv,
         chat_text=optional_note,
-        quoted_message_id=original_message.id
+        quoted_message_id=original_message.id,
     )
 
     # Broadcast to the destination channel so online users see it immediately
@@ -606,9 +615,19 @@ def forward_message(message_id):
         attachments_map=attachments_map,
         Message=Message,
     )
-    
-    broadcast_html = f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
-    chat_manager.broadcast(target_conv_id_str, broadcast_html, sender_ws=None)
+
+    from app.blueprints.api_v1 import serialize_message
+    from app.htmx_oob import oob_to_selector
+
+    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
+    api_data = {
+        "type": "new_message",
+        "data": serialize_message(new_message, reactions_map, attachments_map),
+    }
+    chat_manager.broadcast(
+        target_conv_id_str,
+        {"_raw_html": broadcast_html, "api_data": api_data},
+    )
     chat_service.send_notifications_for_new_message(new_message, g.user)
 
     # Signal HTMX to close the modal
