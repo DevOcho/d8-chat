@@ -24,6 +24,12 @@ RUN chmod +x /app/entrypoint.sh
 # Expose the port the app runs on
 EXPOSE 5001
 
+# Run as a non-root user to limit blast radius of a process compromise.
+RUN groupadd --system --gid 1000 app \
+    && useradd --system --uid 1000 --gid app --no-create-home app \
+    && chown -R app:app /app
+USER app
+
 # Define the entrypoint script
 ENTRYPOINT ["/app/entrypoint.sh"]
 

@@ -400,3 +400,35 @@ class AuditLog(BaseModel):
         # Index on (actor, created_at) for "what did this admin do recently"
         # lookups, and on action for "who triggered X" lookups.
         indexes = ((("actor", "created_at"), False),)
+
+
+class DeviceToken(BaseModel):
+    """A mobile device's push notification token.
+
+    One row per (device, FCM token). Token is globally unique because a single
+    device only ever holds one FCM token at a time — if the same token shows
+    up under a new user (shared/reprovisioned hardware), the registration
+    endpoint reassigns the existing row rather than creating a duplicate.
+
+    ``platform`` is informational ("ios" / "android"); FCM is the transport
+    for both, so we don't branch on it for delivery, but it's useful for
+    metrics and would let us switch a platform to a direct APNs path later
+    without losing tokens.
+
+    ``last_used_at`` is bumped on each push attempt so we can prune tokens
+    that have been dark for a long time without waiting for FCM to mark them
+    UNREGISTERED.
+    """
+
+    id = PrimaryKeyField()
+    user = ForeignKeyField(User, backref="device_tokens", on_delete="CASCADE")
+    platform = CharField(max_length=16)
+    token = TextField(unique=True)
+    last_used_at = DateTimeField(null=True)
+
+    class Meta:
+        """Peewee Meta class."""
+
+        # Lookups are almost always "all tokens for this user" when dispatching
+        # a push, so index that explicitly.
+        indexes = ((("user",), False),)

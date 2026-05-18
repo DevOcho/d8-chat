@@ -22,8 +22,13 @@ spec:
         workingDir: /mnt/code/d8-chat
         securityContext:
           allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
           capabilities:
             drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
         ports:
         - containerPort: 5001
         resources:
@@ -79,6 +84,14 @@ spec:
         # Mirrored on the new-d8 side as [helpdesk] chat_internal_key.
         - name: INTERNAL_NOTIFY_KEY
           value: "dev-helpdesk-notify-shared-secret"
+        # Path inside the pod where the Firebase service-account JSON is
+        # mounted (see the firebase-credentials Secret volume below). When
+        # the Secret is absent the file simply isn't there and
+        # push_service.init_app() logs "push notifications disabled" — the
+        # rest of the app still runs. See CLAUDE.md for the one-time
+        # `kubectl create secret` command that populates it in dev.
+        - name: FIREBASE_CREDENTIALS_PATH
+          value: "/secrets/firebase.json"
         livenessProbe:
           httpGet:
             path: /
@@ -88,10 +101,21 @@ spec:
         volumeMounts:
           - name: code-pvc
             mountPath: /mnt/code
+          - name: firebase-credentials
+            mountPath: /secrets
+            readOnly: true
       volumes:
         - name: code-pvc
           persistentVolumeClaim:
             claimName: code
+        # Same Secret name in dev and prod — only the population mechanism
+        # differs (manual `kubectl create secret` locally, secret-management
+        # tooling in prod). optional: true so the pod still schedules when
+        # the Secret hasn't been created yet; push just stays disabled.
+        - name: firebase-credentials
+          secret:
+            secretName: firebase-credentials
+            optional: true
 ---
 apiVersion: v1
 kind: Service

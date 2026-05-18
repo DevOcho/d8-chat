@@ -26,17 +26,34 @@ def test_profile_access(logged_in_client):
 
 def test_logout(logged_in_client):
     """
-    WHEN the '/logout' route is requested by a logged-in user
+    WHEN '/logout' is POSTed by a logged-in user
     THEN check that they are logged out and redirected.
     """
-    # Hit the logout endpoint
-    response = logged_in_client.get("/logout", follow_redirects=True)
+    response = logged_in_client.post("/logout", follow_redirects=True)
     assert response.status_code == 200  # Should land on the index page
 
     # Now verify that a protected route requires login again
     response = logged_in_client.get("/chat", follow_redirects=False)
     assert response.status_code == 302
     assert "/" in response.headers["Location"]
+
+
+def test_logout_rejects_get(logged_in_client):
+    """
+    GET requests to /logout must not log the user out. Defends against
+    drive-by ``<img src="/logout">`` attacks.
+
+    Status code is 404 here (not 405) because ``static_url_path=""``
+    makes Flask's static handler match ``/<path>`` at root, so the GET
+    falls through to it rather than to our POST-only logout view. Either
+    way, the side effect we care about — the session — must be intact.
+    """
+    response = logged_in_client.get("/logout")
+    assert response.status_code in (404, 405)
+
+    # Session must still be active — /chat shouldn't redirect to login.
+    response = logged_in_client.get("/chat", follow_redirects=False)
+    assert response.status_code != 302
 
 
 def test_login_success(client):

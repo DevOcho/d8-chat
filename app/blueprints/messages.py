@@ -467,7 +467,7 @@ def jump_to_message(message_id):
                 is_online=other_user.id in chat_manager.online_users,
             )
 
-    header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
+    header_html = oob_by_id("chat-header-container", "true", header_html_content)
 
     full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
     response = make_response(full_response)

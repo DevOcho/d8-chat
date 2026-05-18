@@ -80,6 +80,12 @@ class Config:
     # injection. Should not include a trailing slash, e.g. "https://chat.example.com".
     PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL")
 
+    # Path to a Firebase service-account JSON file. When set, the push
+    # service initializes firebase-admin and dispatches FCM notifications to
+    # offline users' devices. When unset, push is disabled — self-hosters
+    # who don't bring their own Firebase project still get a working chat.
+    FIREBASE_CREDENTIALS_PATH = os.environ.get("FIREBASE_CREDENTIALS_PATH")
+
     # Branding shown to mobile clients via /api/v1/app-config. Override per
     # deployment without a code change.
     BRAND_SERVER_NAME = os.environ.get("BRAND_SERVER_NAME", "DevOcho")

@@ -226,3 +226,10 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+
+# Firebase / Google Cloud service account credentials. The JSON contains
+# a private key — never commit. Pattern matches the Firebase console's
+# auto-generated naming: <project>-firebase-adminsdk-<id>.json
+*-firebase-adminsdk-*.json
+*service-account*.json
+secrets/

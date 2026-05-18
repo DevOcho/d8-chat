@@ -452,6 +452,70 @@ Response (200 OK):
 }
 ```
 
+### Register a device for push notifications
+`POST /api/v1/users/me/devices`
+
+Call after login and whenever the OS rotates the FCM token. The endpoint upserts
+on the token string: re-registering the same token under the same user is a
+refresh, and re-registering it under a new user (shared/reprovisioned device)
+reassigns the existing row. Rate-limited to 30 requests/minute per user.
+
+Request Body:
+```json
+{
+  "platform": "android",
+  "token": "<fcm registration token>"
+}
+```
+
+`platform` must be `"android"` or `"ios"`. `token` is the FCM registration
+token (capped at 4096 chars; real tokens are far shorter).
+
+Response: `204 No Content` on success. `400` on missing/invalid fields,
+`401` without a valid Bearer token, `429` if rate-limited.
+
+iOS pushes ride on the FCM APNs bridge — your client still registers an FCM
+token, not an APNs device token. The backend doesn't need a code change to
+light up iOS; the operator just uploads the project's `.p8` APNs key in
+Firebase project settings.
+
+### Deregister a device
+`DELETE /api/v1/users/me/devices`
+
+Call on logout (and any time the app wants to permanently stop pushes to
+this device). Idempotent — returns 204 whether or not the token existed.
+Only deletes tokens that belong to the calling user.
+
+Request Body:
+```json
+{
+  "token": "<fcm registration token>"
+}
+```
+
+Response: `204 No Content`. `400` on missing `token`.
+
+### Push notification payload
+
+When a push lands on the device, FCM delivers the notification block plus
+this `data` payload (all values are stringified by FCM in transit):
+
+```json
+{
+  "conversation_id_str": "dm_1_42",   // or "channel_5"
+  "message_id": "12345",
+  "parent_message_id": "12200"        // only present for thread replies
+}
+```
+
+Use these to deep-link from the notification tap straight to the conversation
+(or to the thread modal). Pushes fire for:
+ - DMs to the user
+ - Direct `@username` mentions of the user
+ - Thread replies on threads the user has participated in (or started)
+
+`@channel` / `@here` do **not** trigger a push in v1 — too noisy on mobile.
+
 ---
 
 ## 4. Client-to-Server WS Events (Sending)

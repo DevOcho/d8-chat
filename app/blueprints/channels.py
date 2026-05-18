@@ -114,7 +114,7 @@ def get_channel_chat(channel_id):
         members_count=members_count,
         current_user_membership=current_user_membership,
     )
-    header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
+    header_html = oob_by_id("chat-header-container", "true", header_html_content)
 
     messages_html = render_template(
         "partials/channel_messages.html",
@@ -139,7 +139,9 @@ def get_channel_chat(channel_id):
     # Also render the default chat input to ensure it's present.
     chat_input_html = render_template("partials/chat_input_default.html")
     # Wrap it in a container with the correct ID for the OOB swap.
-    chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
+    chat_input_oob_html = oob_by_id(
+        "chat-input-container", "outerHTML", chat_input_html
+    )
 
     # Check for other unreads and add the result to the response
     read_state_oob_html = check_and_get_read_state_oob(g.user, conversation)
@@ -761,7 +763,9 @@ def leave_channel(channel_id):
         attachments_map=attachments_map,
         Message=Message,
     )
-    messages_swap_html = f'<div id="chat-messages-container" hx-swap-oob="innerHTML">{dm_messages_html}</div>'
+    messages_swap_html = oob_by_id(
+        "chat-messages-container", "innerHTML", dm_messages_html
+    )
 
     full_response_html = remove_from_list_html + dm_header_html + messages_swap_html
     response = make_response(full_response_html)
@@ -977,9 +981,7 @@ def join_channel(channel_id):
 
         # Render and broadcast the new system message
         message_html = render_template("partials/message.html", message=join_message)
-        broadcast_html = (
-            f'<div hx-swap-oob="beforeend:#message-list">{message_html}</div>'
-        )
+        broadcast_html = oob_to_selector("beforeend", "#message-list", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     new_sidebar_item_html = render_template(

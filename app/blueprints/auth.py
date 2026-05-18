@@ -73,9 +73,15 @@ def authorize():
     return handle_auth_callback()
 
 
-@auth_bp.route("/logout")
+@auth_bp.route("/logout", methods=["POST"])
 def logout():
-    """Logs the user out by clearing the session."""
+    """Logs the user out by clearing the session.
+
+    POST-only so a third-party site can't force a logout via
+    ``<img src="/logout">`` or a drive-by GET. The web UI's logout
+    button posts a CSRF-protected form; the mobile clients use a
+    bearer-token API that doesn't depend on this cookie session.
+    """
     logout_user()
     session.clear()
     return redirect(url_for("auth.index"))

@@ -16,6 +16,7 @@ from app.models import (
     Channel,
     ChannelMember,
     Conversation,
+    DeviceToken,
     Hashtag,
     Mention,
     Message,
@@ -98,6 +99,7 @@ def test_db(app):
             PollOption,
             Vote,
             AuditLog,
+            DeviceToken,
         ]
 
         db.create_tables(tables)

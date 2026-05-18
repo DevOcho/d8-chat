@@ -5,6 +5,7 @@ from flask import Blueprint, g, make_response, render_template, request, url_for
 
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
+from app.htmx_oob import oob_by_id
 from app.models import Conversation, Message, User, UserConversationStatus, utc_now
 from app.routes import (
     PAGE_SIZE,
@@ -160,7 +161,7 @@ def get_dm_chat(other_user_id):
     header_html_content = render_template(
         "partials/dm_header.html", other_user=other_user
     )
-    header_html = f'<div id="chat-header-container" hx-swap-oob="true">{header_html_content}</div>'
+    header_html = oob_by_id("chat-header-container", "true", header_html_content)
 
     messages_html = render_template(
         "partials/dm_messages.html",
@@ -215,7 +216,9 @@ def get_dm_chat(other_user_id):
         chat_manager.send_to_user(other_user.id, payload)
 
     chat_input_html = render_template("partials/chat_input_default.html")
-    chat_input_oob_html = f'<div id="chat-input-container" hx-swap-oob="outerHTML">{chat_input_html}</div>'
+    chat_input_oob_html = oob_by_id(
+        "chat-input-container", "outerHTML", chat_input_html
+    )
 
     read_state_oob_html = check_and_get_read_state_oob(g.user, conversation)
 

@@ -24,7 +24,7 @@ from config import Config
 
 from .chat_manager import chat_manager
 from .models import Channel, User, db, initialize_db, utc_now
-from .services import minio_service
+from .services import minio_service, push_service
 from .sso import init_sso
 
 sock = Sock()
@@ -288,6 +288,37 @@ def _validate_config(app):
         app.logger.warning(
             "VALKEY_URL is not set; rate limiting and pub/sub will degrade to in-process."
         )
+    else:
+        _check_valkey_health(app)
+
+
+def _check_valkey_health(app):
+    """Ping the configured Valkey/Redis at startup so operators see degraded
+    mode loudly.
+
+    Flask-Limiter is initialized with ``swallow_errors=True`` (so rate-limit
+    backend outages don't take down the app), and ``ChatManager``'s pub/sub
+    thread re-connects on its own — both fail open *silently*. Without this
+    explicit ping, a misconfigured ``VALKEY_URL`` only surfaces when users
+    notice rate limits don't apply, or that real-time messages stop
+    broadcasting between gunicorn workers. The warning lands in the same
+    logs as everything else so monitoring/Sentry can alert on it.
+    """
+    # pylint: disable=import-outside-toplevel
+    import redis
+
+    url = app.config.get("VALKEY_URL")
+    try:
+        client = redis.from_url(url, socket_connect_timeout=2, socket_timeout=2)
+        client.ping()
+    except Exception:
+        app.logger.warning(
+            "Valkey/Redis ping at %s failed at startup. Rate limits and "
+            "cross-worker WebSocket broadcasts will silently degrade until "
+            "the backend is reachable.",
+            url,
+            exc_info=True,
+        )
 
 
 def _build_csp(minio_origin):
@@ -550,6 +581,77 @@ def _init_sentry():
     )
 
 
+def _ensure_combined_ca_bundle(app):
+    """Merge the project's local CA into the public CA bundle.
+
+    The dev/prod pods set ``REQUESTS_CA_BUNDLE=./root_ca.crt`` so HTTPS
+    calls to internal mkcert-signed services (minio.local, etc.) verify
+    cleanly. But that env var *replaces* the system CA bundle rather than
+    adding to it — so HTTPS to public services (FCM via
+    ``oauth2.googleapis.com``, Sentry, OIDC, anything else on the public
+    internet) breaks with ``CERTIFICATE_VERIFY_FAILED``.
+
+    Fix: at startup, if ``REQUESTS_CA_BUNDLE`` points at a real file,
+    concatenate it onto ``certifi``'s public bundle and re-point the env
+    var at the combined file. firebase-admin and any other ``requests``-
+    based client will now have both the local mkcert root *and* every
+    public CA. No Dockerfile/deployment changes required.
+
+    No-op when ``REQUESTS_CA_BUNDLE`` is unset, missing, or already points
+    at our combined output.
+    """
+    local_path = os.environ.get("REQUESTS_CA_BUNDLE")
+    if not local_path:
+        return
+    if not os.path.exists(local_path):
+        app.logger.warning(
+            "REQUESTS_CA_BUNDLE=%s does not exist; leaving as-is.", local_path
+        )
+        return
+
+    combined_path = "/tmp/d8chat_combined_ca.crt"  # nosec B108
+    if local_path == combined_path:
+        return  # already merged in a previous create_app() call (test reuse)
+
+    try:
+        import certifi
+    except ImportError:
+        app.logger.warning(
+            "certifi not installed; cannot merge public CAs with %s.", local_path
+        )
+        return
+
+    try:
+        with open(certifi.where(), "rb") as fh:
+            public_bytes = fh.read()
+        with open(local_path, "rb") as fh:
+            local_bytes = fh.read()
+        with open(combined_path, "wb") as fh:
+            fh.write(public_bytes)
+            if not public_bytes.endswith(b"\n"):
+                fh.write(b"\n")
+            fh.write(local_bytes)
+    except OSError:
+        app.logger.exception(
+            "Failed to build combined CA bundle from %s + certifi; HTTPS calls "
+            "to public services (FCM, Sentry, OIDC) may fail.",
+            local_path,
+        )
+        return
+
+    os.environ["REQUESTS_CA_BUNDLE"] = combined_path
+    # ``ssl`` reads the bundle path lazily, but some libraries (incl.
+    # google-auth's HTTP client) cache the value at import time. Setting
+    # both env vars is belt-and-suspenders so requests + urllib3 +
+    # httpx-based clients all see the merged file.
+    os.environ["SSL_CERT_FILE"] = combined_path
+    app.logger.warning(
+        "Merged %s into public CA bundle at %s for HTTPS verification.",
+        local_path,
+        combined_path,
+    )
+
+
 def create_app(config_class=Config, start_listener=True):
     """
     Creates and configures the Flask application.
@@ -586,7 +688,10 @@ def create_app(config_class=Config, start_listener=True):
         if not app.testing and not db.is_closed():
             db.close()
 
+    _ensure_combined_ca_bundle(app)
+
     minio_service.init_app(app)
+    push_service.init_app(app)
     init_sso(app)
     login_manager.init_app(app)
     sock.init_app(app)

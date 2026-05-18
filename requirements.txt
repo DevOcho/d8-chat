@@ -5,6 +5,7 @@ boto3
 click
 emoji
 Faker
+firebase-admin
 Flask
 Flask-Limiter==3.13
 flask-login

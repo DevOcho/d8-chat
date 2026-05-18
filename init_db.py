@@ -12,6 +12,7 @@ from app.models import (
     Channel,
     ChannelMember,
     Conversation,
+    DeviceToken,
     Hashtag,
     Mention,
     Message,
@@ -48,6 +49,7 @@ ALL_MODELS = [
     PollOption,
     Vote,
     AuditLog,
+    DeviceToken,
 ]
 
 

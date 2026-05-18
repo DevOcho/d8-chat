@@ -1,4 +1,4 @@
-{% set channel = channel_map.get(message.conversation.conversation_id_str.split('_')[1]|int) if message.conversation.type == 'channel' else None %}
+{% set channel = thread_channel_map.get(message.id) %}
 <div class="d-flex p-3 border-bottom text-decoration-none text-body"
      style="cursor: pointer"
      hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"

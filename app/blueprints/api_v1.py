@@ -27,6 +27,7 @@ from app.models import (
     Channel,
     ChannelMember,
     Conversation,
+    DeviceToken,
     Mention,
     Message,
     MessageAttachment,
@@ -1474,6 +1475,80 @@ def internal_notify():
     chat_service.send_notifications_for_new_message(new_message, bot_user)
 
     return jsonify({"ok": True}), 200
+
+
+_VALID_DEVICE_PLATFORMS = frozenset({"ios", "android"})
+_MAX_DEVICE_TOKEN_LEN = 4096
+
+
+@api_v1_bp.route("/users/me/devices", methods=["POST"])
+@api_token_required
+@limiter.limit("30 per minute", key_func=_api_user_key)
+def register_device():
+    """Register (or refresh) an FCM token for the calling user's device.
+
+    Request: ``{"platform": "ios"|"android", "token": "<fcm token>"}``
+
+    Upsert semantics: if the same token already exists under a different
+    user (shared/reprovisioned device), the row is reassigned to the
+    current user. Idempotent — the mobile app calls this on every login
+    and whenever the OS rotates the FCM token.
+
+    Returns 204. Token strings are capped at 4096 chars to avoid storing
+    abusive payloads; real FCM tokens are well under 200.
+    """
+    data = request.get_json(silent=True) or {}
+    platform = data.get("platform")
+    token = data.get("token")
+
+    if platform not in _VALID_DEVICE_PLATFORMS:
+        return jsonify({"error": "platform must be 'ios' or 'android'"}), 400
+    if not isinstance(token, str) or not token.strip():
+        return jsonify({"error": "token is required"}), 400
+    token = token.strip()
+    if len(token) > _MAX_DEVICE_TOKEN_LEN:
+        return jsonify({"error": "token is too long"}), 400
+
+    existing = DeviceToken.get_or_none(DeviceToken.token == token)
+    if existing:
+        existing.user = g.api_user
+        existing.platform = platform
+        existing.last_used_at = utc_now()
+        existing.save()
+    else:
+        DeviceToken.create(
+            user=g.api_user,
+            platform=platform,
+            token=token,
+            last_used_at=utc_now(),
+        )
+
+    return "", 204
+
+
+@api_v1_bp.route("/users/me/devices", methods=["DELETE"])
+@api_token_required
+def unregister_device():
+    """Remove an FCM token from the calling user's device list.
+
+    Request: ``{"token": "<fcm token>"}``
+
+    Returns 204 whether or not the token existed (idempotent — a client
+    calling DELETE during logout shouldn't fail if the row was already
+    pruned by an UNREGISTERED response).
+
+    Only removes the token if it currently belongs to the calling user, so
+    one user can't deregister another user's device by guessing tokens.
+    """
+    data = request.get_json(silent=True) or {}
+    token = data.get("token")
+    if not isinstance(token, str) or not token.strip():
+        return jsonify({"error": "token is required"}), 400
+
+    DeviceToken.delete().where(
+        (DeviceToken.token == token.strip()) & (DeviceToken.user == g.api_user)
+    ).execute()
+    return "", 204
 
 
 @api_v1_bp.route("/users/me/presence", methods=["POST"])

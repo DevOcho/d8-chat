@@ -50,15 +50,27 @@ def view_all_threads():
                 Message.last_reply_at.desc(nulls="LAST"), Message.created_at.desc()
             )
         )
-    channel_ids_to_fetch = {
-        parse_conversation_id(t.conversation.conversation_id_str).channel_id
-        for t in threads
-        if t.conversation.type == "channel"
-    }
-    channel_map = {}
+    # Pre-resolve each thread's parent channel here so the template never has
+    # to crack open ``conversation_id_str``.
+    thread_channel_map = {}
+    channel_ids_to_fetch = set()
+    parsed_by_thread = {}
+    for t in threads:
+        if t.conversation.type != "channel":
+            continue
+        try:
+            parsed = parse_conversation_id(t.conversation.conversation_id_str)
+        except ValueError:
+            continue
+        parsed_by_thread[t.id] = parsed
+        channel_ids_to_fetch.add(parsed.channel_id)
+
     if channel_ids_to_fetch:
         channels = Channel.select().where(Channel.id.in_(list(channel_ids_to_fetch)))
-        channel_map = {channel.id: channel for channel in channels}
+        channels_by_id = {c.id: c for c in channels}
+        for tid, parsed in parsed_by_thread.items():
+            thread_channel_map[tid] = channels_by_id.get(parsed.channel_id)
+
     reactions_map = get_reactions_for_messages(threads)
     attachments_map = get_attachments_for_messages(threads)
 
@@ -69,7 +81,7 @@ def view_all_threads():
         reactions_map=reactions_map,
         attachments_map=attachments_map,
         Message=Message,
-        channel_map=channel_map,
+        thread_channel_map=thread_channel_map,
     )
 
     # 2. OOB Header: A simple header for the threads view.
@@ -200,6 +212,26 @@ def view_all_unreads():
                 )
                 context_map[conv.id] = user_lookup.get(partner_id, "Unknown User")
 
+    # Pre-resolve the "jump to conversation" URL for each unread group so the
+    # template never has to crack open ``conversation_id_str``.
+    nav_url_map = {}
+    for conv in grouped_unreads.keys():
+        try:
+            parsed = parse_conversation_id(conv.conversation_id_str)
+        except ValueError:
+            continue
+        if parsed.type == "channel":
+            nav_url_map[conv.id] = url_for(
+                "channels.get_channel_chat", channel_id=parsed.channel_id
+            )
+        elif parsed.type == "dm":
+            other_user_id = next(
+                (uid for uid in parsed.user_ids if uid != g.user.id), g.user.id
+            )
+            nav_url_map[conv.id] = url_for(
+                "dms.get_dm_chat", other_user_id=other_user_id
+            )
+
     # Fetch reactions and attachments for all the unread messages at once.
     reactions_map = get_reactions_for_messages(unread_messages)
     attachments_map = get_attachments_for_messages(unread_messages)
@@ -209,6 +241,7 @@ def view_all_unreads():
         "partials/unreads_view.html",
         grouped_unreads=grouped_unreads,
         context_map=context_map,
+        nav_url_map=nav_url_map,
         reactions_map=reactions_map,
         attachments_map=attachments_map,
         Message=Message,  # Pass the Message class for use in message.html

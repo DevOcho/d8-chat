@@ -8,7 +8,7 @@ from PIL import Image
 from werkzeug.utils import secure_filename
 
 from app.chat_manager import chat_manager
-from app.htmx_oob import oob_by_id
+from app.htmx_oob import oob_by_id, oob_to_selector
 from app.models import UploadedFile, User
 from app.routes import AVATAR_SIZE, login_required
 from app.services import minio_service
@@ -113,7 +113,9 @@ def upload_avatar():
             "partials/profile_header.html", user=g.user
         )
         sidebar_button_html = render_template("partials/_sidebar_profile_button.html")
-        sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
+        sidebar_oob_swap = oob_to_selector(
+            "outerHTML", "#sidebar-profile-button", sidebar_button_html
+        )
         return make_response(profile_header_html + sidebar_oob_swap)
     finally:
         if os.path.exists(temp_path):
@@ -169,7 +171,9 @@ def update_presence_status():
 
     profile_header_html = render_template("partials/profile_header.html", user=g.user)
     sidebar_button_html = render_template("partials/_sidebar_profile_button.html")
-    sidebar_oob_swap = f'<div hx-swap-oob="outerHTML:#sidebar-profile-button">{sidebar_button_html}</div>'
+    sidebar_oob_swap = oob_to_selector(
+        "outerHTML", "#sidebar-profile-button", sidebar_button_html
+    )
     return make_response(profile_header_html + sidebar_oob_swap)
 
 

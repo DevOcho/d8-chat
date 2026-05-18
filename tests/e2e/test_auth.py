@@ -28,7 +28,11 @@ def test_login_with_wrong_password_shows_error(page: Page, admin_credentials):
 
 
 def test_logout_redirects_and_clears_session(logged_in_page: Page):
-    logged_in_page.goto("/logout")
+    # /logout is POST-only — drive it through the profile UI's submit button
+    # so the CSRF token is included automatically.
+    logged_in_page.goto("/chat")
+    logged_in_page.locator("#sidebar-profile-button").click()
+    logged_in_page.get_by_role("button", name="Logout").click()
     # After logout a protected route should bounce back to login.
     logged_in_page.goto("/chat")
     # The login page is at "/" — Flask sends a 302 to that.

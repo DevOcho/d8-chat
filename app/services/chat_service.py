@@ -4,6 +4,7 @@ import datetime
 import re
 
 from flask import render_template, url_for
+from peewee import fn
 
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
@@ -21,6 +22,7 @@ from app.models import (
     db,
     utc_now,
 )
+from app.services import push_service
 
 
 def handle_new_message(
@@ -319,3 +321,106 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 )
                 status.last_notified_timestamp = now
                 status.save()
+
+    _dispatch_push_notifications(new_message, sender_user, conversation, parsed_conv)
+
+
+def _push_recipients(new_message, sender_user, conversation, parsed_conv):
+    """Return the set of user ids that should get a mobile push for this message.
+
+    Triggers (per product decision):
+      - DM     → the other DM participant
+      - @mention of a user → that user
+      - Thread reply → every prior thread participant (everyone who ever
+        replied in this thread, plus the thread starter)
+      - NOT @channel / @here — too noisy for v1; revisit if requested.
+
+    The sender is always excluded. Online filtering happens at the caller
+    so this function stays easy to test in isolation.
+    """
+    recipient_ids = set()
+
+    if conversation.type == "dm":
+        for uid in parsed_conv.user_ids:
+            recipient_ids.add(uid)
+
+    # Mention rows exist for both direct @username mentions *and* the
+    # @channel / @here fan-out (the latter creates a row per member). Only
+    # the direct mentions should drive push — bulk @channel pings would be
+    # too noisy on mobile. Filter by checking the message body for each
+    # mentioned user's literal @username.
+    content = new_message.content or ""
+    direct_mention_pattern = r"(?<![^\s(\['\"])@(\w+)"
+    direct_usernames = {m.lower() for m in re.findall(direct_mention_pattern, content)}
+    direct_usernames -= {"channel", "here"}
+
+    if direct_usernames:
+        mentioned_ids = {
+            u.id
+            for u in User.select(User.id, User.username).where(
+                fn.LOWER(User.username).in_(list(direct_usernames))
+            )
+        }
+        recipient_ids.update(mentioned_ids)
+
+    if new_message.reply_type == "thread" and new_message.parent_message_id:
+        thread_user_ids = {
+            row.user_id
+            for row in Message.select(Message.user).where(
+                (Message.parent_message == new_message.parent_message_id)
+                & (Message.reply_type == "thread")
+            )
+        }
+        parent = Message.get_or_none(id=new_message.parent_message_id)
+        if parent is not None and parent.user_id is not None:
+            thread_user_ids.add(parent.user_id)
+        recipient_ids.update(thread_user_ids)
+
+    recipient_ids.discard(sender_user.id)
+    return recipient_ids
+
+
+def _dispatch_push_notifications(new_message, sender_user, conversation, parsed_conv):
+    """Send a mobile push to every offline recipient for this message.
+
+    No-op when ``push_service`` isn't configured (self-hosters without a
+    Firebase project). Wraps each per-user dispatch in a try/except so a
+    single bad token can't poison the rest of the recipient loop.
+    """
+    if not push_service.is_configured():
+        return
+
+    recipients = _push_recipients(new_message, sender_user, conversation, parsed_conv)
+    if not recipients:
+        return
+
+    sender_label = sender_user.display_name or sender_user.username
+    if conversation.type == "dm":
+        title = f"New message from {sender_label}"
+    elif new_message.reply_type == "thread":
+        title = f"{sender_label} replied in a thread"
+    else:
+        title = f"{sender_label} mentioned you"
+
+    body = new_message.content or ""
+    if len(body) > 240:
+        body = body[:237] + "..."
+
+    payload_data = {
+        "conversation_id_str": conversation.conversation_id_str,
+        "message_id": new_message.id,
+    }
+    if new_message.parent_message_id:
+        payload_data["parent_message_id"] = new_message.parent_message_id
+
+    for user_id in recipients:
+        if chat_manager.is_user_online_in_cluster(user_id):
+            continue
+        try:
+            push_service.send_to_user(
+                user_id, title=title, body=body, data=payload_data
+            )
+        except Exception:  # pylint: disable=broad-except
+            # push_service already logs; we just don't want one bad
+            # recipient to break the rest of the loop.
+            continue

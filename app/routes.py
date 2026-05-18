@@ -22,6 +22,7 @@ from . import sock
 from .access import user_has_conversation_access
 from .chat_manager import chat_manager
 from .conversation_id import parse_conversation_id
+from .htmx_oob import oob_by_id, oob_to_selector
 from .models import (
     Channel,
     ChannelMember,
@@ -418,7 +419,9 @@ def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
         Message=Message,
         is_in_thread_view=True,
     )
-    broadcast_html = f'<div hx-swap-oob="beforeend:#thread-replies-list-{parent_id}">{new_reply_html}</div>'
+    broadcast_html = oob_to_selector(
+        "beforeend", f"#thread-replies-list-{int(parent_id)}", new_reply_html
+    )
 
     parent_message = Message.get_by_id(parent_id)
     reactions_map_for_parent = get_reactions_for_messages(list((parent_message,)))
@@ -471,8 +474,8 @@ def _broadcast_regular_message(ws, new_message, conv_id_str):
         attachments_map=attachments_map,
         Message=Message,
     )
-    message_to_broadcast = (
-        f'<div hx-swap-oob="beforeend:#message-list">{new_message_html}</div>'
+    message_to_broadcast = oob_to_selector(
+        "beforeend", "#message-list", new_message_html
     )
 
     api_data = {
@@ -489,7 +492,7 @@ def _broadcast_regular_message(ws, new_message, conv_id_str):
     if new_message.reply_type == "quote":
         input_html = render_template("partials/chat_input_default.html")
         reset_payload = {
-            "_raw_html": f'<div id="chat-input-container" hx-swap-oob="outerHTML">{input_html}</div>'
+            "_raw_html": oob_by_id("chat-input-container", "outerHTML", input_html)
         }
         chat_manager.send_to_user(ws.user.id, reset_payload)
 
