@@ -391,8 +391,11 @@ def get_app_config():
     if sso_enabled:
         redirect_uri = next(iter(ALLOWED_SSO_REDIRECT_URIS))
         try:
-            url, _state, *_ = oauth.authentik.create_authorization_url(redirect_uri)
-            sso_auth_url = url
+            # create_authorization_url() returns a dict, e.g.
+            # {"nonce": ..., "url": ..., "state": ...} — NOT a tuple. Unpacking it
+            # as a sequence iterates the keys, so the old `url, _state, *_ = ...`
+            # put the literal string "nonce" into sso_auth_url. Read "url" by key.
+            sso_auth_url = oauth.authentik.create_authorization_url(redirect_uri)["url"]
         except Exception as e:
             current_app.logger.warning(f"Could not generate SSO auth URL: {e}")
 
