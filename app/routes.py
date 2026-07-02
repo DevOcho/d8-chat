@@ -313,20 +313,34 @@ def chat_interface():
     last_view_time = g.user.last_threads_view_at or datetime.datetime.min
     has_unread_threads = _has_unread_threads(last_view_time)
 
-    # Only show recent DMs or DMs with unread messages in the sidebar
-    recent_dm_statuses = (
-        UserConversationStatus.select(UserConversationStatus.conversation)
-        .join(Conversation)
-        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
-        .order_by(UserConversationStatus.updated_at.desc())
-        .limit(15)
-    )
-    recent_dm_ids = list(s.conversation_id for s in recent_dm_statuses)
+    # Show a DM in the sidebar when it has had a message in the last 30 days,
+    # or has unread messages. There is deliberately NO cap on the count: the
+    # previous limit(15) silently hid DMs for anyone with more than 15
+    # conversations (and ranked them by UserConversationStatus.updated_at,
+    # which is only bumped as a side effect of notifying an *online* recipient
+    # — so it was a flaky recency signal too). Basing "recent" on actual
+    # Message.created_at makes stale conversations drop off reliably while
+    # keeping every active one visible.
+    dm_conversation_ids = [c.id for c in all_conversations if c.type == "dm"]
+    activity_cutoff = utc_now() - datetime.timedelta(days=30)
+    active_dm_ids = set()
+    if dm_conversation_ids:
+        active_dm_ids = set(
+            row.conversation_id
+            for row in (
+                Message.select(Message.conversation)
+                .distinct()
+                .where(
+                    (Message.conversation.in_(dm_conversation_ids))
+                    & (Message.created_at >= activity_cutoff)
+                )
+            )
+        )
 
     visible_dm_partner_ids = set()
     for conv in all_conversations:
         if conv.type == "dm":
-            is_recent = conv.id in recent_dm_ids
+            is_recent = conv.id in active_dm_ids
             has_unread_msg = unread_info.get(conv.conversation_id_str, dict()).get(
                 "has_unread", False
             )
