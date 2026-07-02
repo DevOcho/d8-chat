@@ -323,24 +323,25 @@ def chat_interface():
     # keeping every active one visible.
     dm_conversation_ids = [c.id for c in all_conversations if c.type == "dm"]
     activity_cutoff = utc_now() - datetime.timedelta(days=30)
-    active_dm_ids = set()
+    # Most recent message timestamp per DM conversation, in one bulk query. This
+    # drives both visibility (recent within 30 days) and sidebar ordering.
+    dm_last_activity = dict()
     if dm_conversation_ids:
-        active_dm_ids = set(
-            row.conversation_id
-            for row in (
-                Message.select(Message.conversation)
-                .distinct()
-                .where(
-                    (Message.conversation.in_(dm_conversation_ids))
-                    & (Message.created_at >= activity_cutoff)
-                )
+        for row in (
+            Message.select(
+                Message.conversation, fn.MAX(Message.created_at).alias("last_at")
             )
-        )
+            .where(Message.conversation.in_(dm_conversation_ids))
+            .group_by(Message.conversation)
+        ):
+            dm_last_activity[row.conversation_id] = row.last_at
 
-    visible_dm_partner_ids = set()
+    # partner_id -> last activity time, for the DMs that should be visible.
+    visible_dm_partners = dict()
     for conv in all_conversations:
         if conv.type == "dm":
-            is_recent = conv.id in active_dm_ids
+            last_at = dm_last_activity.get(conv.id)
+            is_recent = last_at is not None and last_at >= activity_cutoff
             has_unread_msg = unread_info.get(conv.conversation_id_str, dict()).get(
                 "has_unread", False
             )
@@ -352,13 +353,17 @@ def chat_interface():
                     continue
                 for uid in user_ids:
                     if uid != g.user.id:
-                        visible_dm_partner_ids.add(uid)
+                        visible_dm_partners[uid] = last_at
 
-    # Pass only the filtered list of users to the sidebar template
-    direct_message_users = (
-        User.select()
-        .where(User.id.in_(list(visible_dm_partner_ids)))
-        .order_by(User.username)
+    # Order the sidebar by most-recent conversation first (a DM with no message
+    # yet — only possible for a stale/unread edge case — sorts to the bottom).
+    partner_users = User.select().where(
+        User.id.in_(list(visible_dm_partners.keys()))
+    )
+    direct_message_users = sorted(
+        partner_users,
+        key=lambda u: visible_dm_partners.get(u.id) or datetime.datetime.min,
+        reverse=True,
     )
 
     workspace_member = WorkspaceMember.get_or_none(user=g.user)
