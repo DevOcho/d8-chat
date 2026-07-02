@@ -529,6 +529,16 @@ def _process_ws_event(ws, data):
 
     conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
     if not conversation:
+        # A message that resolves to no conversation is dropped here with no
+        # feedback to the client — the message just disappears. Historically
+        # this happened silently after a socket reconnect left ws.channel_id
+        # unset and the frame carried no conversation_id. Log it so any
+        # recurrence is visible instead of an invisible black hole.
+        current_app.logger.warning(
+            "WS send dropped: no conversation for %r (user %s)",
+            conv_id_str,
+            getattr(ws.user, "id", None),
+        )
         return
 
     try:

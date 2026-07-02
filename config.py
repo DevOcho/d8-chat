@@ -63,7 +63,20 @@ class Config:
     # client when the client offers it via the Sec-WebSocket-Protocol header.
     # The /ws/chat web route never offers a subprotocol, so this is a no-op
     # there.
-    SOCK_SERVER_OPTIONS = {"subprotocols": ["d8_sec"]}
+    #
+    # ping_interval makes the server send a WebSocket PING control frame every
+    # 25s. Without it, an idle chat socket carries no traffic between messages,
+    # so a reverse proxy / ingress / NAT (nginx default proxy_read_timeout is
+    # 60s) silently drops the connection. The browser often never sees a close
+    # frame, so the socket goes half-open: the client still thinks it's
+    # connected and keeps sending frames into the void — the message is saved
+    # nowhere and simply disappears, with no error, until a hard refresh builds
+    # a fresh socket. The periodic ping keeps the connection warm through the
+    # proxy and, if the peer really is gone, tears the socket down so the ws
+    # extension reconnects (and resubscribes) instead of silently failing.
+    # 25s stays comfortably under common 60s idle timeouts. Control frames are
+    # invisible to the application/HTMX layer, so no client changes are needed.
+    SOCK_SERVER_OPTIONS = {"subprotocols": ["d8_sec"], "ping_interval": 25}
 
     # Session cookie hardening. The primary local dev workflow runs through k3s
     # at https://d8-chat.local, so SECURE=True is fine. If you need to run the
@@ -72,6 +85,15 @@ class Config:
     SESSION_COOKIE_SECURE = True
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
+
+    # The CSRF token is rendered into each page once (meta tag + hidden form
+    # fields) and reused by every HTMX POST, reaction, and file upload for the
+    # life of that page. Flask-WTF defaults WTF_CSRF_TIME_LIMIT to 3600s, so a
+    # tab left open longer than an hour starts getting "CSRF token has expired"
+    # 400s until a hard refresh. Disabling the time limit keeps the token valid
+    # for the session lifetime — it's still bound to the session and SECRET_KEY,
+    # so it stays CSRF-safe and is invalidated whenever the session is.
+    WTF_CSRF_TIME_LIMIT = None
 
     # Canonical base URL used when generating links that leave the request
     # cycle (password reset emails, OIDC redirect_uri, push notifications). Set

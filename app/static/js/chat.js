@@ -887,6 +887,24 @@ const createEditor = function(idSuffix = '') {
             clearTimeout(state.typingTimer);
             sendTypingStatus(false);
         });
+        // Stamp every outgoing message with the conversation it belongs to.
+        // The server otherwise routes the send purely from ws.channel_id, which
+        // is per-connection state set by an earlier "subscribe". After a
+        // WebSocket drop/reconnect that state is gone until the resubscribe
+        // completes, so a message sent in that window has no conversation and
+        // is silently dropped server-side. Carrying the id in the frame itself
+        // (routes.py prefers data["conversation_id"] over ws.channel_id) makes
+        // sends self-describing and immune to that race. Only set it when the
+        // frame doesn't already carry one (subscribe/typing events set their own).
+        state.messageForm.addEventListener('htmx:wsConfigSend', (e) => {
+            const params = e.detail.parameters;
+            if (params && !params.conversation_id) {
+                const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+                if (activeConv && activeConv.dataset.conversationId) {
+                    params.conversation_id = activeConv.dataset.conversationId;
+                }
+            }
+        });
         state.messageForm.addEventListener('htmx:wsAfterSend', () => {
             const isThread = idSuffix.startsWith('-thread-');
 
@@ -1457,7 +1475,12 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (count > 2) {
             message = 'Several people are typing...';
         }
-        indicators.forEach(indicator => { indicator.textContent = message; });
+        // Only touch the DOM when the text actually changes — typing_update
+        // events arrive on every keystroke, and rewriting identical text just
+        // causes needless repaints/flicker.
+        indicators.forEach(indicator => {
+            if (indicator.textContent !== message) indicator.textContent = message;
+        });
     };
     let userWasNearBottom = false;
     document.body.addEventListener('htmx:wsBeforeMessage', function() {
