@@ -502,6 +502,240 @@ const createMentionManager = function(editorState) {
     return { initialize, state };
 };
 
+// ---------------------------------------------------------------------------
+// Emoji autocomplete + inline ":shortcode:" conversion.
+//
+// Reuses the SAME local emoji dataset the <emoji-picker> element loads, so
+// shortcodes stay consistent everywhere in the app. The index is fetched once
+// and shared across every editor instance.
+// ---------------------------------------------------------------------------
+const EMOJI_DATA_SOURCE = '/js/local/emoji.json';
+// Characters that may appear in an emoji shortcode (letters, digits, _ + -).
+const EMOJI_SHORTCODE_CHARS = 'a-zA-Z0-9_+\\-';
+let emojiIndexPromise = null;
+const getEmojiIndex = function() {
+    if (!emojiIndexPromise) {
+        emojiIndexPromise = fetch(EMOJI_DATA_SOURCE)
+            .then(r => r.json())
+            .then(data => {
+                const list = [];              // {shortcode, emoji, order} for search
+                const byShortcode = new Map(); // exact shortcode -> emoji, for conversion
+                data.forEach(entry => {
+                    if (!entry.emoji || !entry.shortcodes) return;
+                    entry.shortcodes.forEach(sc => {
+                        const key = sc.toLowerCase();
+                        list.push({ shortcode: key, emoji: entry.emoji, order: entry.order || 0 });
+                        if (!byShortcode.has(key)) byShortcode.set(key, entry.emoji);
+                    });
+                });
+                return { list, byShortcode };
+            })
+            .catch(() => ({ list: [], byShortcode: new Map() }));
+    }
+    return emojiIndexPromise;
+};
+
+const createEmojiManager = function(editorState) {
+    const MIN_QUERY = 2;   // don't pop up until the user has typed a couple of letters
+    const MAX_RESULTS = 8; // keep the list short, like WhatsApp's strip
+    const state = {
+        editorState,
+        popoverContainer: null,
+        active: false,
+        query: '',
+        index: null,
+        isSelecting: false
+    };
+
+    const initialize = function() {
+        const popoverContainer = document.createElement('div');
+        popoverContainer.className = 'list-group border rounded shadow-sm bg-body emoji-suggestion-popover';
+        popoverContainer.style.cssText = 'position: absolute; bottom: 100%; left: 40px; z-index: 1060; display: none; max-height: 250px; width: 260px; overflow-y: auto;';
+        state.editorState.messageForm.appendChild(popoverContainer);
+        state.popoverContainer = popoverContainer;
+        // Lets the global outside-click handler dismiss us and reset our state.
+        popoverContainer.emojiHide = hidePopover;
+        getEmojiIndex().then(idx => { state.index = idx; });
+        bindEvents();
+    };
+
+    const bindEvents = function() {
+        const { editor, markdownView } = state.editorState;
+        editor.addEventListener('input', handleInput);
+        markdownView.addEventListener('input', handleInput);
+        editor.addEventListener('keydown', handleKeyDown);
+        markdownView.addEventListener('keydown', handleKeyDown);
+        // mousedown (not click) so the editor keeps its selection/caret while we insert.
+        state.popoverContainer.addEventListener('mousedown', (e) => {
+            const item = e.target.closest('.emoji-suggestion-item');
+            if (item) {
+                e.preventDefault();
+                selectEmoji(item.dataset.emoji);
+            }
+        });
+    };
+
+    // Returns the text preceding the caret plus the info needed to replace a
+    // slice of it, for whichever input mode is active. null if unavailable.
+    const getContext = function() {
+        const { isMarkdownMode, markdownView } = state.editorState;
+        if (isMarkdownMode) {
+            const cursor = markdownView.selectionStart;
+            return { textBeforeCursor: markdownView.value.substring(0, cursor), node: null, cursor };
+        }
+        const selection = window.getSelection();
+        if (!selection.rangeCount) return null;
+        const range = selection.getRangeAt(0);
+        if (!range.collapsed) return null;
+        const node = range.startContainer;
+        if (node.nodeType !== Node.TEXT_NODE) return null;
+        const cursor = range.startOffset;
+        return { textBeforeCursor: node.textContent.substring(0, cursor), node, cursor };
+    };
+
+    const handleInput = function() {
+        if (state.isSelecting) { state.isSelecting = false; return; }
+        const ctx = getContext();
+        if (!ctx) { hidePopover(); return; }
+        // A colon at the start of a word, followed by shortcode characters, with
+        // no closing colon yet.
+        const m = ctx.textBeforeCursor.match(new RegExp('(?:^|\\s):([' + EMOJI_SHORTCODE_CHARS + ']+)$'));
+        if (!m || m[1].length < MIN_QUERY) { hidePopover(); return; }
+        state.query = m[1];
+        showMatches(m[1]);
+    };
+
+    const showMatches = function(query) {
+        if (!state.index) { hidePopover(); return; }
+        const q = query.toLowerCase();
+        const scored = [];
+        for (const item of state.index.list) {
+            const pos = item.shortcode.indexOf(q);
+            if (pos === -1) continue;
+            scored.push({ item, rank: pos === 0 ? 0 : 1 });
+        }
+        // Prefix matches first, then by the dataset's popularity ordering.
+        scored.sort((a, b) => a.rank - b.rank || a.item.order - b.item.order);
+        const seen = new Set();
+        const matches = [];
+        for (const s of scored) {
+            if (seen.has(s.item.emoji)) continue; // one row per emoji
+            seen.add(s.item.emoji);
+            matches.push(s.item);
+            if (matches.length >= MAX_RESULTS) break;
+        }
+        if (matches.length === 0) { hidePopover(); return; }
+        renderPopover(matches);
+        showPopover();
+    };
+
+    const renderPopover = function(matches) {
+        state.popoverContainer.innerHTML = matches.map((mt, i) => (
+            '<button type="button" class="list-group-item list-group-item-action emoji-suggestion-item d-flex align-items-center gap-2 p-2' + (i === 0 ? ' active' : '') + '"' +
+            ' data-emoji="' + mt.emoji + '" data-shortcode="' + mt.shortcode + '">' +
+            '<span style="font-size:1.25rem;line-height:1">' + mt.emoji + '</span>' +
+            '<span class="text-muted small">:' + mt.shortcode + ':</span>' +
+            '</button>'
+        )).join('');
+    };
+
+    const handleKeyDown = function(e) {
+        // Inline conversion: ":shortcode:" + space -> emoji, popover open or not.
+        if (e.key === ' ' || e.key === 'Spacebar') {
+            if (tryConvertShortcodeBeforeCursor()) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            }
+            return;
+        }
+        if (!state.active) return;
+        const items = state.popoverContainer.querySelectorAll('.emoji-suggestion-item');
+        if (items.length === 0) return;
+        if (!['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) return;
+        // stopImmediatePropagation so the editor's own keydown handler (same
+        // element) doesn't also submit/insert a newline.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const activeItem = state.popoverContainer.querySelector('.emoji-suggestion-item.active') || items[0];
+        if (e.key === 'ArrowDown') {
+            const next = activeItem.nextElementSibling || items[0];
+            activeItem.classList.remove('active');
+            next.classList.add('active');
+            next.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            const prev = activeItem.previousElementSibling || items[items.length - 1];
+            activeItem.classList.remove('active');
+            prev.classList.add('active');
+            prev.scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter' || e.key === 'Tab') {
+            selectEmoji(activeItem.dataset.emoji);
+        } else if (e.key === 'Escape') {
+            hidePopover();
+        }
+    };
+
+    // If the text right before the caret is a complete ":shortcode:", replace
+    // it with the emoji (followed by the space the user just pressed).
+    const tryConvertShortcodeBeforeCursor = function() {
+        if (!state.index) return false;
+        const ctx = getContext();
+        if (!ctx) return false;
+        const m = ctx.textBeforeCursor.match(new RegExp(':([' + EMOJI_SHORTCODE_CHARS + ']+):$'));
+        if (!m) return false;
+        const emoji = state.index.byShortcode.get(m[1].toLowerCase());
+        if (!emoji) return false;
+        replaceRange(ctx, ctx.cursor - m[0].length, ctx.cursor, emoji + ' ');
+        hidePopover();
+        return true;
+    };
+
+    const selectEmoji = function(emoji) {
+        if (!emoji) { hidePopover(); return; }
+        const ctx = getContext();
+        if (!ctx) { hidePopover(); return; }
+        // Replace the ":query" the caret sits after with the chosen emoji.
+        replaceRange(ctx, ctx.cursor - state.query.length - 1, ctx.cursor, emoji);
+        hidePopover();
+    };
+
+    const replaceRange = function(ctx, start, end, text) {
+        const { isMarkdownMode, markdownView, editor } = state.editorState;
+        state.isSelecting = true; // suppress our own re-trigger on the synthetic input event
+        if (isMarkdownMode) {
+            const val = markdownView.value;
+            markdownView.value = val.substring(0, start) + text + val.substring(end);
+            const pos = start + text.length;
+            markdownView.focus();
+            markdownView.setSelectionRange(pos, pos);
+        } else {
+            const range = document.createRange();
+            range.setStart(ctx.node, start);
+            range.setEnd(ctx.node, end);
+            const sel = window.getSelection();
+            editor.focus();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            // execCommand keeps the change in the native undo stack.
+            document.execCommand('insertText', false, text);
+        }
+        // Keep the hidden field, typing indicator and auto-resize in sync.
+        (isMarkdownMode ? markdownView : editor).dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const showPopover = function() {
+        state.popoverContainer.style.display = 'block';
+        state.active = true;
+    };
+    const hidePopover = function() {
+        state.popoverContainer.style.display = 'none';
+        state.popoverContainer.innerHTML = '';
+        state.active = false;
+        state.query = '';
+    };
+
+    return { initialize, state, hidePopover };
+};
+
 /**
  * Factory function to create a self-contained editor instance.
  */
@@ -509,6 +743,7 @@ const createEditor = function(idSuffix = '') {
     const state = {};
     let attachmentManager = null;
     let mentionManager = null;
+    let emojiManager = null;
 
     const initialize = function() {
         const messageForm = document.getElementById(`message-form${idSuffix}`);
@@ -569,6 +804,9 @@ const createEditor = function(idSuffix = '') {
 
         mentionManager = createMentionManager(state);
         mentionManager.initialize();
+
+        emojiManager = createEmojiManager(state);
+        emojiManager.initialize();
 
         const mentionButton = document.getElementById(`mention-btn${idSuffix}`);
         if (mentionButton) {
@@ -824,6 +1062,9 @@ const createEditor = function(idSuffix = '') {
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const keydownHandler = (e) => {
             if (mentionManager && mentionManager.state.active) {
+                return;
+            }
+            if (emojiManager && emojiManager.state.active) {
                 return;
             }
             if (!state.isMarkdownMode && e.key === 'Enter' && !e.shiftKey) {
@@ -1459,6 +1700,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (openPicker && openPicker.contains(e.target)) { return; }
         document.querySelectorAll('[id^="emoji-picker-container"]').forEach(picker => {
             picker.style.display = 'none';
+        });
+    });
+    document.addEventListener('click', (e) => {
+        // Dismiss any open ":shortcode" autocomplete popover on an outside click.
+        document.querySelectorAll('.emoji-suggestion-popover').forEach(popover => {
+            if (!popover.contains(e.target) && typeof popover.emojiHide === 'function') {
+                popover.emojiHide();
+            }
         });
     });
     const updateTypingIndicator = (typists = []) => {
