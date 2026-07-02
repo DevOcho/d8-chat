@@ -66,6 +66,15 @@ class ChatManager:
             if channel_name.startswith("chat:"):
                 target_channel = channel_name.split(":", 1)[1]
 
+            # Only set when a broadcast explicitly opts out of echoing to its
+            # sender (typing events). Messages deliberately echo back to the
+            # sender so their own message renders, so they leave this unset.
+            exclude_sender_id = (
+                payload_data.get("_sender_id")
+                if payload_data.get("_exclude_sender")
+                else None
+            )
+
             for client_ws in clients_on_this_pod:
                 # For a channel message, only send to clients subscribed to that channel.
                 if target_channel:
@@ -73,6 +82,20 @@ class ChatManager:
                         hasattr(client_ws, "channel_id")
                         and client_ws.channel_id == target_channel
                     ):
+                        # Don't echo a sender's own typing event back to them.
+                        # typing_users is per-worker, so the sender's worker
+                        # broadcasts only [self] while the other person's worker
+                        # broadcasts [them]; the sender's client receiving its
+                        # own [self] (filtered to empty) interleaved with [them]
+                        # makes the "X is typing" indicator strobe.
+                        if (
+                            exclude_sender_id is not None
+                            and getattr(
+                                getattr(client_ws, "user", None), "id", None
+                            )
+                            == exclude_sender_id
+                        ):
+                            continue
                         self._send_message(client_ws, payload_data)
                 # For a global message, send to everyone.
                 elif channel_name.startswith("global:"):
@@ -93,6 +116,7 @@ class ChatManager:
                         clean_payload = message.copy()
                         clean_payload.pop("_sender_id", None)
                         clean_payload.pop("_exclude_channel", None)
+                        clean_payload.pop("_exclude_sender", None)
                         ws.send(json.dumps(clean_payload))
                     return
 
@@ -102,6 +126,7 @@ class ChatManager:
                     clean_payload = payload_to_send.copy()
                     clean_payload.pop("_sender_id", None)
                     clean_payload.pop("_exclude_channel", None)
+                    clean_payload.pop("_exclude_sender", None)
                     clean_payload.pop("api_data", None)
                     ws.send(json.dumps(clean_payload))
                 else:
@@ -113,8 +138,14 @@ class ChatManager:
             current_app.logger.exception(f"Error sending to client {ws}")
             self._handle_disconnect(ws)
 
-    def broadcast(self, channel_id, message, sender_ws=None):
-        """Publishes a message to a specific channel on Valkey."""
+    def broadcast(self, channel_id, message, sender_ws=None, exclude_sender=False):
+        """Publishes a message to a specific channel on Valkey.
+
+        When exclude_sender is True, the listener skips delivering this payload
+        back to the sender's own client (identified via _sender_id). Used for
+        typing events; messages leave it False so the sender's client still
+        receives and renders its own message.
+        """
         redis_channel = f"chat:{channel_id}"
         sender_id = (
             sender_ws.user.id if sender_ws and hasattr(sender_ws, "user") else None
@@ -127,6 +158,8 @@ class ChatManager:
             payload_data["_raw_html"] = message
 
         payload_data["_sender_id"] = sender_id
+        if exclude_sender:
+            payload_data["_exclude_sender"] = True
         self.redis_client.publish(redis_channel, json.dumps(payload_data))
 
     def send_to_user(self, user_id, message, exclude_channel=None):
@@ -230,7 +263,9 @@ class ChatManager:
             "conversation_id": conversation_id,
             "typists": typists,
         }
-        self.broadcast(conversation_id, payload, sender_ws=sender_ws)
+        self.broadcast(
+            conversation_id, payload, sender_ws=sender_ws, exclude_sender=True
+        )
 
 
 chat_manager = ChatManager()

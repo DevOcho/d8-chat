@@ -25,7 +25,9 @@
 
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
     restart: "no"
     ports:
       - "5001:5001"
@@ -55,11 +57,12 @@ services:
         condition: service_healthy
       valkey:
         condition: service_started
-    # Re-init the DB and run migrations on every container start.
-    # The Postgres tmpfs makes "fresh DB" the default state.
+    # Re-init the DB on every container start. The Postgres tmpfs makes
+    # "fresh DB" the default state, and init_db.py builds the schema from
+    # current models — so smalls migrations (which are deltas for long-lived
+    # DBs) are unnecessary here. Internal CI uses `auto migrate` against k3s.
     command: >
       sh -c "python init_db.py --reset-db &&
-             ./smalls.py migrate &&
              gunicorn --worker-class gevent --workers 2 --bind 0.0.0.0:5001 run:app"
 
   db:
