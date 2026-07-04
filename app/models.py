@@ -109,6 +109,10 @@ class User(BaseModel, UserMixin):
     presence_status = CharField(default="online")  # 'online', 'away', or 'busy'
     theme = CharField(default="system")  # 'light', 'dark', or 'system'
     wysiwyg_enabled = BooleanField(default=False, null=False)
+    # When True (default) Enter sends a chat message and Shift+Enter inserts a
+    # newline; when False, Ctrl/Cmd+Enter sends and plain Enter inserts a
+    # newline. User-configurable in the Preferences menu.
+    send_on_enter = BooleanField(default=True, null=False)
     last_threads_view_at = DateTimeField(null=True)
     avatar = DeferredForeignKey("UploadedFile", backref="user_avatar", null=True)
     notification_sound = CharField(default="d8-notification.mp3")

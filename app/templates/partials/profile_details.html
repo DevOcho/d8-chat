@@ -116,6 +116,36 @@
                     </div>
                 </div>
             </div>
+            <!-- Accordion Item 5: Preferences -->
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed"
+                            type="button"
+                            data-bs-toggle="collapse"
+                            data-bs-target="#collapseFive"
+                            aria-expanded="false"
+                            aria-controls="collapseFive">Preferences</button>
+                </h2>
+                <div id="collapseFive"
+                     class="accordion-collapse collapse"
+                     data-bs-parent="#profileAccordion">
+                    <div class="accordion-body">
+                        <label for="send-key-select" class="form-label">Sending messages</label>
+                        <select class="form-select"
+                                id="send-key-select"
+                                name="send_on_enter"
+                                hx-put="{{ url_for('profile.update_send_on_enter') }}"
+                                hx-trigger="change"
+                                hx-swap="none">
+                            <option value="true" {% if user.send_on_enter %}selected{% endif %}>Enter sends (Shift+Enter for a new line)</option>
+                            <option value="false" {% if not user.send_on_enter %}selected{% endif %}>
+                                Ctrl+Enter sends (Enter for a new line)
+                            </option>
+                        </select>
+                        <div class="form-text">Choose which key sends a chat message.</div>
+                    </div>
+                </div>
+            </div>
         </div>
         <!-- End Accordion -->
         <!-- The Logout Button remains outside and always visible at the bottom -->

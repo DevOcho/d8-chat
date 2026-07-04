@@ -222,3 +222,21 @@ def set_wysiwyg_preference():
         user.save()
         g.user.wysiwyg_enabled = enabled
     return "", 204
+
+
+@profile_bp.route("/profile/send_on_enter", methods=["PUT"])
+@login_required
+def update_send_on_enter():
+    """Updates the 'send message with Enter vs Ctrl+Enter' preference.
+
+    Emits an HX-Trigger so the open chat page updates its send behavior live
+    (no page reload), mirroring the notification-sound preference.
+    """
+    enabled = request.form.get("send_on_enter", "true").lower() == "true"
+    user = User.get_by_id(g.user.id)
+    user.send_on_enter = enabled
+    user.save()
+    g.user.send_on_enter = enabled
+    response = make_response("")
+    response.headers["HX-Trigger"] = json.dumps({"update-send-on-enter": enabled})
+    return response

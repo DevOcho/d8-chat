@@ -920,13 +920,14 @@ const createEditor = function(idSuffix = '') {
     const updateSendButton = function() {
         const {
             sendButton,
-            isMarkdownMode,
             messageForm
         } = state;
         const replyTypeInput = messageForm.querySelector('input[name="reply_type"]');
         const isQuoteReply = replyTypeInput && replyTypeInput.value === 'quote';
         const sendText = isQuoteReply ? "Reply" : "Send";
-        if (isMarkdownMode) {
+        // Reflect the user's send-key preference, not the editor mode.
+        const enterSends = document.querySelector('main.main-content').dataset.sendOnEnter !== 'false';
+        if (enterSends) {
             sendButton.innerHTML = `<span>${sendText}</span><span class="send-shortcut"><i class="bi bi-arrow-return-left"></i></span>`;
             sendButton.title = `${sendText} (Enter)`;
         } else {
@@ -1090,22 +1091,27 @@ const createEditor = function(idSuffix = '') {
                 return;
             }
             if (e.key === 'Enter') {
-                // Check if there are any successfully uploaded attachments
+                // Send-key behavior is a user preference (Preferences menu),
+                // read live from the DOM so a change applies without reload and
+                // works the same in both the plain-textarea and rich editor.
+                //   enterSends true  -> Enter sends, Shift+Enter = newline
+                //   enterSends false -> Ctrl/Cmd+Enter sends, Enter = newline
+                const enterSends = document.querySelector('main.main-content').dataset.sendOnEnter !== 'false';
                 const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
+                const content = state.isMarkdownMode ? state.markdownView.value : state.editor.innerText;
+                const hasContent = content.trim() !== '' || hasAttachment;
 
-                if (state.isMarkdownMode && !e.shiftKey) {
-                    e.preventDefault();
-                    // Submit if there is text OR an attachment
-                    if (state.markdownView.value.trim() !== '' || hasAttachment) {
-                        state.messageForm.requestSubmit();
+                if (enterSends) {
+                    if (!e.shiftKey) {
+                        e.preventDefault();
+                        if (hasContent) state.messageForm.requestSubmit();
                     }
-                } else if (!state.isMarkdownMode && e.ctrlKey) {
+                    // Shift+Enter falls through to the default newline.
+                } else if (e.ctrlKey || e.metaKey) {
                     e.preventDefault();
-                    // Submit if there is text OR an attachment
-                    if (state.editor.innerText.trim() !== '' || hasAttachment) {
-                        state.messageForm.requestSubmit();
-                    }
+                    if (hasContent) state.messageForm.requestSubmit();
                 }
+                // Plain Enter in Ctrl+Enter mode falls through to a newline.
             }
         };
         state.editor.addEventListener('keydown', keydownHandler);
@@ -1780,6 +1786,27 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`Updating notification sound to: ${newSound}`);
             NotificationManager.soundFile = newSound;
         }
+    });
+    // Preferences: send-key choice changed. Update the DOM flag the keydown
+    // handler reads (so it applies immediately, no reload) and refresh the
+    // visible send-button hints to match.
+    document.body.addEventListener('update-send-on-enter', (evt) => {
+        const enabled = evt.detail['update-send-on-enter'] !== false
+            && evt.detail['update-send-on-enter'] !== 'false';
+        const main = document.querySelector('main.main-content');
+        if (main) main.dataset.sendOnEnter = enabled ? 'true' : 'false';
+        document.querySelectorAll('[id^="send-button"]').forEach((btn) => {
+            const form = btn.closest('form');
+            const replyInput = form && form.querySelector('input[name="reply_type"]');
+            const label = replyInput && replyInput.value === 'quote' ? 'Reply' : 'Send';
+            if (enabled) {
+                btn.innerHTML = `<span>${label}</span><span class="send-shortcut"><i class="bi bi-arrow-return-left"></i></span>`;
+                btn.title = `${label} (Enter)`;
+            } else {
+                btn.innerHTML = `<span>${label}</span><span class="send-shortcut"><kbd>Ctrl</kbd>+<i class="bi bi-arrow-return-left"></i></span>`;
+                btn.title = `${label} (Ctrl+Enter)`;
+            }
+        });
     });
     document.addEventListener('click', (e) => {
         if (e.target.closest('[id^="emoji-btn"]')) { return; }
