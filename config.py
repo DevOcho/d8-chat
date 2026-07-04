@@ -76,7 +76,15 @@ class Config:
     # extension reconnects (and resubscribes) instead of silently failing.
     # 25s stays comfortably under common 60s idle timeouts. Control frames are
     # invisible to the application/HTMX layer, so no client changes are needed.
-    SOCK_SERVER_OPTIONS = {"subprotocols": ["d8_sec"], "ping_interval": 25}
+    # max_message_size caps a single inbound WS frame at 128 KiB. Without it
+    # simple_websocket buffers an unbounded incoming message, so one client can
+    # make a worker allocate arbitrary memory. Chat messages and control frames
+    # are tiny; attachments upload over HTTP, not the socket.
+    SOCK_SERVER_OPTIONS = {
+        "subprotocols": ["d8_sec"],
+        "ping_interval": 25,
+        "max_message_size": 131072,
+    }
 
     # Session cookie hardening. The primary local dev workflow runs through k3s
     # at https://d8-chat.local, so SECURE=True is fine. If you need to run the

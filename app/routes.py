@@ -35,9 +35,11 @@ from .models import (
     User,
     UserConversationStatus,
     WorkspaceMember,
+    db,
     utc_now,
 )
 from .services import chat_service
+from .ws_utils import harden_ws
 
 # This blueprint now only handles the main chat interface and WebSocket.
 main_bp = Blueprint("main", __name__)
@@ -357,9 +359,7 @@ def chat_interface():
 
     # Order the sidebar by most-recent conversation first (a DM with no message
     # yet — only possible for a stale/unread edge case — sorts to the bottom).
-    partner_users = User.select().where(
-        User.id.in_(list(visible_dm_partners.keys()))
-    )
+    partner_users = User.select().where(User.id.in_(list(visible_dm_partners.keys())))
     direct_message_users = sorted(
         partner_users,
         key=lambda u: visible_dm_partners.get(u.id) or datetime.datetime.min,
@@ -516,14 +516,69 @@ def _broadcast_regular_message(ws, new_message, conv_id_str):
         chat_manager.send_to_user(ws.user.id, reset_payload)
 
 
+def _safe_handle_frame(ws, raw):
+    """Process one inbound WS frame without ever letting a bad frame kill the
+    connection.
+
+    Previously the receive loops ran ``json.loads`` + ``_process_ws_event``
+    bare, so a single malformed frame or a transient DB hiccup unwound the loop
+    and closed the socket (the client then reconnected, resubscribed, and could
+    lose messages in the gap). Here we swallow decode errors and unexpected
+    handler exceptions — logging them — while letting ``ConnectionClosed``
+    propagate so flask-sock can tear down a genuinely closed socket.
+    """
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        current_app.logger.warning(
+            "WS frame ignored: invalid JSON from user %s",
+            getattr(getattr(ws, "user", None), "id", None),
+        )
+        return
+    if not isinstance(data, dict):
+        return
+
+    # API clients send {"type": "send_message", "content": "..."}; normalize to
+    # the internal field name so both routes share one handler.
+    if data.get("type") == "send_message" and "content" in data:
+        data.setdefault("chat_message", data.get("content"))
+
+    # Check out a pooled DB connection for the duration of this event and hand
+    # it back afterwards. The socket itself no longer holds one (see the WS
+    # handlers), so the pool isn't drained by idle connections.
+    try:
+        _ws_db_connect()
+        _process_ws_event(ws, data)
+    except Exception:  # pylint: disable=broad-exception-caught
+        current_app.logger.exception("WS event failed (connection kept alive)")
+    finally:
+        _ws_db_close()
+
+
 def _process_ws_event(ws, data):
     """Processes a single WebSocket event."""
     event_type = data.get("type")
     conv_id_str = data.get("conversation_id") or getattr(ws, "channel_id", None)
 
     if event_type == "subscribe":
-        if conv_id_str:
-            chat_manager.subscribe(conv_id_str, ws)
+        if not conv_id_str:
+            return
+        # Authorize the subscription. Without this any authenticated client
+        # could subscribe to another user's DM (or a channel they're not in)
+        # and receive its live traffic — the same hole the send path closed
+        # with user_has_conversation_access, missed on subscribe.
+        try:
+            parsed = parse_conversation_id(conv_id_str)
+        except ValueError:
+            return
+        if not user_has_conversation_access(ws.user, parsed):
+            current_app.logger.warning(
+                "WS subscribe blocked: user %s not in %r",
+                getattr(ws.user, "id", None),
+                conv_id_str,
+            )
+            return
+        chat_manager.subscribe(conv_id_str, ws)
         return
 
     if event_type in ("typing_start", "typing_stop"):
@@ -600,6 +655,77 @@ def _process_ws_event(ws, data):
     chat_service.send_notifications_for_new_message(new_message, ws.user)
 
 
+# --- WebSocket connection helpers ---
+
+PRESENCE_CLASS_MAP = {
+    "online": "presence-online",
+    "away": "presence-away",
+    "busy": "presence-busy",
+}
+
+
+def _ws_db_connect():
+    """Check out a pooled DB connection for a WS event/setup step.
+
+    No-op under tests, where the app context already holds the single
+    in-memory SQLite connection and reconnecting/closing would destroy it.
+    """
+    if not current_app.testing:
+        db.connect(reuse_if_open=True)
+
+
+def _ws_db_close():
+    """Return the WS event/setup DB connection to the pool (skip under tests)."""
+    if not current_app.testing and not db.is_closed():
+        db.close()
+
+
+def _broadcast_presence(user_id, status):
+    """Broadcast a presence_update for a user to every connected client."""
+    chat_manager.broadcast_to_all(
+        {
+            "type": "presence_update",
+            "user_id": user_id,
+            "status_class": PRESENCE_CLASS_MAP.get(status, "presence-away"),
+            "status": status,
+        }
+    )
+
+
+def _setup_ws(ws, user, is_api=False):
+    """Shared WS connection setup for both routes.
+
+    Attaches the user, hardens the raw socket (send lock + timeout), registers
+    presence, announces it, and then releases the pooled DB connection the
+    upgrade request checked out. The receive loop checks out a fresh connection
+    per event, so an open socket no longer pins a pool slot for its lifetime.
+    """
+    ws.user = user
+    if is_api:
+        ws.is_api_client = True
+    harden_ws(ws)
+    chat_manager.set_online(user.id, ws)
+    _broadcast_presence(user.id, user.presence_status)
+    _ws_db_close()
+
+
+def _teardown_ws(ws, label):
+    """Shared WS disconnect cleanup: presence-away, unsubscribe (writes read
+    state), and logging. Runs its DB work on a freshly checked-out connection
+    since the socket released its own during setup."""
+    if not (hasattr(ws, "user") and ws.user):
+        return
+    user = ws.user
+    try:
+        _ws_db_connect()
+        chat_manager.set_offline(user.id)
+        _broadcast_presence(user.id, "away")
+        chat_manager.unsubscribe(ws)
+    finally:
+        _ws_db_close()
+    current_app.logger.info("%s connection closed for '%s'.", label, user.username)
+
+
 # --- WebSocket Handler ---
 @sock.route("/ws/chat")
 def chat(ws):
@@ -628,41 +754,13 @@ def chat(ws):
         ws.close(reason=1008, message="Invalid origin")
         return
 
-    ws.user = user
-    chat_manager.set_online(user.id, ws)
-    presence_class_map = {
-        "online": "presence-online",
-        "away": "presence-away",
-        "busy": "presence-busy",
-    }
-    status_class = presence_class_map.get(user.presence_status, "presence-away")
-    payload = {
-        "type": "presence_update",
-        "user_id": user.id,
-        "status_class": status_class,
-        "status": user.presence_status,
-    }
-    chat_manager.broadcast_to_all(payload)
+    _setup_ws(ws, user)
 
     try:
         while True:
-            data = json.loads(ws.receive())
-            _process_ws_event(ws, data)
+            _safe_handle_frame(ws, ws.receive())
     finally:
-        if hasattr(ws, "user") and ws.user:
-            user_id = ws.user.id
-            chat_manager.set_offline(user_id)
-            payload = {
-                "type": "presence_update",
-                "user_id": user_id,
-                "status_class": "presence-away",
-                "status": "away",
-            }
-            chat_manager.broadcast_to_all(payload)
-            chat_manager.unsubscribe(ws)
-            current_app.logger.info(
-                f"Client connection closed for '{ws.user.username}'."
-            )
+        _teardown_ws(ws, "Client")
 
 
 # --- API JSON WebSocket Handler ---
@@ -695,51 +793,13 @@ def api_ws(ws):
         ws.close(reason=1008, message="User not found")
         return
 
-    ws.user = user
-    ws.is_api_client = True  # Tell chat_manager to serve raw JSON to this WS
-
-    chat_manager.set_online(user.id, ws)
-
-    presence_class_map = {
-        "online": "presence-online",
-        "away": "presence-away",
-        "busy": "presence-busy",
-    }
-    status_class = presence_class_map.get(user.presence_status, "presence-away")
-
-    payload = {
-        "type": "presence_update",
-        "user_id": user.id,
-        "status_class": status_class,
-        "status": user.presence_status,
-    }
-    chat_manager.broadcast_to_all(payload)
+    _setup_ws(ws, user, is_api=True)
 
     try:
         while True:
-            data = json.loads(ws.receive())
-
-            # Route API events using the exact same flow but without relying on HTML
-            # Mobile app is expected to send {"type": "send_message", "content": "..."}
-            event_type = data.get("type")
-
-            if event_type == "send_message":
-                data["chat_message"] = data.get("content")
-
-            _process_ws_event(ws, data)
-
+            # _safe_handle_frame maps the mobile {"type":"send_message",
+            # "content": ...} shape onto the internal chat_message field, so
+            # both routes share one handler.
+            _safe_handle_frame(ws, ws.receive())
     finally:
-        if hasattr(ws, "user") and ws.user:
-            user_id = ws.user.id
-            chat_manager.set_offline(user_id)
-            disconnect_payload = {
-                "type": "presence_update",
-                "user_id": user_id,
-                "status_class": "presence-away",
-                "status": "away",
-            }
-            chat_manager.broadcast_to_all(disconnect_payload)
-            chat_manager.unsubscribe(ws)
-            current_app.logger.info(
-                f"API client connection closed for '{ws.user.username}'."
-            )
+        _teardown_ws(ws, "API client")

@@ -298,10 +298,11 @@ def _check_valkey_health(app):
 
     Flask-Limiter is initialized with ``swallow_errors=True`` (so rate-limit
     backend outages don't take down the app), and ``ChatManager``'s pub/sub
-    thread re-connects on its own — both fail open *silently*. Without this
-    explicit ping, a misconfigured ``VALKEY_URL`` only surfaces when users
-    notice rate limits don't apply, or that real-time messages stop
-    broadcasting between gunicorn workers. The warning lands in the same
+    thread supervises itself — reconnecting with capped backoff after a drop —
+    but both fail open *silently*. Without this explicit ping, a misconfigured
+    ``VALKEY_URL`` only surfaces when users notice rate limits don't apply, or
+    that real-time messages stop broadcasting between gunicorn workers (until
+    the listener's next successful reconnect). The warning lands in the same
     logs as everything else so monitoring/Sentry can alert on it.
     """
     # pylint: disable=import-outside-toplevel

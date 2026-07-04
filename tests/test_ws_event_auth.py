@@ -25,7 +25,7 @@ from app.models import (
     Workspace,
     WorkspaceMember,
 )
-from app.routes import _process_ws_event
+from app.routes import _process_ws_event, _safe_handle_frame
 
 
 @pytest.fixture
@@ -221,16 +221,77 @@ class TestDeniedSends:
 # --- Empty/no-op events ---
 
 
-class TestNoopEvents:
-    def test_subscribe_routes_to_chat_manager(self, app, mocker):
+class TestSubscribeAuth:
+    """Subscribe must be access-checked just like send — otherwise any
+    authenticated client could subscribe to another user's DM and receive
+    its live traffic."""
+
+    def test_member_can_subscribe_to_channel(self, app, channel_and_member, mocker):
         with app.app_context():
             ws = _ws_for(1)
             sub = mocker.patch("app.routes.chat_manager.subscribe")
 
-            _process_ws_event(ws, {"type": "subscribe", "conversation_id": "channel_1"})
+            conv_id = f"channel_{channel_and_member}"
+            _process_ws_event(ws, {"type": "subscribe", "conversation_id": conv_id})
 
-            sub.assert_called_once_with("channel_1", ws)
+            sub.assert_called_once_with(conv_id, ws)
 
+    def test_dm_participant_can_subscribe(self, app, dm_with_partner, mocker):
+        with app.app_context():
+            _, conv_id = dm_with_partner
+            ws = _ws_for(1)
+            sub = mocker.patch("app.routes.chat_manager.subscribe")
+
+            _process_ws_event(ws, {"type": "subscribe", "conversation_id": conv_id})
+
+            sub.assert_called_once_with(conv_id, ws)
+
+    def test_non_member_subscribe_to_channel_is_denied(
+        self, app, channel_no_member, mocker
+    ):
+        with app.app_context():
+            ws = _ws_for(1)
+            sub = mocker.patch("app.routes.chat_manager.subscribe")
+
+            _process_ws_event(
+                ws,
+                {
+                    "type": "subscribe",
+                    "conversation_id": f"channel_{channel_no_member}",
+                },
+            )
+
+            sub.assert_not_called()
+
+    def test_outsider_subscribe_to_dm_is_denied(self, app, dm_with_partner, mocker):
+        with app.app_context():
+            _, conv_id = dm_with_partner
+            workspace = Workspace.get(Workspace.name == "DevOcho")
+            outsider = User.create(
+                username="ws-sub-outsider",
+                email="ws-sub-outsider@example.com",
+                display_name="Sub Outsider",
+            )
+            WorkspaceMember.create(user=outsider, workspace=workspace)
+
+            ws = _ws_for(outsider.id)
+            sub = mocker.patch("app.routes.chat_manager.subscribe")
+
+            _process_ws_event(ws, {"type": "subscribe", "conversation_id": conv_id})
+
+            sub.assert_not_called()
+
+    def test_malformed_subscribe_id_is_denied(self, app, mocker):
+        with app.app_context():
+            ws = _ws_for(1)
+            sub = mocker.patch("app.routes.chat_manager.subscribe")
+
+            _process_ws_event(ws, {"type": "subscribe", "conversation_id": "garbage"})
+
+            sub.assert_not_called()
+
+
+class TestNoopEvents:
     def test_empty_message_drops_silently(self, app, channel_and_member, mocker):
         with app.app_context():
             ws = _ws_for(1)
@@ -248,3 +309,48 @@ class TestNoopEvents:
             )
 
             handle_new_message.assert_not_called()
+
+
+class TestSafeHandleFrame:
+    """A bad frame or a transient handler error must never tear down the socket."""
+
+    def test_invalid_json_is_swallowed(self, app, mocker):
+        with app.app_context():
+            ws = _ws_for(1)
+            proc = mocker.patch("app.routes._process_ws_event")
+
+            _safe_handle_frame(ws, "not json{{{")
+
+            proc.assert_not_called()  # and no exception raised
+
+    def test_non_dict_json_is_ignored(self, app, mocker):
+        with app.app_context():
+            ws = _ws_for(1)
+            proc = mocker.patch("app.routes._process_ws_event")
+
+            _safe_handle_frame(ws, "[1, 2, 3]")
+
+            proc.assert_not_called()
+
+    def test_handler_exception_is_swallowed(self, app, mocker):
+        with app.app_context():
+            ws = _ws_for(1)
+            mocker.patch(
+                "app.routes._process_ws_event", side_effect=RuntimeError("boom")
+            )
+
+            # Must not raise — the connection stays alive.
+            _safe_handle_frame(ws, '{"type": "subscribe", "conversation_id": "x"}')
+
+    def test_mobile_send_shape_is_normalized(self, app, mocker):
+        with app.app_context():
+            ws = _ws_for(1)
+            proc = mocker.patch("app.routes._process_ws_event")
+
+            _safe_handle_frame(
+                ws, '{"type": "send_message", "content": "hi", "conversation_id": "c"}'
+            )
+
+            proc.assert_called_once()
+            passed = proc.call_args[0][1]
+            assert passed["chat_message"] == "hi"
