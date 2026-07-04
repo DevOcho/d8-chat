@@ -1,6 +1,12 @@
 <div id="chat-input-container" class="chat-input-form">
     <div id="typing-indicator" class="text-muted small"></div>
-    <form ws-send id="message-form" autocomplete="off">
+    {# Web sends go over HTTP POST (not the WebSocket) so the sender gets a
+       real success/failure instead of a fire-and-forget frame. chat.js rewrites
+       the _pending_ path to the active conversation at request time. #}
+    <form hx-post="/chat/conversations/_pending_/messages"
+          hx-swap="none"
+          id="message-form"
+          autocomplete="off">
         <input type="file" id="file-attachment-input" class="d-none" multiple>
         <input type="hidden" name="attachment_file_ids" id="attachment-file-ids">
         <div class="wysiwyg-editor-container">

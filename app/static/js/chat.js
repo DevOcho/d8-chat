@@ -1128,25 +1128,48 @@ const createEditor = function(idSuffix = '') {
             clearTimeout(state.typingTimer);
             sendTypingStatus(false);
         });
-        // Stamp every outgoing message with the conversation it belongs to.
-        // The server otherwise routes the send purely from ws.channel_id, which
-        // is per-connection state set by an earlier "subscribe". After a
-        // WebSocket drop/reconnect that state is gone until the resubscribe
-        // completes, so a message sent in that window has no conversation and
-        // is silently dropped server-side. Carrying the id in the frame itself
-        // (routes.py prefers data["conversation_id"] over ws.channel_id) makes
-        // sends self-describing and immune to that race. Only set it when the
-        // frame doesn't already carry one (subscribe/typing events set their own).
-        state.messageForm.addEventListener('htmx:wsConfigSend', (e) => {
-            const params = e.detail.parameters;
-            if (params && !params.conversation_id) {
-                const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-                if (activeConv && activeConv.dataset.conversationId) {
-                    params.conversation_id = activeConv.dataset.conversationId;
-                }
+        // Web messages POST over HTTP (the socket is push-only now). Rewrite
+        // the placeholder path to the active conversation, inject the composed
+        // message text, and cancel the request when there's nothing to send or
+        // no conversation is open. Guarded to 'post' so the in-form hx-get
+        // buttons (poll/emoji/mention), whose events bubble up to the form,
+        // pass through untouched.
+        state.messageForm.addEventListener('htmx:configRequest', (e) => {
+            if (e.detail.verb !== 'post') return;
+            if (state.isMarkdownMode) {
+                state.hiddenInput.value = preprocessMarkdown(state.markdownView.value);
+            } else {
+                updateStateAndButtons();
             }
+            const text = state.hiddenInput.value;
+            const hasText = text.trim() !== '';
+            const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
+            if (!hasText && !hasAttachment) {
+                e.preventDefault();
+                return;
+            }
+            const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+            const convId = activeConv && activeConv.dataset.conversationId;
+            if (!convId) {
+                e.preventDefault();
+                ToastManager.show('Not connected', 'Could not determine the current conversation. Please reload the page.', 'warning');
+                return;
+            }
+            e.detail.path = '/chat/conversations/' + encodeURIComponent(convId) + '/messages';
+            e.detail.parameters['chat_message'] = text;
+            clearTimeout(state.typingTimer);
+            sendTypingStatus(false);
         });
-        state.messageForm.addEventListener('htmx:wsAfterSend', () => {
+        state.messageForm.addEventListener('htmx:afterRequest', (e) => {
+            const cfg = e.detail.requestConfig;
+            // Only react to this form's own message POST, not the bubbling
+            // hx-get requests from toolbar buttons inside the form.
+            if (!cfg || cfg.verb !== 'post' || !String(cfg.path).includes('/messages')) return;
+            if (!e.detail.successful) {
+                // Keep the draft so the user can retry instead of losing it.
+                ToastManager.show('Message not sent', 'Your message could not be delivered and has been kept so you can try again.', 'danger');
+                return;
+            }
             const isThread = idSuffix.startsWith('-thread-');
 
             if (isThread) {
@@ -1170,7 +1193,6 @@ const createEditor = function(idSuffix = '') {
                     if (attachmentManager && typeof attachmentManager.reset === 'function') {
                         attachmentManager.reset();
                     }
-                    state.messageForm.setAttribute('ws-send', '');
                     resizeActiveInput();
                     focusActiveInput();
                 }
@@ -1524,8 +1546,46 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+    // After a reconnect, backfill anything broadcast while the socket was down.
+    // pub/sub is at-most-once, so a disconnected client receives none of it;
+    // without this, missed messages stay invisible until a full page refresh.
+    function backfillAfterReconnect(convId) {
+        let lastId = 0;
+        document
+            .querySelectorAll('#message-list .message-container[id^="message-"]')
+            .forEach((el) => {
+                const n = parseInt(el.id.slice('message-'.length), 10);
+                if (!Number.isNaN(n) && n > lastId) lastId = n;
+            });
+        // OOB fragments in the response apply themselves; the dedupe guard in
+        // htmx:oobAfterSwap protects against a message that also arrived live.
+        htmx.ajax('GET',
+            `/chat/conversations/${encodeURIComponent(convId)}/messages/since/${lastId}`,
+            { source: document.body, swap: 'none' }
+        ).catch(() => {});
+        htmx.ajax('GET', '/chat/sidebar/unreads',
+            { source: document.body, swap: 'none' }
+        ).catch(() => {});
+    }
+
+    // If too many messages were missed to append safely, the catch-up endpoint
+    // sets X-D8-Catchup: truncated — reload the pane instead of a partial gap.
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+        const cfg = evt.detail.requestConfig;
+        if (!cfg || !String(cfg.path).includes('/messages/since/')) return;
+        if (evt.detail.successful && evt.detail.xhr &&
+            evt.detail.xhr.getResponseHeader('X-D8-Catchup') === 'truncated') {
+            const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+            const convId = activeConv && activeConv.dataset.conversationId;
+            const link = convId && document.getElementById('link-' + convId);
+            if (link) htmx.trigger(link, 'click');
+            else window.location.reload();
+        }
+    });
+
     document.body.addEventListener('htmx:wsOpen', function(evt) {
         console.log("WebSocket Connection Opened.");
+        const wasReconnecting = isReconnecting;
         if (isReconnecting && connectionStatusBar) {
             connectionStatusBar.classList.replace('bg-warning', 'bg-success');
             connectionStatusBar.innerHTML = 'Connection restored.';
@@ -1536,17 +1596,44 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 2000);
         }
         const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+        const convId = activeConv && activeConv.dataset.conversationId;
         const typingSender = document.getElementById('typing-sender');
-        if (activeConv && activeConv.dataset.conversationId && typingSender) {
+        if (convId && typingSender) {
             const subscribeMsg = {
                 type: "subscribe",
-                conversation_id: activeConv.dataset.conversationId
+                conversation_id: convId
             };
             typingSender.setAttribute('hx-vals', JSON.stringify(subscribeMsg));
             htmx.trigger(typingSender, 'typing-event');
         }
+        if (wasReconnecting && convId) {
+            backfillAfterReconnect(convId);
+        }
         isReconnecting = false;
     });
+
+    // Show the "reconnecting" bar on a close too, not just on wsError — some
+    // drops surface only as a close frame (e.g. a server-initiated 1011).
+    document.body.addEventListener('htmx:wsClose', function(evt) {
+        const code = evt.detail && evt.detail.event && evt.detail.event.code;
+        // Clean closes (normal / going-away) and auth rejects don't reconnect,
+        // so don't nag the user with the reconnect bar for them.
+        if (code === 1000 || code === 1001 || code === 1008) return;
+        if (!isReconnecting) {
+            isReconnecting = true;
+            if (connectionStatusBar) connectionStatusBar.style.display = 'block';
+        }
+    });
+
+    // Proactively reconnect when the tab regains focus or the network returns,
+    // rather than waiting for TCP to notice a socket died while backgrounded.
+    const reconnectIfNeeded = () => {
+        if (typeof window.d8WsReconnectNow === 'function') window.d8WsReconnectNow();
+    };
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) reconnectIfNeeded();
+    });
+    window.addEventListener('online', reconnectIfNeeded);
 
     const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
@@ -1805,6 +1892,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- Scrolling logic for new messages in the main chat view ---
         if (target && target.id === 'message-list') {
+            // Dedupe: drop any message a live broadcast and a reconnect catch-up
+            // both delivered, keeping the earliest copy already in the DOM.
+            const seenIds = new Set();
+            target.querySelectorAll('.message-container[id^="message-"]').forEach((el) => {
+                if (seenIds.has(el.id)) el.remove();
+                else seenIds.add(el.id);
+            });
+
             const messagesContainer = document.getElementById('chat-messages-container');
             const mainContent = document.querySelector('main.main-content');
             const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');

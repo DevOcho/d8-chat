@@ -2,7 +2,8 @@
 <div id="thread-input-container-{{ parent_message.id }}"
      class="chat-input-form">
     <div id="typing-indicator" class="text-muted small"></div>
-    <form ws-send
+    <form hx-post="/chat/conversations/_pending_/messages"
+          hx-swap="none"
           id="message-form-thread-{{ parent_message.id }}"
           autocomplete="off">
         {# These hidden inputs provide the necessary context for a threaded reply #}

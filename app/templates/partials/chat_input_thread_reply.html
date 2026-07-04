@@ -1,7 +1,8 @@
 {# app/templates/partials/chat_input_thread_reply.html #}
 <div id="thread-input-container-{{ parent_message.id }}"
      class="chat-input-form">
-    <form ws-send
+    <form hx-post="/chat/conversations/_pending_/messages"
+          hx-swap="none"
           id="message-form-thread-{{ parent_message.id }}"
           autocomplete="off">
         {# These hidden inputs provide context for a THREAD reply that QUOTES another message #}

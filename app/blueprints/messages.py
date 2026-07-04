@@ -13,7 +13,7 @@ from flask import (
     url_for,
 )
 
-from app import _sanitize_and_linkify
+from app import _sanitize_and_linkify, limiter
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
 from app.htmx_oob import oob_by_id
@@ -33,9 +33,19 @@ from app.routes import (
     PAGE_SIZE,
     get_attachments_for_messages,
     get_reactions_for_messages,
+    handle_inbound_message,
     login_required,
 )
 from app.services import chat_service, minio_service
+
+
+def _opt_int(value):
+    """Coerce an optional form value to int, or None if empty/invalid."""
+    try:
+        return int(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
 
 messages_bp = Blueprint("messages", __name__)
 
@@ -176,6 +186,41 @@ def delete_message(message_id):
     chat_manager.broadcast(
         conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
     )
+    return "", 204
+
+
+@messages_bp.route("/chat/conversations/<conv_id_str>/messages", methods=["POST"])
+@login_required
+@limiter.limit("60 per minute")
+def post_message(conv_id_str):
+    """Web clients send chat messages here instead of over the WebSocket.
+
+    The browser's socket is push-only now: an HTTP POST gives the sender a
+    definitive success/failure instead of a fire-and-forget WS frame that a
+    half-dead socket could silently swallow (the root of the "messages
+    disappear" reports). The rendered message still lands in the sender's DOM
+    via the WS broadcast echo, so on success the UX is unchanged. Returns 204;
+    the client clears the composer on 2xx and preserves the draft on error.
+    """
+    status = handle_inbound_message(
+        sender=g.user,
+        conv_id_str=conv_id_str,
+        chat_text=request.form.get("chat_message"),
+        parent_id=_opt_int(request.form.get("parent_message_id")),
+        reply_type=request.form.get("reply_type") or None,
+        attachment_file_ids=request.form.get("attachment_file_ids") or None,
+        quoted_message_id=_opt_int(request.form.get("quoted_message_id")),
+    )
+    if status == "ok":
+        return "", 204
+    if status == "empty":
+        return "Message is empty.", 400
+    if status == "bad_request":
+        return "Malformed conversation id.", 400
+    if status == "no_conversation":
+        return "Conversation not found.", 404
+    if status == "forbidden":
+        return "You can't post to this conversation.", 403
     return "", 204
 
 

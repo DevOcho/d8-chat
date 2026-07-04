@@ -10,6 +10,7 @@ from flask import (
     Blueprint,
     current_app,
     g,
+    make_response,
     redirect,
     render_template,
     request,
@@ -22,7 +23,7 @@ from . import sock
 from .access import user_has_conversation_access
 from .chat_manager import chat_manager
 from .conversation_id import parse_conversation_id
-from .htmx_oob import oob_by_id, oob_to_selector
+from .htmx_oob import oob_to_selector
 from .models import (
     Channel,
     ChannelMember,
@@ -381,6 +382,136 @@ def chat_interface():
     )
 
 
+CATCHUP_LIMIT = 100
+
+
+@main_bp.route("/chat/conversations/<conv_id_str>/messages/since/<int:last_id>")
+@login_required
+def catch_up_messages(conv_id_str, last_id):
+    """Backfill messages newer than ``last_id`` as OOB appends to #message-list.
+
+    The web client calls this right after a WebSocket reconnect to recover
+    anything broadcast while the socket was down — pub/sub is at-most-once, so
+    those frames are otherwise lost until a full page refresh. Capped at
+    CATCHUP_LIMIT; if more exist, the ``X-D8-Catchup: truncated`` header tells
+    the client to reload the whole pane instead of appending a partial gap.
+    """
+    conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
+    if not conversation:
+        return "", 404
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return "", 400
+    if not user_has_conversation_access(g.user, parsed):
+        return "", 403
+
+    messages = list(
+        Message.select()
+        .where((Message.conversation == conversation) & (Message.id > last_id))
+        .order_by(Message.id.asc())
+        .limit(CATCHUP_LIMIT + 1)
+    )
+    truncated = len(messages) > CATCHUP_LIMIT
+    messages = messages[:CATCHUP_LIMIT]
+
+    reactions_map = get_reactions_for_messages(messages)
+    attachments_map = get_attachments_for_messages(messages)
+    parts = []
+    for m in messages:
+        msg_html = render_template(
+            "partials/message.html",
+            message=m,
+            reactions_map=reactions_map,
+            attachments_map=attachments_map,
+            Message=Message,
+        )
+        parts.append(oob_to_selector("beforeend", "#message-list", msg_html))
+
+    resp = make_response("".join(parts))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    if truncated:
+        resp.headers["X-D8-Catchup"] = "truncated"
+    return resp
+
+
+@main_bp.route("/chat/sidebar/unreads")
+@login_required
+def catch_up_sidebar():
+    """Re-emit unread-badge OOB fragments for the user's conversations.
+
+    Called by the client after a reconnect so sidebar badges reflect anything
+    that changed while the socket was down. Reuses the same bulk unread
+    computation as the initial page render.
+    """
+    user_channels = list(
+        Channel.select().join(ChannelMember).where(ChannelMember.user == g.user)
+    )
+    channel_map = {f"channel_{c.id}": c for c in user_channels}
+    dm_convs = list(
+        Conversation.select()
+        .join(UserConversationStatus)
+        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
+    )
+    channel_convs = list(
+        Conversation.select().where(
+            Conversation.conversation_id_str.in_(list(channel_map.keys()))
+        )
+    )
+    all_conversations = dm_convs + channel_convs
+    unread_info = _get_unread_info(all_conversations)
+
+    parts = []
+    for conv in all_conversations:
+        info = unread_info.get(conv.conversation_id_str, {})
+        if not info.get("has_unread"):
+            continue
+
+        if conv.type == "channel":
+            channel = channel_map.get(conv.conversation_id_str)
+            if not channel:
+                continue
+            link_text = f"# {channel.name}"
+            hx_get_url = url_for("channels.get_channel_chat", channel_id=channel.id)
+            mentions = info.get("mentions", 0)
+            template = (
+                "partials/unread_badge.html"
+                if mentions > 0
+                else "partials/bold_link.html"
+            )
+            parts.append(
+                render_template(
+                    template,
+                    conv_id_str=conv.conversation_id_str,
+                    count=mentions,
+                    link_text=link_text,
+                    hx_get_url=hx_get_url,
+                )
+            )
+        else:  # DM
+            try:
+                user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+            except ValueError:
+                continue
+            partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
+            partner = User.get_or_none(id=partner_id) if partner_id else None
+            if not partner:
+                continue
+            parts.append(
+                render_template(
+                    "partials/unread_badge.html",
+                    conv_id_str=conv.conversation_id_str,
+                    count=info.get("mentions", 0) or 1,
+                    link_text=partner.display_name or partner.username,
+                    hx_get_url=url_for("dms.get_dm_chat", other_user_id=partner_id),
+                )
+            )
+
+    resp = make_response("".join(parts))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    return resp
+
+
 def _notify_thread_participant(user_id, conversation, now, conv_id_str):
     """Sends sound notification for thread replies if needed."""
     status, _ = UserConversationStatus.get_or_create(
@@ -397,7 +528,7 @@ def _notify_thread_participant(user_id, conversation, now, conv_id_str):
         status.save()
 
 
-def _notify_all_thread_participants(ws, parent_message, conv_id_str):
+def _notify_all_thread_participants(sender, parent_message, conv_id_str):
     """Gathers all thread participants and sends them unread notifications."""
     all_participant_ids = {parent_message.user.id}
     replies = list(
@@ -409,7 +540,7 @@ def _notify_all_thread_participants(ws, parent_message, conv_id_str):
     now = utc_now()
 
     for user_id in list(all_participant_ids):
-        if user_id == ws.user.id or not chat_manager.is_user_online_in_cluster(user_id):
+        if user_id == sender.id or not chat_manager.is_user_online_in_cluster(user_id):
             continue
         chat_manager.send_to_user(
             user_id, unread_link_html, exclude_channel=conv_id_str
@@ -424,7 +555,7 @@ def _notify_all_thread_participants(ws, parent_message, conv_id_str):
             )
 
 
-def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
+def _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str):
     """Broadcasts a thread reply to relevant users."""
     from app.blueprints.api_v1 import serialize_message
 
@@ -461,7 +592,7 @@ def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
     broadcast_html += parent_in_channel_oob
 
     # Delegate the notification loop to our new helper function
-    _notify_all_thread_participants(ws, parent_message, conv_id_str)
+    _notify_all_thread_participants(sender, parent_message, conv_id_str)
 
     api_data = {
         "type": "new_thread_reply",
@@ -475,12 +606,15 @@ def _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str):
         },
     }
 
+    # sender_ws=None: messages never opt out of echoing to their sender (unlike
+    # typing events), so no _exclude_sender is needed. The sender sees their own
+    # message via the normal fan-out to whichever sockets are subscribed.
     chat_manager.broadcast(
-        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}, sender_ws=ws
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
     )
 
 
-def _broadcast_regular_message(ws, new_message, conv_id_str):
+def _broadcast_regular_message(sender, new_message, conv_id_str):
     """Broadcasts a regular message or quoted reply."""
     from app.blueprints.api_v1 import serialize_message
 
@@ -505,15 +639,10 @@ def _broadcast_regular_message(ws, new_message, conv_id_str):
     chat_manager.broadcast(
         conv_id_str,
         {"_raw_html": message_to_broadcast, "api_data": api_data},
-        sender_ws=ws,
     )
-
-    if new_message.reply_type == "quote":
-        input_html = render_template("partials/chat_input_default.html")
-        reset_payload = {
-            "_raw_html": oob_by_id("chat-input-container", "outerHTML", input_html)
-        }
-        chat_manager.send_to_user(ws.user.id, reset_payload)
+    # The web client resets its own composer on the POST's htmx:afterRequest
+    # (including reverting a quote-reply input to the default), so there's no
+    # server-pushed input reset here anymore.
 
 
 def _safe_handle_frame(ws, raw):
@@ -591,53 +720,76 @@ def _process_ws_event(ws, data):
         )
         return
 
-    # --- New Message Handling ---
-    chat_text = data.get("chat_message")
-    parent_id = data.get("parent_message_id")
-    reply_type = data.get("reply_type")
-    attachment_file_ids = data.get("attachment_file_ids")
-    quoted_message_id = data.get("quoted_message_id")
+    # --- New Message Handling (shared with the HTTP POST endpoint) ---
+    handle_inbound_message(
+        sender=ws.user,
+        conv_id_str=conv_id_str,
+        chat_text=data.get("chat_message"),
+        parent_id=data.get("parent_message_id"),
+        reply_type=data.get("reply_type"),
+        attachment_file_ids=data.get("attachment_file_ids"),
+        quoted_message_id=data.get("quoted_message_id"),
+    )
 
+
+def handle_inbound_message(
+    sender,
+    conv_id_str,
+    chat_text,
+    parent_id=None,
+    reply_type=None,
+    attachment_file_ids=None,
+    quoted_message_id=None,
+):
+    """Create, broadcast, and notify for one new message from ``sender``.
+
+    Shared by the WebSocket path (``_process_ws_event``) and the web HTTP POST
+    endpoint so both enforce identical access rules and produce identical
+    broadcasts. Returns a short status string:
+
+      "ok"              — message created and broadcast
+      "empty"           — nothing to send (no text, no attachments)
+      "no_conversation" — conv_id_str resolves to no conversation
+      "bad_request"     — malformed conversation id
+      "forbidden"       — sender isn't a member / can't post here
+    """
     if not chat_text and not attachment_file_ids:
-        return
+        return "empty"
 
     conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
     if not conversation:
-        # A message that resolves to no conversation is dropped here with no
-        # feedback to the client — the message just disappears. Historically
-        # this happened silently after a socket reconnect left ws.channel_id
-        # unset and the frame carried no conversation_id. Log it so any
-        # recurrence is visible instead of an invisible black hole.
+        # A send that resolves to no conversation is dropped. Historically this
+        # happened silently after a reconnect left ws.channel_id unset and the
+        # frame carried no conversation_id; log it so recurrences are visible.
         current_app.logger.warning(
-            "WS send dropped: no conversation for %r (user %s)",
+            "Send dropped: no conversation for %r (user %s)",
             conv_id_str,
-            getattr(ws.user, "id", None),
+            getattr(sender, "id", None),
         )
-        return
+        return "no_conversation"
 
     try:
         parsed_conv = parse_conversation_id(conversation.conversation_id_str)
     except ValueError:
-        return
+        return "bad_request"
 
-    # Membership gate: REST endpoints validate this, the WS path used to skip
-    # it. Without this check any authenticated client could post into any
-    # conversation by sending a crafted frame with another conv's id.
-    if not user_has_conversation_access(ws.user, parsed_conv):
+    # Membership gate: any authenticated client could otherwise post into any
+    # conversation by naming another conv's id.
+    if not user_has_conversation_access(sender, parsed_conv):
         current_app.logger.warning(
-            f"WS send_message blocked: user {ws.user.id} not in {conv_id_str!r}"
+            "Send blocked: user %s not in %r", sender.id, conv_id_str
         )
-        return
+        return "forbidden"
 
     if conversation.type == "channel":
         channel = Channel.get_by_id(parsed_conv.channel_id)
         if channel.posting_restricted_to_admins:
-            membership = ChannelMember.get_or_none(user=ws.user, channel=channel)
+            membership = ChannelMember.get_or_none(user=sender, channel=channel)
             if not membership or membership.role != "admin":
-                return
+                return "forbidden"
 
     new_message = chat_service.handle_new_message(
-        sender=ws.user,
+        sender=sender,
         conversation=conversation,
         chat_text=chat_text,
         parent_id=parent_id,
@@ -648,11 +800,12 @@ def _process_ws_event(ws, data):
 
     # --- Broadcast and Notification Logic ---
     if new_message.reply_type == "thread":
-        _broadcast_thread_reply(ws, new_message, parent_id, conv_id_str)
+        _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str)
     else:
-        _broadcast_regular_message(ws, new_message, conv_id_str)
+        _broadcast_regular_message(sender, new_message, conv_id_str)
 
-    chat_service.send_notifications_for_new_message(new_message, ws.user)
+    chat_service.send_notifications_for_new_message(new_message, sender)
+    return "ok"
 
 
 # --- WebSocket connection helpers ---
