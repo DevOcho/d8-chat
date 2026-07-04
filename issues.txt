@@ -18,7 +18,11 @@ We need to update the administration section with HTMX and set it up to handle m
 
 i18n
 
-If the server disconnects, it will reconnect for users at different times.  Messages sent while the other user is reconnecting are lost until a page refresh when they will show up for a user.  On the reconnect we probably need to reload the messages or do a full page refresh.
+[FIXED — WS reliability work] If the server disconnects, it will reconnect for users at different times.  Messages sent while the other user is reconnecting are lost until a page refresh when they will show up for a user.  On the reconnect we probably need to reload the messages or do a full page refresh.
+  -> On reconnect the web client now backfills missed messages via
+     GET /chat/conversations/<id>/messages/since/<last_id> (falling back to a
+     full pane reload if too many were missed). See routes.catch_up_messages
+     and chat.js backfillAfterReconnect.
 
 We need to develop an audit log for all chats so we can see if someone does something inappropriate and/or illegal.
 
@@ -50,6 +54,10 @@ There is a full page refresh when you leave a channel.  This should probably be 
 instead but it was causing issues and it's 10pm and I want this to work.  So I'm risking someone sending
 you a message at the exact same second you click the leave button (websocket disconnects).  That message will
 be missed until you reload the browser.
+  [Mitigated — WS reliability work] The reconnect catch-up (messages/since)
+  now backfills anything missed during that disconnect window, so a message
+  sent as the socket drops is recovered on reconnect rather than lost until a
+  manual reload. The full-page-refresh-on-leave itself is unchanged.
 
 Add Bots and webhooks
 

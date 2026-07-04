@@ -39,9 +39,51 @@ def test_user_presence(chat_manager):
     assert not chat_manager.is_online(user_id)
     chat_manager.set_online(user_id, mock_ws)
     assert chat_manager.is_online(user_id)
-    assert chat_manager.all_clients[user_id] is mock_ws
+    assert mock_ws in chat_manager.all_clients[user_id]
     chat_manager.set_offline(user_id)
     assert not chat_manager.is_online(user_id)
+
+
+def test_multi_socket_presence(chat_manager):
+    """A user can hold several sockets (tabs); closing one keeps them online."""
+    ws1, ws2 = Mock(), Mock()
+    chat_manager.set_online(1, ws1)
+    chat_manager.set_online(1, ws2)
+    assert chat_manager.all_clients[1] == {ws1, ws2}
+
+    # Closing one tab: still online, other socket retained.
+    went_offline = chat_manager.set_offline(1, ws1)
+    assert went_offline is False
+    assert chat_manager.is_online(1)
+    assert chat_manager.all_clients[1] == {ws2}
+
+    # Closing the last tab: now offline.
+    went_offline = chat_manager.set_offline(1, ws2)
+    assert went_offline is True
+    assert not chat_manager.is_online(1)
+    assert 1 not in chat_manager.all_clients
+
+
+def test_dispatch_user_message_hits_all_sockets(app, chat_manager):
+    """A user:* message fans out to every socket a user holds on this pod."""
+    with app.app_context():
+        ws1, ws2 = Mock(), Mock()
+        ws1.is_api_client = False
+        ws2.is_api_client = False
+        ws1.channel_id = None
+        ws2.channel_id = None
+        chat_manager.set_online(7, ws1)
+        chat_manager.set_online(7, ws2)
+
+        message = {
+            "type": "pmessage",
+            "channel": b"user:7",
+            "data": json.dumps({"type": "sound"}),
+        }
+        chat_manager._dispatch(message)
+
+        ws1.send.assert_called_once()
+        ws2.send.assert_called_once()
 
 
 def test_subscribe_and_unsubscribe(chat_manager):
@@ -137,9 +179,30 @@ def test_handle_typing_event(chat_manager):
 
 
 def test_is_user_online_in_cluster(chat_manager):
-    """Tests checking online status checks Redis set."""
-    chat_manager.redis_client.sismember.return_value = True
+    """A fresh presence score (within the TTL window) counts as online."""
+    import time
+
+    chat_manager.redis_client.zscore.return_value = time.time()
     assert chat_manager.is_user_online_in_cluster(1) is True
+
+
+def test_is_user_offline_when_score_stale(chat_manager):
+    """A presence score older than the TTL window counts as offline."""
+    import time
+
+    from app.chat_manager import PRESENCE_TTL
+
+    chat_manager.redis_client.zscore.return_value = time.time() - PRESENCE_TTL - 10
+    assert chat_manager.is_user_online_in_cluster(1) is False
+
+
+def test_set_online_stamps_presence_zset(chat_manager):
+    """Connecting stamps the presence ZSET immediately."""
+    chat_manager.set_online(5, Mock())
+    chat_manager.redis_client.zadd.assert_called()
+    args = chat_manager.redis_client.zadd.call_args[0]
+    assert args[0] == "presence:online"
+    assert "5" in args[1]
 
 
 def test_handle_disconnect(chat_manager):
@@ -148,8 +211,7 @@ def test_handle_disconnect(chat_manager):
     mock_ws.channel_id = None  # otherwise auto-Mock makes it truthy
     mock_ws.user.username = "testuser"
     mock_ws.user.id = 1
-    chat_manager.all_clients[1] = mock_ws
-    chat_manager.clients.add(mock_ws)
+    chat_manager.set_online(1, mock_ws)
 
     chat_manager._handle_disconnect(mock_ws)
 
@@ -205,8 +267,7 @@ def test_send_message_exception(chat_manager):
     mock_ws.user.id = 1
     mock_ws.send.side_effect = Exception("Socket Closed")
 
-    chat_manager.all_clients[1] = mock_ws
-    chat_manager.clients.add(mock_ws)
+    chat_manager.set_online(1, mock_ws)
 
     # This should trigger an exception catch and disconnect
     chat_manager._send_message(mock_ws, "test html")

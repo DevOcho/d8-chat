@@ -178,7 +178,7 @@
                                     {% endwith %}
                                     <!-- Presence Indicator Dot -->
                                     {% set presence_class = "presence-away" %} {# Default to offline #}
-                                    {% if online_users.get(user.id) %}
+                                    {% if user.id in online_users %}
                                         {% if user.presence_status == 'busy' %}
                                             {% set presence_class = "presence-busy" %}
                                         {% else %}

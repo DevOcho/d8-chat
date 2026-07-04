@@ -9,14 +9,20 @@ firebase-admin
 Flask
 Flask-Limiter==3.13
 flask-login
-flask-sock
+# Realtime stack pinned: redis-py pub/sub reconnect semantics and flask-sock /
+# simple-websocket behavior vary across majors, and the WS reliability work
+# depends on the shipped behavior. Bump deliberately, not incidentally.
+flask-sock==0.7.0
 flask-wtf
-gevent
-gunicorn
+gevent==25.8.2
+gunicorn==23.0.0
 Markdown
 minio
 peewee==3.18.2
 Pillow
+# psycogreen makes psycopg2 cooperate with gevent (patched in run.py) so DB
+# calls yield instead of freezing the worker's event loop.
+psycogreen==1.0.2
 psycopg2-binary
 pydantic
 Pygments
@@ -28,8 +34,8 @@ pytest-mock
 pytest-playwright
 python-dotenv
 python-magic
-redis
+redis==7.0.0
 requests
 rich
 sentry-sdk[flask]
-simple-websocket
+simple-websocket==1.1.0

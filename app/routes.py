@@ -5,11 +5,13 @@
 import datetime
 import functools
 import json
+import time
 
 from flask import (
     Blueprint,
     current_app,
     g,
+    jsonify,
     make_response,
     redirect,
     render_template,
@@ -19,8 +21,9 @@ from flask import (
 )
 from peewee import JOIN, fn
 
-from . import sock
+from . import limiter, sock
 from .access import user_has_conversation_access
+from .background import spawn_background
 from .chat_manager import chat_manager
 from .conversation_id import parse_conversation_id
 from .htmx_oob import oob_to_selector
@@ -373,7 +376,9 @@ def chat_interface():
         "chat.html",
         channels=user_channels,
         direct_message_users=direct_message_users,
-        online_users=chat_manager.online_users,
+        # Cluster-wide presence (a set of online user ids) so the sidebar dots
+        # reflect users connected to any worker, not just this one.
+        online_users=chat_manager.online_user_ids(),
         unread_info=unread_info,
         has_unreads=has_unreads,
         has_unread_threads=has_unread_threads,
@@ -512,6 +517,52 @@ def catch_up_sidebar():
     return resp
 
 
+@main_bp.route("/healthz")
+@limiter.exempt
+def healthz():
+    """Realtime-aware health check for the readiness probe.
+
+    Healthy (200) only when Redis is reachable, the pub/sub listener has stamped
+    a heartbeat recently, and a trivial DB query works. Reports 503 otherwise so
+    a worker whose listener has wedged is pulled from the load balancer. The
+    listener self-heals, so this is deliberately NOT wired to a liveness probe
+    (a Redis blip shouldn't restart-loop the pods).
+    """
+    status = {"redis": "unknown", "listener_age_s": None, "db": "unknown"}
+    ok = True
+
+    try:
+        if chat_manager.redis_client:
+            chat_manager.redis_client.ping()
+            status["redis"] = "ok"
+        else:
+            status["redis"] = "absent"
+    except Exception:  # pylint: disable=broad-exception-caught
+        status["redis"] = "fail"
+        ok = False
+
+    hb = chat_manager.listener_heartbeat
+    if hb:
+        age = time.time() - hb
+        status["listener_age_s"] = round(age, 1)
+        if age > 60:
+            ok = False
+    # hb == 0 means the listener hasn't started stamping yet (fresh worker);
+    # don't fail readiness on that or the pod could never come up.
+
+    try:
+        _ws_db_connect()
+        db.execute_sql("SELECT 1")
+        status["db"] = "ok"
+    except Exception:  # pylint: disable=broad-exception-caught
+        status["db"] = "fail"
+        ok = False
+    finally:
+        _ws_db_close()
+
+    return jsonify(status), (200 if ok else 503)
+
+
 def _notify_thread_participant(user_id, conversation, now, conv_id_str):
     """Sends sound notification for thread replies if needed."""
     status, _ = UserConversationStatus.get_or_create(
@@ -645,6 +696,32 @@ def _broadcast_regular_message(sender, new_message, conv_id_str):
     # server-pushed input reset here anymore.
 
 
+# Token-bucket parameters for per-connection WS event rate limiting: a 60-event
+# burst that refills at 6/sec (≈60 events / 10s sustained).
+_WS_RATE_CAPACITY = 60.0
+_WS_RATE_REFILL_PER_SEC = 6.0
+
+
+def _ws_rate_ok(ws):
+    """Per-connection token bucket. Returns False when the client is over its
+    event budget. Tolerant of test Mock sockets (which have no real counters)."""
+    now = time.time()
+    tokens = getattr(ws, "_rate_tokens", None)
+    if not isinstance(tokens, (int, float)):
+        tokens = _WS_RATE_CAPACITY
+    last = getattr(ws, "_rate_last", None)
+    if not isinstance(last, (int, float)):
+        last = now
+    tokens = min(_WS_RATE_CAPACITY, tokens + (now - last) * _WS_RATE_REFILL_PER_SEC)
+    if tokens < 1.0:
+        ws._rate_tokens = tokens
+        ws._rate_last = now
+        return False
+    ws._rate_tokens = tokens - 1.0
+    ws._rate_last = now
+    return True
+
+
 def _safe_handle_frame(ws, raw):
     """Process one inbound WS frame without ever letting a bad frame kill the
     connection.
@@ -665,6 +742,16 @@ def _safe_handle_frame(ws, raw):
         )
         return
     if not isinstance(data, dict):
+        return
+
+    # Per-connection rate limit (flask-limiter only covers HTTP). Drop — but
+    # don't close — frames once a client exceeds the bucket, so a chatty or
+    # buggy client can't flood the worker.
+    if not _ws_rate_ok(ws):
+        current_app.logger.warning(
+            "WS frame rate-limited for user %s",
+            getattr(getattr(ws, "user", None), "id", None),
+        )
         return
 
     # API clients send {"type": "send_message", "content": "..."}; normalize to
@@ -804,7 +891,12 @@ def handle_inbound_message(
     else:
         _broadcast_regular_message(sender, new_message, conv_id_str)
 
-    chat_service.send_notifications_for_new_message(new_message, sender)
+    # Notification fan-out (badges, sounds, desktop + FCM push) runs off the hot
+    # path so the sender's send returns immediately and slow FCM HTTP can't
+    # block the gevent worker.
+    spawn_background(
+        chat_service.send_notifications_for_new_message, new_message, sender
+    )
     return "ok"
 
 
@@ -871,8 +963,11 @@ def _teardown_ws(ws, label):
     user = ws.user
     try:
         _ws_db_connect()
-        chat_manager.set_offline(user.id)
-        _broadcast_presence(user.id, "away")
+        went_offline = chat_manager.set_offline(user.id, ws)
+        # Only announce away when the user's last socket on this worker closed;
+        # otherwise a second tab is still connected and they're not away.
+        if went_offline:
+            _broadcast_presence(user.id, "away")
         chat_manager.unsubscribe(ws)
     finally:
         _ws_db_close()

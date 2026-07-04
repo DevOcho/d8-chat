@@ -51,6 +51,25 @@ val ws = client.newWebSocket(request, listener)
 
 > **Migration note:** Earlier drafts of this document showed `?token=…` in the URL. That mechanism has been removed and is no longer accepted. Update any client built against the older spec.
 
+### Keepalive, reconnect, and delivery guarantees
+
+* **Server pings.** The server sends a WebSocket PING control frame every ~25s.
+  Keep your client library's automatic PONG enabled (it is by default) — an idle
+  socket that stops answering pings is torn down so a dead connection doesn't
+  linger half-open. You do **not** need to send application-level pings.
+* **Reconnect.** On an unexpected close, reconnect with jittered exponential
+  backoff (e.g. capped at ~30s). Do **not** reconnect on close code **1008**
+  (auth rejected) — refresh the token first. After reconnecting you must
+  **re-subscribe** to the active conversation (`{"type":"subscribe", ...}`).
+* **Delivery is at-most-once; fill gaps yourself.** Redis pub/sub does not
+  replay. Any event broadcast while you were disconnected is **not** re-sent on
+  reconnect. After reconnecting, re-fetch history with
+  `GET /api/v1/conversations/<id>/messages` (see *Fetch Message History*) using
+  the id of the last message you already have, and reconcile. Treat realtime
+  events as a fast path, not a guaranteed log.
+* **Presence lag.** Cluster presence decays on a heartbeat TTL, so a user who
+  disconnects may briefly still read as online (up to ~90s) before aging out.
+
 ---
 
 ## 2. Data Models

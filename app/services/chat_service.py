@@ -115,7 +115,7 @@ def handle_new_message(
                 )
                 member_ids = {m.user_id for m in member_ids_query}
                 online_channel_members_ids = member_ids.intersection(
-                    chat_manager.online_users.keys()
+                    chat_manager.online_user_ids()
                 )
                 if online_channel_members_ids:
                     online_users = User.select().where(

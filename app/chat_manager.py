@@ -12,6 +12,21 @@ from flask import current_app
 from .models import Conversation, UserConversationStatus, utc_now
 from .ws_utils import LOCK_TYPES
 
+# Cluster presence is a Redis sorted set: member = user id, score = the unix
+# time of that user's most recent heartbeat. A TTL-by-decay model (rather than a
+# plain SET) means a crashed/OOM-killed worker can't leave users pinned "online"
+# forever — stale scores simply age out, so suppressed pushes self-heal.
+PRESENCE_KEY = "presence:online"
+PRESENCE_TTL = 90  # a score newer than this many seconds counts as online
+PRESENCE_HEARTBEAT_INTERVAL = 30  # how often each worker re-stamps its users
+PRESENCE_SWEEP_MAX_AGE = 300  # prune members older than this on heartbeat
+
+# Cap per-user sockets on a single worker so a runaway client can't open
+# unbounded connections. When exceeded, the oldest-tracked socket is closed to
+# make room for the new one.
+MAX_SOCKETS_PER_USER = 10
+STATS_LOG_INTERVAL = 60  # seconds between per-worker WS stats log lines
+
 
 class ChatManager:
     """Manages WebSocket clients, online status, and Redis Pub/Sub broadcasting."""
@@ -28,7 +43,10 @@ class ChatManager:
         # listener; listener_restarts counts supervised reconnects.
         self.listener_heartbeat = 0.0
         self.listener_restarts = 0
+        self.sends_ok = 0
+        self.sends_failed = 0
         self._last_presence_heartbeat = 0.0
+        self._last_stats_log = 0.0
 
     def initialize(self, app):
         """Initializes the Valkey/Redis connection."""
@@ -93,6 +111,7 @@ class ChatManager:
                     )
                     self.listener_heartbeat = time.time()
                     self._heartbeat_presence_maybe()
+                    self._log_stats_maybe()
 
                     if message is None or message.get("type") != "pmessage":
                         continue
@@ -131,11 +150,50 @@ class ChatManager:
             pass
 
     def _heartbeat_presence_maybe(self):
-        """Hook for periodic cluster-presence heartbeat (Phase 3.2).
+        """Re-stamp presence for this worker's connected users, ~every 30s.
 
-        No-op placeholder until TTL-based presence lands; keeping the call site
-        here means the listener's 5s wake-up already drives it.
+        Driven by the listener loop's 5s wake-up. Refreshing the score keeps
+        genuinely-online users online; a disconnected user stops being refreshed
+        and ages out. Also opportunistically prunes very old members so the ZSET
+        can't grow unbounded from crashed workers.
         """
+        if not self.redis_client:
+            return
+        now = time.time()
+        if now - self._last_presence_heartbeat < PRESENCE_HEARTBEAT_INTERVAL:
+            return
+        self._last_presence_heartbeat = now
+        user_ids = list(self.all_clients.keys())
+        try:
+            if user_ids:
+                self.redis_client.zadd(
+                    PRESENCE_KEY, {str(uid): now for uid in user_ids}
+                )
+            self.redis_client.zremrangebyscore(
+                PRESENCE_KEY, "-inf", now - PRESENCE_SWEEP_MAX_AGE
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            current_app.logger.exception("presence heartbeat failed")
+
+    def _log_stats_maybe(self):
+        """Emit one per-worker WS stats line every STATS_LOG_INTERVAL seconds.
+
+        Gives operators a heartbeat of realtime health (socket counts, send
+        success/failure, listener restarts) that was previously invisible.
+        """
+        now = time.time()
+        if now - self._last_stats_log < STATS_LOG_INTERVAL:
+            return
+        self._last_stats_log = now
+        current_app.logger.info(
+            "ws_stats sockets=%s users=%s sends_ok=%s sends_failed=%s "
+            "listener_restarts=%s",
+            len(self.clients),
+            len(self.all_clients),
+            self.sends_ok,
+            self.sends_failed,
+            self.listener_restarts,
+        )
 
     def _dispatch(self, message):
         """Fan a single pub/sub pmessage out to the matching local clients."""
@@ -147,17 +205,15 @@ class ChatManager:
 
         if channel_name.startswith("user:"):
             target_user_id = int(channel_name.split(":", 1)[1])
-            if target_user_id in self.all_clients:
-                ws = self.all_clients[target_user_id]
-
-                # Filter out messages meant to be excluded for the active channel
-                exclude_channel = payload_data.get("_exclude_channel")
+            # Deliver to every socket this user holds on this worker (multi-tab
+            # / web + mobile), applying the active-channel exclusion per socket.
+            exclude_channel = payload_data.get("_exclude_channel")
+            for ws in list(self.all_clients.get(target_user_id, ())):
                 if (
                     exclude_channel
                     and getattr(ws, "channel_id", None) == exclude_channel
                 ):
-                    return
-
+                    continue
                 self._send_message(ws, payload_data)
             return
 
@@ -210,7 +266,9 @@ class ChatManager:
                     self._encode_and_send(ws, message)
             else:
                 self._encode_and_send(ws, message)
+            self.sends_ok += 1
         except Exception:  # pylint: disable=broad-exception-caught
+            self.sends_failed += 1
             current_app.logger.exception(f"Error sending to client {ws}")
             self._handle_disconnect(ws)
 
@@ -285,40 +343,126 @@ class ChatManager:
         self.redis_client.publish(redis_channel, json.dumps(payload_data))
 
     def _handle_disconnect(self, ws):
-        user_id_to_remove = None
-        for uid, client_ws in self.all_clients.items():
-            if client_ws == ws:
-                user_id_to_remove = uid
+        owner = None
+        for uid, socket_set in list(self.all_clients.items()):
+            if ws in socket_set:
+                owner = uid
                 break
-        if user_id_to_remove:
-            self.set_offline(user_id_to_remove)
+        if owner is not None:
+            self.set_offline(owner, ws)
         self.unsubscribe(ws)
         self.clients.discard(ws)
 
+    def local_sockets(self, user_id):
+        """Snapshot list of this worker's sockets for a user (may be empty)."""
+        return list(self.all_clients.get(user_id, ()))
+
+    def send_local(self, user_id, message):
+        """Send to all of a user's sockets on THIS worker (no pub/sub).
+
+        Best-effort, same-worker UI nudges (e.g. channel add/remove). Routed
+        through _send_message so the per-connection send lock and disconnect
+        handling apply.
+        """
+        for ws in self.local_sockets(user_id):
+            self._send_message(ws, message)
+
     def set_online(self, user_id, ws):
-        """Marks a user as online and tracks their websocket connection."""
+        """Register a websocket for a user (a user may hold several at once —
+        multiple tabs, or web + mobile). Marks the user online cluster-wide."""
+        existing = self.all_clients.setdefault(user_id, set())
+        # Enforce the per-user cap on this worker: evict an existing socket to
+        # make room rather than letting a client open unbounded connections.
+        # (A backstop against abuse — eviction order isn't significant.)
+        while len(existing) >= MAX_SOCKETS_PER_USER:
+            victim = next(iter(existing))
+            existing.discard(victim)
+            self.clients.discard(victim)
+            try:
+                victim.close(reason=1008, message="Too many connections")
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
         self.clients.add(ws)
         self.online_users[user_id] = "online"
-        self.all_clients[user_id] = ws
+        existing.add(ws)
         if self.redis_client:
-            self.redis_client.sadd("global:online_users", user_id)
+            # Stamp presence immediately so it's visible cluster-wide without
+            # waiting for the next heartbeat.
+            try:
+                self.redis_client.zadd(PRESENCE_KEY, {str(user_id): time.time()})
+            except Exception:  # pylint: disable=broad-exception-caught
+                current_app.logger.exception("presence zadd failed on connect")
 
-    def set_offline(self, user_id):
-        """Marks a user as offline and cleans up their state."""
-        self.online_users.pop(user_id, None)
+    def set_offline(self, user_id, ws=None):
+        """Deregister a user's socket. The user only goes offline (locally and
+        cluster-wide) once their last local socket is gone — closing one of two
+        tabs must not stop the other tab from receiving DM badges/sounds.
+
+        ws=None removes the user entirely (all their local sockets), used when a
+        full teardown is wanted rather than a single-socket close.
+
+        Returns True if the user is now fully offline on this worker (so the
+        caller can decide whether to broadcast a presence-away), False if other
+        sockets remain.
+        """
+        socket_set = self.all_clients.get(user_id)
+        if ws is not None and socket_set is not None:
+            socket_set.discard(ws)
+            self.clients.discard(ws)
+            if socket_set:
+                return False  # other sockets remain; still online
+        else:
+            for existing in socket_set or ():
+                self.clients.discard(existing)
+
         self.all_clients.pop(user_id, None)
-        if self.redis_client:
-            self.redis_client.srem("global:online_users", user_id)
+        self.online_users.pop(user_id, None)
+        # Deliberately no ZREM here: another worker may still hold a socket for
+        # this user. Their presence score simply stops being refreshed and ages
+        # out within PRESENCE_TTL, so a real disconnect self-clears without
+        # risking a false-offline while another worker is still serving them.
+        return True
 
     def is_online(self, user_id):
         """Checks if a user is online in the current pod."""
         return user_id in self.online_users
 
     def is_user_online_in_cluster(self, user_id):
-        """Checks if a user is online across ANY worker via Redis."""
+        """True if the user has a fresh presence heartbeat on ANY worker."""
         if self.redis_client:
-            return self.redis_client.sismember("global:online_users", str(user_id))
+            try:
+                score = self.redis_client.zscore(PRESENCE_KEY, str(user_id))
+            except Exception:  # pylint: disable=broad-exception-caught
+                return user_id in self.online_users
+            if not isinstance(score, (int, float)):
+                # Test doubles (Mock) or a missing member: fall back to local.
+                return user_id in self.online_users
+            return score >= time.time() - PRESENCE_TTL
         return user_id in self.online_users
+
+    def online_user_ids(self):
+        """Set of user ids currently online anywhere in the cluster.
+
+        Falls back to this worker's local view when Redis is unavailable or a
+        test double returns a non-list (so unit tests can patch online_users).
+        """
+        if self.redis_client:
+            try:
+                raw = self.redis_client.zrangebyscore(
+                    PRESENCE_KEY, time.time() - PRESENCE_TTL, "+inf"
+                )
+            except Exception:  # pylint: disable=broad-exception-caught
+                return set(self.online_users.keys())
+            if not isinstance(raw, (list, tuple, set)):
+                return set(self.online_users.keys())
+            result = set()
+            for member in raw:
+                try:
+                    result.add(int(member))
+                except (TypeError, ValueError):
+                    continue
+            return result
+        return set(self.online_users.keys())
 
     def broadcast_to_all(self, message):
         """Publishes a message to all users globally."""

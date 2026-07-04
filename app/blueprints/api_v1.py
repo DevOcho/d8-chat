@@ -808,8 +808,13 @@ def create_message(conv_id_str):
             conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
         )
 
-    # 5. Process standard push notifications / badges for inactive users
-    chat_service.send_notifications_for_new_message(new_message, g.api_user)
+    # 5. Process standard push notifications / badges for inactive users, off
+    #    the hot path so slow FCM HTTP can't block the response / worker.
+    from app.background import spawn_background
+
+    spawn_background(
+        chat_service.send_notifications_for_new_message, new_message, g.api_user
+    )
 
     # 6. Return the created message object to the REST caller
     return jsonify(message_data), 201
@@ -897,7 +902,21 @@ def toggle_reaction(message_id):
             "reactions": grouped_reactions,
         },
     }
-    chat_manager.broadcast(conv_id_str, {"api_data": api_data})
+    # Include the HTML fragment so web clients update too (parity with the web
+    # /react endpoint); without it web clients received an empty payload.
+    from flask import render_template
+
+    from app.htmx_oob import oob_by_id
+
+    reactions_html = render_template(
+        "partials/reactions.html", message=message, grouped_reactions=grouped_reactions
+    )
+    broadcast_html = oob_by_id(
+        f"reactions-container-{int(message.id)}", "innerHTML", reactions_html
+    )
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
     return jsonify(api_data["data"]), 200
 
 
@@ -929,7 +948,25 @@ def edit_message(message_id):
     conv_id_str = message.conversation.conversation_id_str
 
     api_data = {"type": "message_edited", "data": message_data}
-    chat_manager.broadcast(conv_id_str, {"api_data": api_data})
+    # Parity with the web edit path: send the re-rendered message HTML as an OOB
+    # replace so web clients update in place, not just mobile.
+    from flask import render_template
+
+    edited_html = render_template(
+        "partials/message.html",
+        message=message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+    )
+    broadcast_html = edited_html.replace(
+        f'id="message-{message.id}"',
+        f'id="message-{message.id}" hx-swap-oob="true"',
+        1,
+    )
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
     return jsonify(message_data), 200
 
 
@@ -964,7 +1001,13 @@ def delete_message(message_id):
         "type": "message_deleted",
         "data": {"message_id": message_id, "conversation_id_str": conv_id_str},
     }
-    chat_manager.broadcast(conv_id_str, {"api_data": api_data})
+    # Parity with the web delete path: OOB-delete the message node for web clients.
+    from app.htmx_oob import oob_by_id
+
+    broadcast_html = oob_by_id(f"message-{int(message_id)}", "delete")
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
     return "", 204
 
 

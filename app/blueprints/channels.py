@@ -1,5 +1,4 @@
 # app/blueprints/channels.py
-import json
 import re
 
 from flask import (
@@ -380,13 +379,12 @@ def add_channel_member(channel_id):
     UserConversationStatus.get_or_create(
         user_id=user_id_to_add, conversation=conversation
     )
-    if user_id_to_add in chat_manager.all_clients:
+    if chat_manager.local_sockets(user_id_to_add):
         try:
-            recipient_ws = chat_manager.all_clients[user_id_to_add]
             new_channel_html = render_template(
                 "partials/channel_list_item.html", channel=channel
             )
-            recipient_ws.send(new_channel_html)
+            chat_manager.send_local(user_id_to_add, new_channel_html)
         except Exception:
             current_app.logger.exception(
                 f"Could not send real-time channel add to user {user_id_to_add}"
@@ -514,7 +512,7 @@ def remove_channel_member(channel_id, user_id_to_remove):
         broadcast_html = oob_to_selector("beforeend", "#message-list", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
-        if user_id_to_remove in chat_manager.all_clients:
+        if chat_manager.local_sockets(user_id_to_remove):
             try:
                 remove_html = oob_by_id(f"channel-item-{int(channel_id)}", "delete")
                 notification = {
@@ -523,9 +521,8 @@ def remove_channel_member(channel_id, user_id_to_remove):
                     "body": f"You have been removed from #{channel.name} by {g.user.username}.",
                     "icon": external_url_for("static", filename="favicon.ico"),
                 }
-                recipient_ws = chat_manager.all_clients[user_id_to_remove]
-                recipient_ws.send(remove_html)
-                recipient_ws.send(json.dumps(notification))
+                chat_manager.send_local(user_id_to_remove, remove_html)
+                chat_manager.send_local(user_id_to_remove, notification)
             except Exception:
                 current_app.logger.exception(
                     f"Could not send removal notification to user {user_id_to_remove}"
@@ -1036,7 +1033,7 @@ def mention_search(conversation_id_str):
             ChannelMember.channel == channel
         )
         member_ids = {m.user_id for m in member_ids_query}
-        online_ids = member_ids.intersection(chat_manager.online_users.keys())
+        online_ids = member_ids.intersection(chat_manager.online_user_ids())
         online_member_count = len(online_ids)
 
         # Helper for pluralizing "member" vs "members"

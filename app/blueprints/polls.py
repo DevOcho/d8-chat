@@ -103,8 +103,18 @@ def create_poll():
     )
     broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
 
-    # Broadcast the new poll to everyone in the channel
-    chat_manager.broadcast(conv_id_str, broadcast_html, sender_ws=None)
+    # Broadcast the new poll to everyone in the channel. Include api_data so
+    # mobile clients receive the poll as a structured new_message instead of raw
+    # HTML they can't render.
+    from app.blueprints.api_v1 import serialize_message
+
+    api_data = {
+        "type": "new_message",
+        "data": serialize_message(poll_message, reactions_map, attachments_map),
+    }
+    chat_manager.broadcast(
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
+    )
 
     # Return a response that closes the modal for the creator
     response = make_response()
@@ -161,8 +171,15 @@ def vote_on_poll(option_id):
     broadcast_html = render_template(
         "partials/message_poll_oob_update.html", poll_context=poll_context
     )
+    conv_id_str = message.conversation.conversation_id_str
+    # api_data lets mobile clients know this poll's tallies changed so they can
+    # refresh the message (the OOB HTML is web-only).
+    api_data = {
+        "type": "poll_update",
+        "data": {"message_id": message.id, "conversation_id_str": conv_id_str},
+    }
     chat_manager.broadcast(
-        message.conversation.conversation_id_str, broadcast_html, sender_ws=None
+        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
     )
 
     # Return the full updated partial directly to the user who voted

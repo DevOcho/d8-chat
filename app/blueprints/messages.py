@@ -511,7 +511,7 @@ def jump_to_message(message_id):
                 "partials/dm_list_item_oob.html",
                 user=other_user,
                 conv_id_str=conversation.conversation_id_str,
-                is_online=other_user.id in chat_manager.online_users,
+                is_online=chat_manager.is_user_online_in_cluster(other_user.id),
             )
 
     header_html = oob_by_id("chat-header-container", "true", header_html_content)
