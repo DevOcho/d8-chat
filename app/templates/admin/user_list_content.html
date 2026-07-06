@@ -43,6 +43,21 @@
                        hx-get="{{ url_for('admin.edit_user', user_id=user.id) }}"
                        hx-target="#admin-content"
                        class="btn btn-sm btn-secondary">Edit</a>
+                    {% if user.id != g.user.id %}
+                        {% if user.is_active %}
+                            <button type="button"
+                                    hx-post="{{ url_for('admin.deactivate_user', user_id=user.id) }}"
+                                    hx-target="#admin-content"
+                                    hx-confirm="Deactivate {{ user.username }}? They lose all access immediately. Their message history is kept and you can reactivate them later."
+                                    class="btn btn-sm btn-danger">Deactivate</button>
+                        {% else %}
+                            <button type="button"
+                                    hx-post="{{ url_for('admin.reactivate_user', user_id=user.id) }}"
+                                    hx-target="#admin-content"
+                                    hx-confirm="Reactivate {{ user.username }}? They will be able to log in again."
+                                    class="btn btn-sm btn-success">Reactivate</button>
+                        {% endif %}
+                    {% endif %}
                 </td>
             </tr>
         {% else %}

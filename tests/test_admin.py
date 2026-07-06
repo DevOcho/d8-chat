@@ -1,7 +1,14 @@
 # tests/test_admin.py
 import pytest
 
-from app.models import Channel, ChannelMember, User, Workspace, WorkspaceMember
+from app.models import (
+    Channel,
+    ChannelMember,
+    DeviceToken,
+    User,
+    Workspace,
+    WorkspaceMember,
+)
 
 
 @pytest.fixture
@@ -97,6 +104,58 @@ def test_admin_edit_user(admin_client):
     updated_user = User.get_by_id(1)
     assert updated_user.username == "edited_testuser"
     assert updated_user.email == "edited@test.com"
+
+
+def test_admin_deactivate_user(admin_client):
+    """Deactivating a user flips is_active, blocks auth, and clears push tokens."""
+    user = User.get_by_id(1)  # testuser (a member, seeded by conftest)
+    assert user.is_active is True
+    DeviceToken.create(user=user, token="fcm-token-abc", platform="android")
+
+    res = admin_client.post(f"/admin/users/{user.id}/deactivate")
+    assert res.status_code == 200
+    assert b"has been deactivated" in res.data
+
+    refreshed = User.get_by_id(1)
+    assert refreshed.is_active is False
+    # Canonical auth gate now refuses the account everywhere.
+    assert User.get_active_by_id(1) is None
+    # Push device tokens were purged so a departed device stops getting pushes.
+    assert DeviceToken.select().where(DeviceToken.user == user).count() == 0
+
+
+def test_admin_reactivate_user(admin_client):
+    """A deactivated user can be restored to active."""
+    user = User.get_by_id(1)
+    user.is_active = False
+    user.save()
+
+    res = admin_client.post(f"/admin/users/{user.id}/reactivate")
+    assert res.status_code == 200
+    assert b"has been reactivated" in res.data
+
+    refreshed = User.get_by_id(1)
+    assert refreshed.is_active is True
+    assert User.get_active_by_id(1) is not None
+
+
+def test_admin_cannot_deactivate_self(admin_client):
+    """An admin can't deactivate their own account (avoids locking themselves out)."""
+    admin = User.get(User.username == "superadmin")
+
+    res = admin_client.post(f"/admin/users/{admin.id}/deactivate")
+    assert res.status_code == 200
+    assert b"your own account" in res.data
+    assert User.get(User.username == "superadmin").is_active is True
+
+
+def test_deactivate_user_requires_admin(logged_in_client):
+    """A non-admin can't reach the deactivate route."""
+    res = logged_in_client.post("/admin/users/1/deactivate")
+    assert res.status_code == 302
+    assert "/chat" in res.headers["Location"]
+    # The regular user is untouched.
+    assert User.get_by_id(1).is_active is True
 
 
 def test_admin_create_duplicate_user(admin_client):

@@ -15,10 +15,12 @@ from flask import (
 from peewee import JOIN, IntegrityError, fn
 
 from ..audit import audit
+from ..chat_manager import chat_manager
 from ..models import (
     Channel,
     ChannelMember,
     Conversation,
+    DeviceToken,
     Hashtag,
     Message,
     MessageHashtag,
@@ -295,6 +297,102 @@ def edit_user(user_id):
         else "admin/edit_user.html"
     )
     return render_template(template_name, user=user, workspace_member=workspace_member)
+
+
+def _render_user_list():
+    """Re-render the user-management table partial (used after a mutation).
+
+    Matches the HTMX branch of ``list_users`` so a deactivate/reactivate action
+    can swap the refreshed table into ``#admin-content`` and surface its flash.
+    """
+    users_with_roles = (
+        User.select(User, WorkspaceMember.role)
+        .join(WorkspaceMember, on=(User.id == WorkspaceMember.user))
+        .order_by(User.id)
+    )
+    return render_template("admin/user_list_content.html", users=users_with_roles)
+
+
+def _active_admin_count():
+    """Count users who are both active and hold the workspace 'admin' role."""
+    return (
+        User.select()
+        .join(WorkspaceMember, on=(User.id == WorkspaceMember.user))
+        .where((WorkspaceMember.role == "admin") & (User.is_active))
+        .count()
+    )
+
+
+@admin_bp.route("/users/<int:user_id>/deactivate", methods=["POST"])
+@admin_required
+def deactivate_user(user_id):
+    """Soft-delete a user: revoke all access while preserving their history.
+
+    Sets ``is_active = False`` — which ``User.get_active_by_id`` enforces at
+    every login, session, API-token and SSO entry point — deletes their push
+    device tokens, and best-effort closes any live socket this worker holds for
+    them. Reversible via :func:`reactivate_user`.
+
+    We deliberately never hard-delete the row: messages, reactions, mentions,
+    votes and uploaded files all foreign-key back to it, so a row delete would
+    either fail on those constraints or destroy the user's chat history.
+    """
+    user = User.get_or_none(id=user_id)
+    if not user:
+        flash("User not found.", "danger")
+        return _render_user_list()
+
+    if user.id == g.user.id:
+        flash("You can't deactivate your own account.", "danger")
+        return _render_user_list()
+
+    member = WorkspaceMember.get_or_none(user=user)
+    if member and member.role == "admin" and _active_admin_count() <= 1:
+        flash("You can't deactivate the only remaining admin.", "danger")
+        return _render_user_list()
+
+    if not user.is_active:
+        flash(f"User '{user.username}' is already deactivated.", "info")
+        return _render_user_list()
+
+    with db.atomic():
+        user.is_active = False
+        user.save()
+        DeviceToken.delete().where(DeviceToken.user == user).execute()
+
+    # Best-effort: close any socket this worker holds for the user so an open
+    # tab stops receiving right away. Sockets on other workers drop on their
+    # next idle-reconnect, which re-auths through get_active_by_id and is
+    # refused; new connections are blocked at the WS handshake regardless.
+    for ws in chat_manager.local_sockets(user.id):
+        try:
+            ws.close(reason=1008, message="Account deactivated")
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+
+    audit("user.deactivated", target=user)
+    flash(f"User '{user.username}' has been deactivated.", "success")
+    return _render_user_list()
+
+
+@admin_bp.route("/users/<int:user_id>/reactivate", methods=["POST"])
+@admin_required
+def reactivate_user(user_id):
+    """Restore access for a previously deactivated user."""
+    user = User.get_or_none(id=user_id)
+    if not user:
+        flash("User not found.", "danger")
+        return _render_user_list()
+
+    if user.is_active:
+        flash(f"User '{user.username}' is already active.", "info")
+        return _render_user_list()
+
+    user.is_active = True
+    user.save()
+    audit("user.reactivated", target=user)
+    flash(f"User '{user.username}' has been reactivated.", "success")
+    return _render_user_list()
 
 
 # --- Channel Management Routes ---
