@@ -402,6 +402,15 @@ def _register_security_headers(app):
 def register_template_filters(app):
     """Registers all custom template filters for the application."""
 
+    @app.template_filter("markdown_clean")
+    def markdown_clean_filter(text: str):
+        if not text:
+            return ""
+        if not text.startswith("```"):
+            return text
+        
+        return "\n".join(text.splitlines()[1:-1])
+
     @app.template_filter("is_jumboable")
     def is_jumboable_filter(text):
         if not text:
@@ -452,9 +461,9 @@ def register_template_filters(app):
 
         content_with_emojis = emoji.emojize(content, language="alias")
         content_with_mentions = _process_mentions(content_with_emojis, mention_links)
-        content_preprocessed = _escape_h1_headers(content_with_mentions)
+        content_without_code = _process_code_blocks(content_with_mentions, code_blocks)
+        content_preprocessed = _escape_h1_headers(content_without_code)
         content_with_channels = _process_channels(content_preprocessed, channel_links)
-        content_without_code = _process_code_blocks(content_with_channels, code_blocks)
 
         main_html = markdown.markdown(
             content_without_code, extensions=["extra", "pymdownx.tilde", "nl2br"]

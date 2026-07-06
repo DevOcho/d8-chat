@@ -170,6 +170,11 @@ def get_dm_chat(other_user_id):
         .limit(PAGE_SIZE)
     )
     messages.reverse()
+    prev_sender = None
+    for message in messages:
+        message.same_sender = message.user.id == prev_sender
+        prev_sender =  message.user.id
+
     reactions_map = get_reactions_for_messages(messages)
     attachments_map = get_attachments_for_messages(messages)
 
