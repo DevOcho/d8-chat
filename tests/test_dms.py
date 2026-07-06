@@ -88,6 +88,38 @@ def test_search_users_for_dm_pagination(logged_in_client, setup_dm_search_users)
     assert b"Load More" not in response.data
 
 
+def test_search_finds_existing_dm_partner(logged_in_client, setup_dm_search_users):
+    """
+    GIVEN the logged-in user already has a DM with dm_partner
+    WHEN they search for that partner by name
+    THEN the partner is returned, so a stale DM (hidden from the sidebar after
+    30 days of inactivity) is still reachable to reopen.
+    """
+    response = logged_in_client.get("/chat/dms/search?q=dm_partner")
+
+    assert response.status_code == 200
+    assert b"dm_partner" in response.data
+
+
+def test_search_matches_email(logged_in_client, setup_dm_search_users):
+    """
+    WHEN a user's searchable text only appears in their email address
+    THEN searching for it still finds them (search covers email too).
+    """
+    User.create(
+        id=100,
+        username="lgarcia",
+        email="luis.garcia@example.com",
+        display_name="L. Garcia",
+    )
+
+    response = logged_in_client.get("/chat/dms/search?q=luis")
+
+    assert response.status_code == 200
+    # Matched only via the email address (username/display_name lack "luis").
+    assert b"lgarcia" in response.data
+
+
 def test_open_dm_chat_with_user(logged_in_client):
     """
     GIVEN two users exist

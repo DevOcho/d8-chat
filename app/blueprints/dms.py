@@ -76,31 +76,46 @@ def search_users_for_dm():
     search_term = request.args.get("q", "").strip()
     page = request.args.get("page", 1, type=int)
 
-    # Find users already in DMs to exclude them from search.
-    dm_conversations = (
-        Conversation.select()
-        .join(UserConversationStatus)
-        .where((UserConversationStatus.user == g.user) & (Conversation.type == "dm"))
-    )
-    existing_partner_ids = {g.user.id}
-    for conv in dm_conversations:
-        try:
-            user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
-        except ValueError:
-            continue
-        partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
-        if partner_id:
-            existing_partner_ids.add(partner_id)
-
-    # Base query for users not already in a DM.
-    query = User.select().where(User.id.not_in(list(existing_partner_ids)))
-
-    # Apply search filter if a query is provided.
     if search_term:
-        query = query.where(
-            (User.username.contains(search_term))
-            | (User.display_name.contains(search_term))
+        # An explicit search must be able to find ANYONE (except yourself),
+        # including people you already have a DM with. Previously we excluded
+        # every existing DM partner here, which made stale conversations
+        # unreachable: the sidebar hides a DM after 30 days of inactivity
+        # (see routes.py), but the partner was still filtered out of search,
+        # so there was no path back to them. get_dm_chat get_or_creates the
+        # conversation, so selecting an existing partner just reopens it.
+        # We also match on email — username/display_name alone miss users
+        # whose searchable name only appears in their email address.
+        query = User.select().where(
+            (User.id != g.user.id)
+            & (
+                User.username.contains(search_term)
+                | User.display_name.contains(search_term)
+                | User.email.contains(search_term)
+            )
         )
+    else:
+        # Browse mode (no query): suggest people you're NOT already DMing, so
+        # the "start a new conversation" list doesn't repeat the sidebar.
+        dm_conversations = (
+            Conversation.select()
+            .join(UserConversationStatus)
+            .where(
+                (UserConversationStatus.user == g.user)
+                & (Conversation.type == "dm")
+            )
+        )
+        existing_partner_ids = {g.user.id}
+        for conv in dm_conversations:
+            try:
+                user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
+            except ValueError:
+                continue
+            partner_id = next((uid for uid in user_ids if uid != g.user.id), None)
+            if partner_id:
+                existing_partner_ids.add(partner_id)
+
+        query = User.select().where(User.id.not_in(list(existing_partner_ids)))
 
     # Get the next (or first) batch of users
     total_users = query.count()
