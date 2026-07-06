@@ -4,7 +4,6 @@ import os
 import uuid
 
 from flask import Blueprint, current_app, g, make_response, render_template, request
-from PIL import Image
 from werkzeug.utils import secure_filename
 
 from app.chat_manager import chat_manager
@@ -12,6 +11,7 @@ from app.htmx_oob import oob_by_id, oob_to_selector
 from app.models import UploadedFile, User
 from app.routes import AVATAR_SIZE, login_required
 from app.services import minio_service
+from app.services.image_processing import reencode_avatar
 from app.services.upload_validation import (
     AVATAR_EXTENSIONS,
     ValidationError,
@@ -50,10 +50,9 @@ def upload_avatar():
         return "No selected file", 400
 
     original_filename = secure_filename(file.filename)
-    stored_filename = f"{uuid.uuid4()}.png"
     temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
     os.makedirs(temp_dir, exist_ok=True)
-    temp_path = os.path.join(temp_dir, stored_filename)
+    temp_path = os.path.join(temp_dir, str(uuid.uuid4()))
 
     try:
         file.save(temp_path)
@@ -68,17 +67,18 @@ def upload_avatar():
         except ValidationError as exc:
             return str(exc), 400
 
+        # Re-encode through Pillow (strips embedded payloads) while keeping
+        # animated GIFs animated. Extension/MIME depend on the result.
         try:
-            with Image.open(temp_path) as img:
-                img.thumbnail(AVATAR_SIZE)
-                img.save(temp_path, format="PNG")
+            mime_type, ext = reencode_avatar(temp_path, AVATAR_SIZE)
         except Exception as exc:
             current_app.logger.warning(f"Avatar re-encode failed: {exc}")
             return "Could not process image.", 400
 
+        stored_filename = f"{uuid.uuid4()}.{ext}"
         file_size = os.path.getsize(temp_path)
         success = minio_service.upload_file(
-            object_name=stored_filename, file_path=temp_path, content_type="image/png"
+            object_name=stored_filename, file_path=temp_path, content_type=mime_type
         )
         if not success:
             return "Failed to upload file to storage", 500
@@ -88,7 +88,7 @@ def upload_avatar():
             uploader=g.user,
             original_filename=original_filename,
             stored_filename=stored_filename,
-            mime_type="image/png",
+            mime_type=mime_type,
             file_size_bytes=file_size,
         )
         g.user.avatar = new_file

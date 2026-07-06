@@ -57,8 +57,9 @@ ALLOWED_EXTENSIONS: frozenset[str] = (
 )
 
 # Subset that may be supplied for an avatar. Avatars must be raster images;
-# the upload pipeline re-encodes everything to PNG via Pillow so we don't
-# need the rest of ALLOWED_EXTENSIONS here.
+# the upload pipeline re-encodes every avatar through Pillow (PNG for stills,
+# animation-preserving GIF for animated inputs) so we don't need the rest of
+# ALLOWED_EXTENSIONS here.
 AVATAR_EXTENSIONS: frozenset[str] = frozenset({"png", "jpg", "jpeg", "gif"})
 
 

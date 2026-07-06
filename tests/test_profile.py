@@ -2,7 +2,7 @@
 
 import io
 
-from app.models import User
+from app.models import UploadedFile, User
 
 
 def test_update_address_success(logged_in_client):
@@ -259,6 +259,54 @@ def test_upload_avatar_success(logged_in_client, mocker):
 
     assert response.status_code == 200
     assert b"profile-header-card" in response.data
+
+
+def test_upload_avatar_preserves_gif_animation(logged_in_client, mocker):
+    """
+    GIVEN an animated GIF avatar
+    WHEN posted to the /profile/avatar endpoint
+    THEN it is stored as an animated image/gif (not flattened to PNG).
+    """
+    from PIL import Image
+
+    mocker.patch(
+        "app.blueprints.profile.minio_service.get_presigned_url",
+        return_value="http://mock-url",
+    )
+
+    # Capture the bytes handed to storage before the temp file is cleaned up.
+    captured = {}
+
+    def _capture(object_name, file_path, content_type):
+        with open(file_path, "rb") as fh:
+            captured["bytes"] = fh.read()
+        captured["content_type"] = content_type
+        return True
+
+    mocker.patch(
+        "app.blueprints.profile.minio_service.upload_file", side_effect=_capture
+    )
+
+    # Build a 3-frame animated GIF in memory.
+    frames = [Image.new("RGB", (48, 48), c) for c in ((255, 0, 0), (0, 255, 0), (0, 0, 255))]
+    buf = io.BytesIO()
+    frames[0].save(
+        buf, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0
+    )
+    buf.seek(0)
+    data = {"avatar": (buf, "avatar.gif")}
+
+    response = logged_in_client.post(
+        "/profile/avatar", data=data, content_type="multipart/form-data"
+    )
+
+    assert response.status_code == 200
+    assert captured["content_type"] == "image/gif"
+    assert UploadedFile.get().mime_type == "image/gif"
+
+    stored = Image.open(io.BytesIO(captured["bytes"]))
+    assert getattr(stored, "is_animated", False)
+    assert stored.n_frames == 3
 
 
 def test_upload_avatar_missing_file(logged_in_client):

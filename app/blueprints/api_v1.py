@@ -45,6 +45,7 @@ from app.models import (
 )
 from app.routes import get_attachments_for_messages, get_reactions_for_messages
 from app.services import minio_service
+from app.services.image_processing import reencode_avatar
 from app.services.upload_validation import (
     ALLOWED_EXTENSIONS,
     AVATAR_EXTENSIONS,
@@ -1362,10 +1363,9 @@ def update_avatar():
         return jsonify({"error": "No file provided"}), 400
 
     original_filename = secure_filename(file.filename)
-    stored_filename = f"{uuid.uuid4()}.png"
     temp_dir = os.path.join(current_app.instance_path, "temp_uploads")
     os.makedirs(temp_dir, exist_ok=True)
-    temp_path = os.path.join(temp_dir, stored_filename)
+    temp_path = os.path.join(temp_dir, str(uuid.uuid4()))
     file.save(temp_path)
 
     try:
@@ -1380,21 +1380,20 @@ def update_avatar():
         except ValidationError as exc:
             return jsonify({"error": str(exc)}), 400
 
-        # Re-encode to PNG. If Pillow can't open it, refuse — don't fall
+        # Re-encode through Pillow (strips embedded payloads) while keeping
+        # animated GIFs animated. If Pillow can't open it, refuse — don't fall
         # through to storing the raw bytes as before.
         try:
-            with Image.open(temp_path) as img:
-                img = ImageOps.exif_transpose(img)
-                img.thumbnail((1920, 1920), Image.Resampling.LANCZOS)
-                img.save(temp_path, format="PNG", optimize=True)
+            mime_type, ext = reencode_avatar(temp_path, (1920, 1920))
         except Exception as exc:
             current_app.logger.warning(f"Avatar re-encode failed: {exc}")
             return jsonify({"error": "Could not process image."}), 400
 
+        stored_filename = f"{uuid.uuid4()}.{ext}"
         file_size = os.path.getsize(temp_path)
 
         success = minio_service.upload_file(
-            object_name=stored_filename, file_path=temp_path, content_type="image/png"
+            object_name=stored_filename, file_path=temp_path, content_type=mime_type
         )
         if not success:
             return jsonify({"error": "Failed to upload file to storage"}), 500
@@ -1404,7 +1403,7 @@ def update_avatar():
             uploader=g.api_user,
             original_filename=original_filename,
             stored_filename=stored_filename,
-            mime_type="image/png",
+            mime_type=mime_type,
             file_size_bytes=file_size,
         )
         g.api_user.avatar = new_file
