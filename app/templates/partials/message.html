@@ -38,9 +38,9 @@
             </div>
             {% set message_to_quote = message.quoted_message or (message.parent_message if message.reply_type == 'quote' else None) %}
             {% if message_to_quote %}
-                <div class="message_content">
+                <div class="quoted-reply p-2 mb-2">
                     <strong>{{ message_to_quote.user.display_name or message_to_quote.user.username }}</strong>
-                    <p class="mb-0 text-muted">{{ message_to_quote.content | markdown }}</p>
+                    <div class="mb-0 text-muted">{{ message_to_quote.content | markdown }}</div>
                 </div>
             {% endif %}
             {% if message.poll %}
