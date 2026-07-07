@@ -127,7 +127,7 @@ docker compose -f docker-compose.dev.yaml up --build -d  # Docker Compose altern
 ```bash
 python3 init_db.py          # Create tables and admin user
 python3 init_db.py --reset-db  # Drop all tables, then re-create
-python3 seed.py             # Seed 200 fake users, channels, messages
+python3 seed.py             # Seed minimal dev data: set admin password, create 'kp' user
 ```
 
 ### Tests
