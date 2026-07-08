@@ -10,7 +10,6 @@ class Config:
     """Base configuration."""
 
     SECRET_KEY = os.environ.get("SECRET_KEY")
-    SECRET_KEY = "-CX9BnMh5_TjIDWrFEIUSnxBHKbOmI6lRNjcrq2BfpinNZRG8oNYbJBwAIh3IY7I"
     if not SECRET_KEY:
         raise ValueError(
             "SECRET_KEY environment variable must be set. "
