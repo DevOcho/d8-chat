@@ -355,40 +355,55 @@ def load_message_for_thread_edit(message_id):
         return "Message not found", 404
 
 
-@messages_bp.route("/chat/messages/older/<string:conversation_id>")
+@messages_bp.route("/chat/messages/<string:conversation_id>")
 @login_required
-def get_older_messages(conversation_id):
-    """Fetches a batch of older messages for a given conversation."""
+def get_messages_page(conversation_id):
+    """
+    Fetches a batch of messages for a given conversation relative to a cursor message.
+    Provide one cursor: ``before_message_id`` to fetch the previous page (older)
+                        ``after_message_id`` to fetch the next page (newer).
+    """
     before_message_id = request.args.get("before_message_id", type=int)
-    if not before_message_id:
-        return "Missing 'before_message_id'", 400
+    after_message_id = request.args.get("after_message_id", type=int)
+    fetching_older = before_message_id is not None
+    cursor_id = before_message_id if fetching_older else after_message_id
+    if (before_message_id is None) == (after_message_id is None):
+        return "Provide exactly one of 'before_message_id' / 'after_message_id'", 400
     try:
-        cursor_message = Message.get_by_id(before_message_id)
+        cursor_message = Message.get_by_id(cursor_id)
     except Message.DoesNotExist:
         return "Message not found", 404
     conversation = Conversation.get_or_none(conversation_id_str=conversation_id)
     if not conversation:
         return "Conversation not found", 404
+
+    if fetching_older:
+        condition = Message.created_at < cursor_message.created_at
+        order = Message.created_at.desc()
+        template = "partials/message_batch.html"
+    else:
+        condition = Message.created_at > cursor_message.created_at
+        order = Message.created_at.asc()
+        template = "partials/message_batch_newer.html"
+
     query = (
         Message.select()
-        .where(
-            (Message.conversation == conversation)
-            & (Message.created_at < cursor_message.created_at)
-        )
-        .order_by(Message.created_at.desc())
+        .where((Message.conversation == conversation) & condition)
+        .order_by(order)
         .limit(PAGE_SIZE)
     )
-    messages = list(reversed(query))
+    messages = list(reversed(query)) if fetching_older else list(query)
     reactions_map = get_reactions_for_messages(messages)
     attachments_map = get_attachments_for_messages(messages)
     return render_template(
-        "partials/message_batch.html",
+        template,
         messages=messages,
         conversation_id=conversation_id,
         PAGE_SIZE=PAGE_SIZE,
         reactions_map=reactions_map,
         attachments_map=attachments_map,
         Message=Message,
+        prev_message=cursor_message,
     )
 
 
@@ -468,6 +483,8 @@ def jump_to_message(message_id):
             last_read_timestamp=status.last_read_timestamp,
             mention_message_ids=set(),
             PAGE_SIZE=PAGE_SIZE,
+            has_older=len(messages_before) == 30,
+            has_newer=len(messages_after) == 30,
             reactions_map=reactions_map,
             attachments_map=attachments_map,
             Message=Message,
@@ -494,6 +511,8 @@ def jump_to_message(message_id):
             other_user=other_user,
             last_read_timestamp=status.last_read_timestamp,
             PAGE_SIZE=PAGE_SIZE,
+            has_older=len(messages_before) == 30,
+            has_newer=len(messages_after) == 30,
             reactions_map=reactions_map,
             attachments_map=attachments_map,
             Message=Message,

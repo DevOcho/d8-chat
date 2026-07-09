@@ -4,9 +4,14 @@
          hx-trigger="load"
          hx-vals='{"type": "subscribe", "conversation_id": "{{ conversation_id }}"}'></div>
     <div id="message-list">
-        {% if messages and messages|length == PAGE_SIZE %}
-            <div class="text-center"
-                 hx-get="{{ url_for('messages.get_older_messages', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
+        {% if has_older is defined %}
+            {% set show_older = has_older %}
+        {% else %}
+            {% set show_older = messages and messages|length == PAGE_SIZE %}
+        {% endif %}
+        {% if show_older %}
+            <div class="text-center older-message-loader"
+                 hx-get="{{ url_for('messages.get_messages_page', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
                  hx-trigger="intersect once"
                  hx-swap="outerHTML"
                  hx-target="this">
@@ -47,6 +52,17 @@
                 {% endif %}
             </div>
         {% endfor %}
+        {% if has_newer %}
+            <div class="text-center newer-message-loader"
+                 hx-get="{{ url_for('messages.get_messages_page', conversation_id=conversation_id, after_message_id=messages[-1].id) }}"
+                 hx-trigger="intersect once"
+                 hx-swap="outerHTML"
+                 hx-target="this">
+                <div class="spinner-border spinner-border-sm my-3" role="status">
+                    <span class="visually-hidden">Loading newer messages...</span>
+                </div>
+            </div>
+        {% endif %}
     </div>
     <div id="message-list-bottom"></div>
 </div>

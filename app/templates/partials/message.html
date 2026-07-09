@@ -31,11 +31,19 @@
                        data-timestamp="{{ message.created_at.isoformat() }}Z">{{ message.created_at.strftime("%I:%M %p") }}</small>
                 {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
             </div>
-            {% set message_to_quote = message.quoted_message or (message.parent_message if message.reply_type == 'quote' else None) %}
-            {% if message_to_quote %}
+            {% if message.parent_message and message.reply_type == 'quote' %}
+                <div class="quoted-reply p-2 mb-2 quoted-reply-clickable"
+                     role="button"
+                     title="Go to original message"
+                     data-target-message-id="{{ message.parent_message.id }}"
+                     data-jump-url="{{ url_for('messages.jump_to_message', message_id=message.parent_message.id) }}">
+                    <strong>{{ message.parent_message.user.display_name or message.parent_message.user.username }}</strong>
+                    <div class="mb-0 text-muted">{{ message.parent_message.content | markdown }}</div>
+                </div>
+            {% elif message.quoted_message %}
                 <div class="quoted-reply p-2 mb-2">
-                    <strong>{{ message_to_quote.user.display_name or message_to_quote.user.username }}</strong>
-                    <p class="mb-0 text-muted">{{ message_to_quote.content | emojize | truncate(100) }}</p>
+                    <strong>{{ message.quoted_message.user.display_name or message.quoted_message.user.username }}</strong>
+                    <div class="mb-0 text-muted">{{ message.quoted_message.content | markdown }}</div>
                 </div>
             {% endif %}
             {% if message.poll %}
