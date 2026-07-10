@@ -344,23 +344,26 @@ def test_newer_batch_adds_separator_at_midnight_seam(
     conversation = setup_conversation["message"].conversation
     user = setup_conversation["user1"]
 
+    midnight = (datetime.now() + timedelta(days=2)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     cursor = Message.create(
         user=user,
         conversation=conversation,
         content="just before midnight",
-        created_at=datetime(2026, 7, 7, 23, 58),
+        created_at=midnight - timedelta(minutes=2),
     )
     Message.create(
         user=user,
         conversation=conversation,
         content="just after midnight",
-        created_at=datetime(2026, 7, 8, 0, 3),
+        created_at=midnight + timedelta(minutes=3),
     )
     Message.create(
         user=user,
         conversation=conversation,
-        content="later on july 8",
-        created_at=datetime(2026, 7, 8, 9, 0),
+        content="later that day",
+        created_at=midnight + timedelta(hours=9),
     )
 
     response = logged_in_client.get(
@@ -383,23 +386,26 @@ def test_newer_batch_separator_precedes_new_day_message(
     conversation = setup_conversation["message"].conversation
     user = setup_conversation["user1"]
 
+    midnight = (datetime.now() + timedelta(days=2)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     cursor = Message.create(
         user=user,
         conversation=conversation,
         content="cursor day one",
-        created_at=datetime(2026, 7, 7, 23, 0),
+        created_at=midnight - timedelta(hours=1),
     )
     Message.create(
         user=user,
         conversation=conversation,
         content="still day one",
-        created_at=datetime(2026, 7, 7, 23, 30),
+        created_at=midnight - timedelta(minutes=30),
     )
     Message.create(
         user=user,
         conversation=conversation,
         content="now day two",
-        created_at=datetime(2026, 7, 8, 0, 30),
+        created_at=midnight + timedelta(minutes=30),
     )
 
     response = logged_in_client.get(
