@@ -16,6 +16,7 @@ deactivated device stops eating delivery attempts.
 # pylint: disable=import-outside-toplevel
 
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,18 @@ def init_app(app):
     if not cred_path:
         app.logger.warning(
             "FIREBASE_CREDENTIALS_PATH not set; push notifications disabled."
+        )
+        return
+
+    # The credentials are mounted from an optional k8s Secret, so in dev (and
+    # any deploy without the Secret) the path is set but the file is absent.
+    # Degrade quietly instead of letting credentials.Certificate() raise a
+    # FileNotFoundError traceback on every startup.
+    if not os.path.exists(cred_path):
+        app.logger.warning(
+            "FIREBASE_CREDENTIALS_PATH set to %s but no file is present; "
+            "push notifications disabled.",
+            cred_path,
         )
         return
 

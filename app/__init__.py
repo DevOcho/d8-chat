@@ -408,7 +408,7 @@ def register_template_filters(app):
             return ""
         if not text.startswith("```"):
             return text
-        
+
         return "\n".join(text.splitlines()[1:-1])
 
     @app.template_filter("is_jumboable")
@@ -466,7 +466,7 @@ def register_template_filters(app):
         content_with_channels = _process_channels(content_preprocessed, channel_links)
 
         main_html = markdown.markdown(
-            content_without_code, extensions=["extra", "pymdownx.tilde", "nl2br"]
+            content_with_channels, extensions=["extra", "pymdownx.tilde", "nl2br"]
         )
 
         safe_html = _sanitize_and_linkify(main_html)
