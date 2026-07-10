@@ -661,12 +661,16 @@ def forward_message(message_id):
     if not optional_note:
         optional_note = "Forwarded a message."
 
+    file_ids = [link.attachment_id for link in original_message.message_links]
+    attachment_file_ids = ",".join(map(str, file_ids))
+
     # Create the forwarded message using the chat_service to handle mentions/hashtags
     new_message = chat_service.handle_new_message(
         sender=g.user,
         conversation=target_conv,
         chat_text=optional_note,
         quoted_message_id=original_message.id,
+        attachment_file_ids=attachment_file_ids or None,
     )
 
     # Broadcast to the destination channel so online users see it immediately
