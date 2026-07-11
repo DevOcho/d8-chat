@@ -5,6 +5,10 @@ import datetime
 import os
 import secrets
 import stat
+from urllib.parse import urlparse
+
+from playhouse.db_url import connect
+from psycopg2 import sql
 
 from app import create_app
 from app.models import (
@@ -29,6 +33,7 @@ from app.models import (
     WorkspaceMember,
     db,
 )
+from config import Config
 
 ALL_MODELS = [
     User,
@@ -61,12 +66,71 @@ def initialize_tables():
     print("Tables created successfully.")
 
 
-def drop_all_tables():
-    """Drops all application tables from the database."""
-    print("Dropping all tables...")
-    with db.atomic():
-        db.drop_tables(ALL_MODELS)
-    print("Tables dropped successfully.")
+def _maintenance_connection():
+    """
+    Open an autocommit connection to the ``postgres`` maintenance database and
+    return ``(peewee_db, raw_connection, target_db_name)``.
+
+    ``CREATE``/``DROP DATABASE`` can't run inside a transaction, hence
+    autocommit. The target database name is taken from ``Config.DATABASE_URI``
+    and may contain characters (e.g. the hyphen in ``d8-chat``) that must be
+    quoted as an identifier — callers use ``psycopg2.sql.Identifier`` for that.
+    """
+    parsed = urlparse(Config.DATABASE_URI)
+    name = parsed.path.lstrip("/")
+    maintenance_url = (
+        f"postgresql://{parsed.username}:{parsed.password}"
+        f"@{parsed.hostname}:{parsed.port or 5432}/postgres"
+    )
+    maintenance = connect(maintenance_url)
+    maintenance.connect()
+    raw = maintenance.connection()  # underlying psycopg2 connection
+    raw.autocommit = True
+    return maintenance, raw, name
+
+
+def ensure_database_exists():
+    """
+    Create the target database if it does not already exist. Non-destructive —
+    this is the path used outside development so existing data is never lost.
+    """
+    maintenance, raw, name = _maintenance_connection()
+    try:
+        with raw.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (name,))
+            if cur.fetchone():
+                print(f"Database {name} already exists.")
+            else:
+                print(f"Creating database {name}...")
+                cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    finally:
+        maintenance.close()
+
+
+def recreate_database():
+    """
+    Drop and recreate the target database so local development always starts
+    from a clean slate. Any other clients (notably the running app pod) are
+    disconnected first, otherwise ``DROP DATABASE`` fails with "database is
+    being accessed by other users". Gated to development by the caller — this
+    must never run against a real database.
+    """
+    maintenance, raw, name = _maintenance_connection()
+    try:
+        with raw.cursor() as cur:
+            cur.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = %s AND pid <> pg_backend_pid()",
+                (name,),
+            )
+            print(f"Dropping database {name} (if it exists)...")
+            cur.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(name))
+            )
+            print(f"Creating database {name}...")
+            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    finally:
+        maintenance.close()
 
 
 def seed_initial_data():
@@ -202,9 +266,25 @@ if __name__ == "__main__":
     parser.add_argument(
         "--reset-db",
         action="store_true",
-        help="Drop all tables and recreate them from scratch before seeding.",
+        help=(
+            "Force a full drop-and-recreate of the database even outside "
+            "development. Ignored in development, which always recreates."
+        ),
     )
     args = parser.parse_args()
+
+    # Provision the database itself (this is the front half of `auto seed`, so
+    # it must handle a Postgres instance that has no `d8-chat` database yet).
+    #   - development: always drop + recreate so every reset starts fresh. The
+    #     dev deployment sets FLASK_ENV=development and the ephemeral init pod
+    #     inherits it.
+    #   - anywhere else: only create the database when it's missing, so real
+    #     data is never dropped. --reset-db forces a recreate when needed.
+    is_development = os.environ.get("FLASK_ENV") == "development"
+    if is_development or args.reset_db:
+        recreate_database()
+    else:
+        ensure_database_exists()
 
     # Create a Flask app to get the application context.
     # This initializes our 'db' proxy to connect to the correct PostgreSQL DB.
@@ -212,10 +292,6 @@ if __name__ == "__main__":
 
     with app.app_context():
         with db.atomic():
-            # Are we starting over?
-            if args.reset_db:
-                drop_all_tables()
-
             # setup the tables
             initialize_tables()
 

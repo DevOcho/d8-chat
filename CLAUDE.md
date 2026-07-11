@@ -25,14 +25,36 @@ auto tag d8-chat      # Build container image, tag it, push to local registry (k
 auto restart d8-chat  # Apply the new image
 ```
 
-> **Note:** Python source is mounted into the pod from a PVC at `/mnt/code/d8-chat`, so Python file changes are live without rebuilding. Only `requirements.txt` or `Dockerfile` changes require `auto tag`.
+> **Note:** Python source is mounted into the pod from a PVC at `/mnt/code/d8-chat`, and the pod runs the **Flask dev server** (`python run.py`), which auto-reloads on source changes. So a Python edit is picked up **immediately — no `auto tag` and no `auto restart` needed**. Only `requirements.txt` or `Dockerfile` changes require `auto tag` + `auto restart`.
 
 ### Database and Seeding (in-cluster)
 ```bash
 auto init d8-chat     # Run init_db.py inside the pod
-auto seed d8-chat     # Run seed.py inside the pod
+auto seed d8-chat     # Run init_db.py THEN seed.py (auto seed runs init first)
 auto migrate d8-chat  # Apply pending smalls migrations
 ```
+
+> **`auto seed` runs the init step first.** `auto seed d8-chat` invokes
+> `init_db.py` and then `seed.py` (see `auto`'s `seed` command). In
+> development, `init_db.py` **drops and recreates** the `d8-chat` database so
+> every reset starts from a clean slate — gated to `FLASK_ENV=development`
+> (set by `.auto/deployment.yaml`), so it never drops a real database.
+> Outside development it only creates the database when missing.
+
+### Resetting the local database ("reset auto")
+
+To wipe and rebuild the local dev DB from scratch:
+```bash
+auto tag d8-chat && auto restart d8-chat && sleep 10 && auto seed d8-chat
+```
+`auto seed` recreates the DB (via `init_db.py`), creates the schema, and seeds
+the default workspace/channels + admin user, then `seed.py` sets the admin
+password to `d8_admin` and creates the `kp` user (password `kp555`). The
+`sleep 10` lets the freshly restarted pod settle before the seed pod runs.
+
+> Since Python changes hot-reload, the `auto tag`/`auto restart` here are only
+> needed when the image itself changed (deps/Dockerfile). For a pure DB reset
+> after Python-only edits, `auto seed d8-chat` alone is enough.
 
 ### Migrations (smalls)
 
@@ -125,10 +147,15 @@ docker compose -f docker-compose.dev.yaml up --build -d  # Docker Compose altern
 
 ### Database Setup
 ```bash
-python3 init_db.py          # Create tables and admin user
-python3 init_db.py --reset-db  # Drop all tables, then re-create
+python3 init_db.py          # Provision the DB (create if missing; recreate under FLASK_ENV=development), create tables + admin user
+python3 init_db.py --reset-db  # Force a full drop-and-recreate of the database, even outside development
 python3 seed.py             # Seed minimal dev data: set admin password, create 'kp' user
 ```
+
+> `init_db.py` provisions the **database itself** (connecting to the `postgres`
+> maintenance DB), not just the tables. Under `FLASK_ENV=development` it always
+> drops + recreates for a clean slate; elsewhere it only creates the DB when
+> absent so real data is never dropped (`--reset-db` forces the recreate).
 
 ### Tests
 ```bash
