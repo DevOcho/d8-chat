@@ -100,6 +100,16 @@ form[id^="message-form"] {
   padding: 0.5em;
 }
 
+.quoted-reply-clickable {
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-left-color 0.15s ease;
+}
+
+.quoted-reply-clickable:hover {
+  background-color: #dcdcdc;
+  border-left-color: #0288d1;
+}
+
 .codehilite {
     max-width: 100%;
     background: #272822; /* Fixed hex code missing an 8 */
@@ -417,6 +427,11 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     .quoted-reply {
         background-color: #2f3136; /* A darker background that fits the theme */
         color: #b9bbbe; /* A light, readable text color */
+    }
+
+    .quoted-reply-clickable:hover {
+        background-color: #36393f;
+        border-left-color: #29b6f6;
     }
 
     /* Dark mode style for editing block */

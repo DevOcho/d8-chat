@@ -1,0 +1,13 @@
+{% set qatt = namespace(image=false, other=false) %}
+{% for att in msg.attachments %}
+    {% if att.mime_type.startswith('image/') %}
+        {% set qatt.image = true %}
+    {% else %}
+        {% set qatt.other = true %}
+    {% endif %}
+{% endfor %}
+{% if qatt.image %}
+    <i class="bi bi-image text-muted ms-1" title="Photo"></i>
+{% elif qatt.other %}
+    <i class="bi bi-paperclip text-muted ms-1" title="Attachment"></i>
+{% endif %}

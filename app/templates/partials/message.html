@@ -26,8 +26,7 @@
                 {% endwith %}
             </div>
         {% else %}
-            <div class="flex-shrink-0" style="width: 40px; height: 40px;">
-            </div>
+            <div class="flex-shrink-0" style="width: 40px; height: 40px;"></div>
         {% endif %}
         <div class="flex-grow-1 ms-3">
             <div>
@@ -36,50 +35,30 @@
                        data-timestamp="{{ message.created_at.isoformat() }}Z">{{ message.created_at.strftime("%I:%M %p") }}</small>
                 {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
             </div>
-            {% set message_to_quote = message.quoted_message or (message.parent_message if message.reply_type == 'quote' else None) %}
-            {% if message_to_quote %}
+            {% if message.parent_message and message.reply_type == 'quote' %}
+                <div class="quoted-reply p-2 mb-2 quoted-reply-clickable"
+                     role="button"
+                     title="Go to original message"
+                     data-target-message-id="{{ message.parent_message.id }}"
+                     data-jump-url="{{ url_for('messages.jump_to_message', message_id=message.parent_message.id) }}">
+                    {% with quoted=message.parent_message %}
+                        <strong>{{ quoted.user.display_name or quoted.user.username }}</strong>
+                        {% with msg=quoted %}
+                            {% include 'partials/_attachment_indicator_icon.html' %}
+                        {% endwith %}
+                        {% if quoted.content %}<div class="mb-0 text-muted">{{ quoted.content | markdown }}</div>{% endif %}
+                    {% endwith %}
+                </div>
+            {% elif message.quoted_message %}
                 <div class="quoted-reply p-2 mb-2">
-                    <strong>{{ message_to_quote.user.display_name or message_to_quote.user.username }}</strong>
-                    <div class="mb-0 text-muted">{{ message_to_quote.content | markdown }}</div>
+                    {% with quoted=message.quoted_message %}
+                        <strong>{{ quoted.user.display_name or quoted.user.username }}</strong>
+                        {% with msg=quoted %}
+                            {% include 'partials/_attachment_indicator_icon.html' %}
+                        {% endwith %}
+                        {% if quoted.content %}<div class="mb-0 text-muted">{{ quoted.content | markdown }}</div>{% endif %}
+                    {% endwith %}
                 </div>
-            {% endif %}
-            {% if message.poll %}
-                {# The message has a poll, so we render our special partial. #}
-                {% set poll_context = get_poll_context(message.poll.get(), g.user) %}
-                {% include 'partials/message_poll.html' %}
-            {% else %}
-                {# This is a regular message, render it as before. #}
-                <div class="message-content {% if message.content | is_jumboable %}jumbo-emoji{% endif %}">
-                    {{ message.content | markdown }}
-                </div>
-            {% endif %}
-            {# Thread reply indicator #}
-            {% if not is_in_thread_view %}
-                {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}
-                {% set thread_reply_count = threaded_replies.count() %}
-                {% if thread_reply_count > 0 %}
-                    <div id="thread-indicator-{{ message.id }}"
-                         class="d-flex align-items-center mt-2">
-                        <div class="thread-participant-avatars">
-                            {# Loop over the unique participants using the new model property #}
-                            {% for participant in message.thread_participants %}
-                                <div class="thread-participant-avatar">
-                                    {% with user=participant, size=24 %}
-                                        {% include 'partials/_avatar_display.html' %}
-                                    {% endwith %}
-                                </div>
-                            {% endfor %}
-                        </div>
-                        <a href="#"
-                           class="text-decoration-none small ms-2"
-                           data-bs-toggle="offcanvas"
-                           data-bs-target="#right-panel-offcanvas"
-                           hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"
-                           hx-target="#right-panel-offcanvas">
-                            {{ thread_reply_count }} {{ 'reply' if thread_reply_count == 1 else 'replies' }}
-                        </a>
-                    </div>
-                {% endif %}
             {% endif %}
             {% set image_count = image_attachments | length %}
             {% if image_count > 0 %}
@@ -131,6 +110,45 @@
                     </div>
                 {% endfor %}
             </div>
+        {% endif %}
+        {% if message.poll %}
+            {# The message has a poll, so we render our special partial. #}
+            {% set poll_context = get_poll_context(message.poll.get(), g.user) %}
+            {% include 'partials/message_poll.html' %}
+        {% else %}
+            {# This is a regular message. Text sits below the attachments, so add a
+               top margin to separate it from them when attachments are present. #}
+            <div class="message-content {% if image_count or other_count %}mt-2{% endif %} {% if message.content | is_jumboable %}jumbo-emoji{% endif %}">
+                {{ message.content | markdown }}
+            </div>
+        {% endif %}
+        {# Thread reply indicator #}
+        {% if not is_in_thread_view %}
+            {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}
+            {% set thread_reply_count = threaded_replies.count() %}
+            {% if thread_reply_count > 0 %}
+                <div id="thread-indicator-{{ message.id }}"
+                     class="d-flex align-items-center mt-2">
+                    <div class="thread-participant-avatars">
+                        {# Loop over the unique participants using the new model property #}
+                        {% for participant in message.thread_participants %}
+                            <div class="thread-participant-avatar">
+                                {% with user=participant, size=24 %}
+                                    {% include 'partials/_avatar_display.html' %}
+                                {% endwith %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <a href="#"
+                       class="text-decoration-none small ms-2"
+                       data-bs-toggle="offcanvas"
+                       data-bs-target="#right-panel-offcanvas"
+                       hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"
+                       hx-target="#right-panel-offcanvas">
+                        {{ thread_reply_count }} {{ 'reply' if thread_reply_count == 1 else 'replies' }}
+                    </a>
+                </div>
+            {% endif %}
         {% endif %}
         <div id="reactions-container-{{ message.id }}"
              class="mt-1 d-flex flex-wrap gap-1">
