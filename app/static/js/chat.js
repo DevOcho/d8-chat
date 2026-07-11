@@ -1481,6 +1481,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (searchOverlay) {
         searchOverlay.addEventListener('click', (e) => {
+            // The close (×) button is swapped in with the results, so it isn't
+            // present when listeners bind at load — delegate from the overlay.
+            // This also makes the Escape handler work, since it fires a
+            // synthetic click on #close-search-btn.
+            if (e.target.closest('#close-search-btn')) {
+                hideSearch();
+                return;
+            }
             if (e.target.closest('div.search-result-item')) {
                 hideSearch();
             }
