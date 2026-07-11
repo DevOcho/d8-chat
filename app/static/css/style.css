@@ -110,6 +110,21 @@ form[id^="message-form"] {
   border-left-color: #0288d1;
 }
 
+/* Search result-count badges: stay muted gray at zero (plain .bg-secondary),
+   but turn brand-pink with a soft glow when there are matches, so results in
+   Channels/People catch the eye even while the Messages tab is empty. */
+.badge.search-count-hit {
+  background-color: #e35a8b !important; /* app's brand pink */
+  color: #fff !important;
+  box-shadow: 0 0 0 0.15rem rgba(227, 90, 139, 0.25);
+}
+
+[data-bs-theme="dark"] .badge.search-count-hit {
+  background-color: #f06595 !important; /* a shade brighter for dark backgrounds */
+  color: #1a1a1a !important;
+  box-shadow: 0 0 0 0.15rem rgba(240, 101, 149, 0.35);
+}
+
 .codehilite {
     max-width: 100%;
     background: #272822; /* Fixed hex code missing an 8 */

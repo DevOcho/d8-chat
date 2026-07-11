@@ -135,7 +135,7 @@ def test_search_for_channels(logged_in_client, search_setup):
     response = logged_in_client.get("/chat/search?q=searchable")
     assert response.status_code == 200
     assert (
-        b'Channels <span class="badge bg-secondary rounded-pill">1</span>'
+        b'Channels <span class="badge rounded-pill search-count-hit">1</span>'
         in response.data
     )
     # This will be loaded via HTMX, so we check the paginated endpoint directly
@@ -145,7 +145,7 @@ def test_search_for_channels(logged_in_client, search_setup):
 
     response_private = logged_in_client.get("/chat/search?q=private-visible")
     assert (
-        b'Channels <span class="badge bg-secondary rounded-pill">1</span>'
+        b'Channels <span class="badge rounded-pill search-count-hit">1</span>'
         in response_private.data
     )
 
@@ -157,7 +157,7 @@ def test_search_does_not_find_hidden_private_channels(logged_in_client, search_s
     """
     response = logged_in_client.get("/chat/search?q=private-hidden")
     assert (
-        b'Channels <span class="badge bg-secondary rounded-pill">0</span>'
+        b'Channels <span class="badge rounded-pill bg-secondary">0</span>'
         in response.data
     )
 
@@ -169,14 +169,20 @@ def test_search_for_users(logged_in_client, search_setup):
     """
     # Search by display name
     res1 = logged_in_client.get("/chat/search?q=Zelda")
-    assert b'People <span class="badge bg-secondary rounded-pill">1</span>' in res1.data
+    assert (
+        b'People <span class="badge rounded-pill search-count-hit">1</span>'
+        in res1.data
+    )
     paginated_res1 = logged_in_client.get("/chat/search/users?q=Zelda")
     assert b"<strong><mark>Zelda</mark> Smith</strong>" in paginated_res1.data
     assert b"user_two" in paginated_res1.data  # also show username
 
     # Search by username
     res2 = logged_in_client.get("/chat/search?q=user_three")
-    assert b'People <span class="badge bg-secondary rounded-pill">1</span>' in res2.data
+    assert (
+        b'People <span class="badge rounded-pill search-count-hit">1</span>'
+        in res2.data
+    )
     paginated_res2 = logged_in_client.get("/chat/search/users?q=user_three")
     assert b"Link Jones" in paginated_res2.data
 

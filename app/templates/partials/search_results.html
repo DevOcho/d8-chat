@@ -14,7 +14,7 @@
                     data-bs-toggle="tab"
                     data-bs-target="#messages-tab-pane"
                     type="button">
-                Messages <span class="badge bg-secondary rounded-pill">{{ message_count }}</span>
+                Messages <span class="badge rounded-pill {{ 'search-count-hit' if message_count else 'bg-secondary' }}">{{ message_count }}</span>
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -25,7 +25,7 @@
                     hx-get="{{ url_for('search.search_channels_paginated', q=query) }}"
                     hx-trigger="click once"
                     hx-target="#channels-tab-pane">
-                Channels <span class="badge bg-secondary rounded-pill">{{ channel_count }}</span>
+                Channels <span class="badge rounded-pill {{ 'search-count-hit' if channel_count else 'bg-secondary' }}">{{ channel_count }}</span>
             </button>
         </li>
         <li class="nav-item" role="presentation">
@@ -36,7 +36,7 @@
                     hx-get="{{ url_for('search.search_users_paginated', q=query) }}"
                     hx-trigger="click once"
                     hx-target="#users-tab-pane">
-                People <span class="badge bg-secondary rounded-pill">{{ user_count }}</span>
+                People <span class="badge rounded-pill {{ 'search-count-hit' if user_count else 'bg-secondary' }}">{{ user_count }}</span>
             </button>
         </li>
     </ul>
