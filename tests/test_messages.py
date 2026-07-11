@@ -1,6 +1,7 @@
 # tests/test_messages.py
 
 import json
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -45,6 +46,59 @@ def setup_conversation(test_db):
         user=user1, conversation=conv, content="Original message content"
     )
     return {"user1": user1, "user2": user2, "message": message}
+
+
+@pytest.fixture
+def setup_dm_conversation(test_db):
+    """
+    Fixture that creates a direct message conversation. The DM
+    initial-load / jump path renders ``dm_messages.html`` and parses the
+    ``dm_{a}_{b}`` id, so the newer-fetch and jump flows need dedicated
+    coverage for this conversation type.
+    """
+    user1 = User.get_by_id(1)
+    user2 = User.create(
+        id=2, username="dm_partner", email="dm@partner.com", display_name="DM Partner"
+    )
+    conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"dm_{user1.id}_{user2.id}", type="dm"
+    )
+    UserConversationStatus.create(user=user1, conversation=conv)
+    message = Message.create(
+        user=user2, conversation=conv, content="DM original message"
+    )
+    return {"user1": user1, "user2": user2, "conversation": conv, "message": message}
+
+
+def _seed_context(conversation, user, n_before, n_after):
+    """
+    Seed ``n_before`` messages, a single ``TARGET MESSAGE``, then ``n_after``
+    messages, all with strictly increasing ``created_at`` (and therefore ids).
+    Returns the target message. Used to exercise the jump-to-message context
+    window and its ``has_older`` / ``has_newer`` loader flags.
+    """
+    base = datetime(2026, 7, 8, 8, 0, 0)
+    for i in range(n_before):
+        Message.create(
+            user=user,
+            conversation=conversation,
+            content=f"before {i}",
+            created_at=base + timedelta(minutes=i),
+        )
+    target = Message.create(
+        user=user,
+        conversation=conversation,
+        content="TARGET MESSAGE",
+        created_at=base + timedelta(minutes=n_before),
+    )
+    for j in range(n_after):
+        Message.create(
+            user=user,
+            conversation=conversation,
+            content=f"after {j}",
+            created_at=base + timedelta(minutes=n_before + 1 + j),
+        )
+    return target
 
 
 def test_update_message_success(logged_in_client, setup_conversation):
@@ -207,7 +261,7 @@ def test_get_older_messages_success(logged_in_client, setup_conversation):
     cursor_message = all_messages[1]
 
     response = logged_in_client.get(
-        f"/chat/messages/older/{conversation.conversation_id_str}?before_message_id={cursor_message.id}"
+        f"/chat/messages/{conversation.conversation_id_str}?before_message_id={cursor_message.id}"
     )
 
     assert response.status_code == 200
@@ -226,21 +280,223 @@ def test_get_older_messages_errors(logged_in_client, setup_conversation):
 
     # Case 1: Missing before_message_id
     response_1 = logged_in_client.get(
-        f"/chat/messages/older/{conversation.conversation_id_str}"
+        f"/chat/messages/{conversation.conversation_id_str}"
     )
     assert response_1.status_code == 400
 
     # Case 2: Non-existent message ID
     response_2 = logged_in_client.get(
-        f"/chat/messages/older/{conversation.conversation_id_str}?before_message_id=9999"
+        f"/chat/messages/{conversation.conversation_id_str}?before_message_id=9999"
     )
     assert response_2.status_code == 404
 
     # Case 3: Non-existent conversation ID
-    response_3 = logged_in_client.get(
-        "/chat/messages/older/channel_9999?before_message_id=1"
-    )
+    response_3 = logged_in_client.get("/chat/messages/channel_9999?before_message_id=1")
     assert response_3.status_code == 404
+
+
+def test_get_newer_messages_success(logged_in_client, setup_conversation):
+    """
+    GIVEN a cursor message with several newer messages after it
+    WHEN the client requests newer messages via `after_message_id`
+    THEN the batch should return those messages in chronological order.
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+
+    base = datetime(2026, 7, 8, 8, 0, 0)
+    cursor = Message.create(
+        user=user, conversation=conversation, content="cursor msg", created_at=base
+    )
+    for i in range(3):
+        Message.create(
+            user=user,
+            conversation=conversation,
+            content=f"newer body {i}",
+            created_at=base + timedelta(minutes=i + 1),
+        )
+
+    response = logged_in_client.get(
+        f"/chat/messages/{conversation.conversation_id_str}?after_message_id={cursor.id}"
+    )
+
+    assert response.status_code == 200
+    # All newer messages present, in ascending order.
+    idx0 = response.data.index(b"newer body 0")
+    idx1 = response.data.index(b"newer body 1")
+    idx2 = response.data.index(b"newer body 2")
+    assert idx0 < idx1 < idx2
+    # The cursor message itself must not be included (strict inequality).
+    assert b"cursor msg" not in response.data
+    # A partial page (< PAGE_SIZE) renders no newer sentinel.
+    assert b"newer-message-loader" not in response.data
+
+
+def test_newer_batch_adds_separator_at_midnight_seam(
+    logged_in_client, setup_conversation
+):
+    """
+    GIVEN the cursor already on screen sits late on one day and the newer batch
+          begins the next day
+    WHEN the client requests the newer batch
+    THEN exactly one date separator is rendered at the day boundary.
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+
+    midnight = (datetime.now() + timedelta(days=2)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    cursor = Message.create(
+        user=user,
+        conversation=conversation,
+        content="just before midnight",
+        created_at=midnight - timedelta(minutes=2),
+    )
+    Message.create(
+        user=user,
+        conversation=conversation,
+        content="just after midnight",
+        created_at=midnight + timedelta(minutes=3),
+    )
+    Message.create(
+        user=user,
+        conversation=conversation,
+        content="later that day",
+        created_at=midnight + timedelta(hours=9),
+    )
+
+    response = logged_in_client.get(
+        f"/chat/messages/{conversation.conversation_id_str}?after_message_id={cursor.id}"
+    )
+
+    assert response.status_code == 200
+    assert response.data.count(b"date-separator") == 1
+
+
+def test_newer_batch_separator_precedes_new_day_message(
+    logged_in_client, setup_conversation
+):
+    """
+    GIVEN a newer batch that crosses a day boundary mid-batch
+    WHEN the batch is rendered
+    THEN the single date separator appears between the last day-1 message and
+         the first day-2 message.
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+
+    midnight = (datetime.now() + timedelta(days=2)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    cursor = Message.create(
+        user=user,
+        conversation=conversation,
+        content="cursor day one",
+        created_at=midnight - timedelta(hours=1),
+    )
+    Message.create(
+        user=user,
+        conversation=conversation,
+        content="still day one",
+        created_at=midnight - timedelta(minutes=30),
+    )
+    Message.create(
+        user=user,
+        conversation=conversation,
+        content="now day two",
+        created_at=midnight + timedelta(minutes=30),
+    )
+
+    response = logged_in_client.get(
+        f"/chat/messages/{conversation.conversation_id_str}?after_message_id={cursor.id}"
+    )
+
+    assert response.status_code == 200
+    assert response.data.count(b"date-separator") == 1
+    sep_idx = response.data.index(b"date-separator")
+    assert response.data.index(b"still day one") < sep_idx
+    assert sep_idx < response.data.index(b"now day two")
+
+
+def test_newer_pagination_chains_to_next_page(logged_in_client, setup_conversation):
+    """
+    GIVEN more than PAGE_SIZE newer messages
+    WHEN the first newer batch is fetched and then its sentinel URL is followed
+    THEN the sentinel points at the last message of the batch and the second
+         page returns the remainder with no further sentinel.
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+
+    base = datetime(2026, 7, 8, 8, 0, 0)
+    cursor = Message.create(
+        user=user, conversation=conversation, content="cursor msg", created_at=base
+    )
+    ids = []
+    for i in range(PAGE_SIZE + 5):
+        m = Message.create(
+            user=user,
+            conversation=conversation,
+            content=f"chain {i}",
+            created_at=base + timedelta(minutes=i + 1),
+        )
+        ids.append(m.id)
+
+    first = logged_in_client.get(
+        f"/chat/messages/{conversation.conversation_id_str}?after_message_id={cursor.id}"
+    )
+    assert first.status_code == 200
+    # The sentinel must chain from the last message of the returned page.
+    last_id_in_page = ids[PAGE_SIZE - 1]
+    assert f"after_message_id={last_id_in_page}".encode() in first.data
+
+    second = logged_in_client.get(
+        f"/chat/messages/{conversation.conversation_id_str}"
+        f"?after_message_id={last_id_in_page}"
+    )
+    assert second.status_code == 200
+    # Remaining 5 messages, and no further sentinel.
+    assert b"chain 34" in second.data
+    assert b"newer-message-loader" not in second.data
+
+
+def test_newer_batch_excludes_thread_replies(logged_in_client, setup_conversation):
+    """
+    GIVEN a mix of a normal message and a thread reply after the cursor
+    WHEN the newer batch is rendered
+    THEN the thread reply is omitted (threads live in the thread view) while the
+         normal message is shown.
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+
+    base = datetime(2026, 7, 8, 8, 0, 0)
+    cursor = Message.create(
+        user=user, conversation=conversation, content="cursor msg", created_at=base
+    )
+    Message.create(
+        user=user,
+        conversation=conversation,
+        content="normal newer body",
+        created_at=base + timedelta(minutes=1),
+    )
+    Message.create(
+        user=user,
+        conversation=conversation,
+        content="threaded newer body",
+        parent_message=cursor,
+        reply_type="thread",
+        created_at=base + timedelta(minutes=2),
+    )
+
+    response = logged_in_client.get(
+        f"/chat/messages/{conversation.conversation_id_str}?after_message_id={cursor.id}"
+    )
+
+    assert response.status_code == 200
+    assert b"normal newer body" in response.data
+    assert b"threaded newer body" not in response.data
 
 
 def test_get_message_view(logged_in_client, setup_conversation):
@@ -376,6 +632,88 @@ def test_jump_to_nonexistent_message(logged_in_client):
     """
     response = logged_in_client.get("/chat/message/9999/context")
     assert response.status_code == 404
+
+
+def test_jump_channel_renders_both_loaders(logged_in_client, setup_conversation):
+    """
+    GIVEN a channel message with a full page of history on both sides
+    WHEN a member jumps to it
+    THEN both the older and newer sentinels render (has_older/has_newer true).
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+    target = _seed_context(
+        conversation, user, n_before=PAGE_SIZE + 1, n_after=PAGE_SIZE + 1
+    )
+
+    response = logged_in_client.get(f"/chat/message/{target.id}/context")
+
+    assert response.status_code == 200
+    assert b"older-message-loader" in response.data
+    assert b"newer-message-loader" in response.data
+    assert json.loads(response.headers["HX-Trigger"])["jumpToMessage"] == (
+        f"#message-{target.id}"
+    )
+
+
+def test_jump_channel_newest_edge_hides_newer_loader(
+    logged_in_client, setup_conversation
+):
+    """
+    GIVEN a target near the newest edge (fewer than a page of newer messages)
+    WHEN a member jumps to it
+    THEN only the older sentinel renders (has_newer false).
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+    target = _seed_context(conversation, user, n_before=PAGE_SIZE + 1, n_after=5)
+
+    response = logged_in_client.get(f"/chat/message/{target.id}/context")
+
+    assert response.status_code == 200
+    assert b"older-message-loader" in response.data
+    assert b"newer-message-loader" not in response.data
+
+
+def test_jump_channel_oldest_edge_hides_older_loader(
+    logged_in_client, setup_conversation
+):
+    """
+    GIVEN a target near the oldest edge (fewer than a page of older messages)
+    WHEN a member jumps to it
+    THEN only the newer sentinel renders (has_older false).
+    """
+    conversation = setup_conversation["message"].conversation
+    user = setup_conversation["user1"]
+    target = _seed_context(conversation, user, n_before=0, n_after=PAGE_SIZE + 1)
+
+    response = logged_in_client.get(f"/chat/message/{target.id}/context")
+
+    assert response.status_code == 200
+    assert b"older-message-loader" not in response.data
+    assert b"newer-message-loader" in response.data
+
+
+def test_jump_dm_renders_both_loaders(logged_in_client, setup_dm_conversation):
+    """
+    GIVEN a DM message with a full page of history on both sides
+    WHEN the participant jumps to it
+    THEN both older and newer sentinels render in the DM template too.
+    """
+    conversation = setup_dm_conversation["conversation"]
+    user = setup_dm_conversation["user2"]
+    target = _seed_context(
+        conversation, user, n_before=PAGE_SIZE + 1, n_after=PAGE_SIZE + 1
+    )
+
+    response = logged_in_client.get(f"/chat/message/{target.id}/context")
+
+    assert response.status_code == 200
+    assert b"older-message-loader" in response.data
+    assert b"newer-message-loader" in response.data
+    assert json.loads(response.headers["HX-Trigger"])["jumpToMessage"] == (
+        f"#message-{target.id}"
+    )
 
 
 def test_load_for_thread_reply(logged_in_client, setup_conversation):

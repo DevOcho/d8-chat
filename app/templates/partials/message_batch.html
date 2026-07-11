@@ -8,7 +8,7 @@
 {# If we fetched a full page, it's likely there are more messages. Render the next trigger. #}
 {% if messages|length == PAGE_SIZE %}
     <div class="text-center"
-         hx-get="{{ url_for('messages.get_older_messages', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
+         hx-get="{{ url_for('messages.get_messages_page', conversation_id=conversation_id, before_message_id=messages[0].id) }}"
          hx-trigger="intersect once"
          hx-swap="outerHTML">
         <div class="spinner-border spinner-border-sm my-3" role="status">

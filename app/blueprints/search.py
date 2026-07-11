@@ -16,6 +16,7 @@ from ..models import (
 )
 from ..routes import login_required
 
+
 search_bp = Blueprint("search", __name__)
 
 SEARCH_PAGE_SIZE = 20

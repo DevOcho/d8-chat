@@ -1435,13 +1435,50 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const searchInput = document.getElementById('global-search-input');
     const searchOverlay = document.getElementById('search-results-overlay');
+    const searchWrapper = document.querySelector('.global-search-wrapper');
     const channelSidebar = document.querySelector('.channel-sidebar');
+    const showCompactSearch = () => {
+        if (!searchWrapper) return;
+        const rect = searchWrapper.getBoundingClientRect();
+        searchOverlay.classList.add('compact');
+        Object.assign(searchOverlay.style, {
+            position: 'fixed',
+            top: `${rect.bottom}px`,
+            left: `${rect.left}px`,
+            width: `${rect.width}px`,
+            display: 'flex',
+        });
+    };
+    const showFullSearch = () => {
+        searchOverlay.classList.remove('compact');
+        searchOverlay.removeAttribute('style');
+        searchOverlay.style.display = 'flex';
+        searchOverlay.style.flexDirection = 'column';
+    };
     const hideSearch = () => {
         if (!searchOverlay || !searchInput) return;
+        searchOverlay.classList.remove('compact');
         searchOverlay.style.display = 'none';
         searchInput.value = '';
         htmx.trigger(searchInput, 'htmx:abort');
     };
+    if (searchInput && searchOverlay) {
+        searchInput.addEventListener('input', () => {
+            if (searchInput.value.trim()) {
+                showCompactSearch();
+            } else {
+                searchOverlay.style.display = 'none';
+            }
+        });
+        // native `search` event fires on Enter (and the input's native clear-X)
+        searchInput.addEventListener('search', () => {
+            if (searchInput.value.trim()) {
+                showFullSearch();
+            } else {
+                hideSearch();
+            }
+        });
+    }
     if (searchOverlay) {
         searchOverlay.addEventListener('click', (e) => {
             if (e.target.closest('div.search-result-item')) {
@@ -1456,16 +1493,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-
-    document.body.addEventListener('jumpToMessage', (evt) => {
-        const selector = evt.detail.value;
-        const targetMessage = document.querySelector(selector);
-        if (targetMessage) {
-            targetMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
-            targetMessage.classList.add('mentioned-message');
-            setTimeout(() => {
-                targetMessage.classList.remove('mentioned-message');
-            }, 2000);
+    document.body.addEventListener('keydown', (e) => {
+        if (e.ctrlKey && e.key === 'k') {
+            e.preventDefault();
+            if (searchInput) {
+                searchInput.focus();
+                searchInput.select();
+            }
         }
     });
 
@@ -1679,6 +1713,45 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, 1); // A 1ms delay is enough to push this to the next browser task.
     };
+
+    // Scroll a specific message into view and briefly highlight it.
+    const scrollToMessage = (selector) => {
+        const targetMessage = document.querySelector(selector);
+        if (!targetMessage) return;
+        targetMessage.scrollIntoView({ behavior: 'auto', block: 'center' });
+        targetMessage.classList.add('mentioned-message');
+        setTimeout(() => targetMessage.classList.remove('mentioned-message'), 2000);
+    };
+
+    const getJumpSelector = (xhr) => {
+        try {
+            const header = xhr && xhr.getResponseHeader('HX-Trigger');
+            if (!header) return null;
+            const parsed = JSON.parse(header);
+            return parsed && parsed.jumpToMessage ? parsed.jumpToMessage : null;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    // --- Click a quoted reply → go to the original message ---
+    document.body.addEventListener('click', (e) => {
+        const quote = e.target.closest('.quoted-reply-clickable');
+        if (!quote) return;
+        const targetId = quote.dataset.targetMessageId;
+        if (!targetId) return;
+        const selector = '#message-' +
+            ((window.CSS && CSS.escape) ? CSS.escape(targetId) : targetId);
+
+        if (document.querySelector(selector)) {
+            scrollToMessage(selector);
+        } else if (quote.dataset.jumpUrl && window.htmx) {
+            window.htmx.ajax('GET', quote.dataset.jumpUrl, {
+                target: '#chat-messages-container',
+                swap: 'innerHTML',
+            });
+        }
+    });
     const initializeTooltips = (container) => {
         const tooltipTriggerList = container.querySelectorAll('[data-bs-toggle="tooltip"]');
         [...tooltipTriggerList].map(tooltipTriggerEl => new bootstrap.Tooltip(tooltipTriggerEl));
@@ -1856,7 +1929,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // --- Scrolling logic for new chat history ---
         // This is the main fix for the issue.
         if (target.id === 'chat-messages-container') {
-            scrollChatToPosition();
+            const jumpSelector = getJumpSelector(event.detail.xhr);
+            jumpSelector ? scrollToMessage(jumpSelector) : scrollChatToPosition();
         }
 
         // Re-initialize dynamic components on the newly swapped content.
