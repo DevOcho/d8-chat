@@ -147,6 +147,63 @@ def get_attachments_for_messages(messages):
     return attachments_map
 
 
+# Consecutive messages from one author within this window (same day, nobody
+# else in between) render as a single visual group: one avatar/name/timestamp
+# header with the follow-ups tucked underneath, Slack-style.
+MESSAGE_GROUP_WINDOW = datetime.timedelta(minutes=5)
+
+
+def annotate_message_grouping(messages, prev_message=None):
+    """
+    Set ``message.same_sender`` on each message so the templates can group a run
+    of messages from one author under a single header.
+
+    A message groups with the one above it when they share an author, fall on
+    the same calendar day, and were sent within ``MESSAGE_GROUP_WINDOW`` — with
+    no other author or system message in between. Thread replies are skipped
+    because they aren't rendered inline, so the message after a thread reply
+    still groups with the last *visible* message.
+
+    ``prev_message`` is the message immediately above this batch (a pagination
+    cursor or the last message already on screen) so grouping stays correct
+    across a fetch/broadcast boundary; pass ``None`` when nothing precedes it.
+    """
+    prev = prev_message
+    for message in messages:
+        if message.reply_type == "thread":
+            message.same_sender = False
+            continue  # not rendered inline — don't let it anchor/break a group
+        message.same_sender = bool(
+            prev is not None
+            and message.user_id is not None
+            and prev.user_id is not None
+            and prev.user_id == message.user_id
+            and message.created_at.date() == prev.created_at.date()
+            and message.created_at - prev.created_at <= MESSAGE_GROUP_WINDOW
+        )
+        prev = message
+    return messages
+
+
+def previous_visible_message(new_message):
+    """
+    The most recent non-thread message before ``new_message`` in its
+    conversation — the one that sits directly above it in the main flow. Used
+    to compute grouping for realtime/catch-up renders that don't have the
+    surrounding list in hand.
+    """
+    return (
+        Message.select()
+        .where(
+            (Message.conversation == new_message.conversation)
+            & (Message.id < new_message.id)
+            & ((Message.reply_type != "thread") | Message.reply_type.is_null())
+        )
+        .order_by(Message.id.desc())
+        .first()
+    )
+
+
 def check_and_get_read_state_oob(current_user, just_read_conversation):
     """
     Checks if a user has other unread messages. If not, returns HTML to
@@ -422,6 +479,11 @@ def catch_up_messages(conv_id_str, last_id):
 
     reactions_map = get_reactions_for_messages(messages)
     attachments_map = get_attachments_for_messages(messages)
+    # Continue grouping from the last message the client already has on screen.
+    if messages:
+        annotate_message_grouping(
+            messages, prev_message=previous_visible_message(messages[0])
+        )
     parts = []
     for m in messages:
         msg_html = render_template(
@@ -671,6 +733,11 @@ def _broadcast_regular_message(sender, new_message, conv_id_str):
 
     reactions_map = get_reactions_for_messages(list((new_message,)))
     attachments_map = get_attachments_for_messages(list((new_message,)))
+    # Group under the previous message if it's the same author within the
+    # window, so a realtime-appended message matches the grouped page render.
+    annotate_message_grouping(
+        [new_message], prev_message=previous_visible_message(new_message)
+    )
     new_message_html = render_template(
         "partials/message.html",
         message=new_message,

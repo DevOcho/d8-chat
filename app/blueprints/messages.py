@@ -32,6 +32,7 @@ from app.models import (
 )
 from app.routes import (
     PAGE_SIZE,
+    annotate_message_grouping,
     get_attachments_for_messages,
     get_reactions_for_messages,
     handle_inbound_message,
@@ -403,6 +404,12 @@ def get_messages_page(conversation_id):
         .limit(PAGE_SIZE)
     )
     messages = list(reversed(query)) if fetching_older else list(query)
+    # For a newer batch the cursor sits directly above it, so grouping can
+    # continue across the seam. An older batch is prepended above unknown
+    # (unloaded) history, so it starts a fresh group.
+    annotate_message_grouping(
+        messages, prev_message=None if fetching_older else cursor_message
+    )
     reactions_map = get_reactions_for_messages(messages)
     attachments_map = get_attachments_for_messages(messages)
     return render_template(
@@ -459,6 +466,7 @@ def jump_to_message(message_id):
         .limit(30)
     )
     messages = messages_before + [target_message] + messages_after
+    annotate_message_grouping(messages)
     reactions_map = get_reactions_for_messages(messages)
     attachments_map = get_attachments_for_messages(messages)
     status, created = UserConversationStatus.get_or_create(

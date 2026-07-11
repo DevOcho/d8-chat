@@ -125,6 +125,13 @@ form[id^="message-form"] {
   box-shadow: 0 0 0 0.15rem rgba(240, 101, 149, 0.35);
 }
 
+/* Grouped messages (same author, within the 5-min window): the repeated
+   avatar/name/timestamp header is dropped in the template, so pull the line up
+   snug under the previous one to read as one block. */
+.message-container.grouped-message {
+  margin-top: -0.15rem;
+}
+
 .codehilite {
     max-width: 100%;
     background: #272822; /* Fixed hex code missing an 8 */

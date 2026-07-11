@@ -13,7 +13,7 @@ from app.models import (
     User,
     UserConversationStatus,
 )
-from app.routes import PAGE_SIZE
+from app.routes import MESSAGE_GROUP_WINDOW, PAGE_SIZE, annotate_message_grouping
 
 
 @pytest.fixture
@@ -843,3 +843,79 @@ def test_forward_denies_inaccessible_source(logged_in_client, test_db):
         data={"conversation_id_str": f"channel_{mine.id}", "optional_note": "leak"},
     )
     assert res.status_code == 403
+
+
+# --- Message grouping (Slack-style consecutive-message collapsing) ---
+
+
+def _grp_msg(user_id, created_at, reply_type=None):
+    """Build an unsaved Message with just the fields grouping cares about."""
+    m = Message(content="x", reply_type=reply_type)
+    m.user_id = user_id
+    m.created_at = created_at
+    return m
+
+
+class TestMessageGrouping:
+    BASE = datetime(2026, 7, 11, 12, 0, 0)
+
+    def test_first_message_never_groups(self):
+        a = _grp_msg(1, self.BASE)
+        annotate_message_grouping([a])
+        assert a.same_sender is False
+
+    def test_consecutive_same_author_within_window_groups(self):
+        a1 = _grp_msg(1, self.BASE)
+        a2 = _grp_msg(1, self.BASE + timedelta(seconds=60))
+        annotate_message_grouping([a1, a2])
+        assert a1.same_sender is False
+        assert a2.same_sender is True
+
+    def test_exactly_at_window_groups_but_beyond_does_not(self):
+        a1 = _grp_msg(1, self.BASE)
+        at_edge = _grp_msg(1, self.BASE + MESSAGE_GROUP_WINDOW)
+        annotate_message_grouping([a1, at_edge])
+        assert at_edge.same_sender is True
+
+        b1 = _grp_msg(1, self.BASE)
+        past_edge = _grp_msg(1, self.BASE + MESSAGE_GROUP_WINDOW + timedelta(seconds=1))
+        annotate_message_grouping([b1, past_edge])
+        assert past_edge.same_sender is False
+
+    def test_other_author_in_between_breaks_group(self):
+        a1 = _grp_msg(1, self.BASE)
+        other = _grp_msg(2, self.BASE + timedelta(seconds=10))
+        a2 = _grp_msg(1, self.BASE + timedelta(seconds=20))
+        annotate_message_grouping([a1, other, a2])
+        assert other.same_sender is False
+        assert a2.same_sender is False  # its predecessor is the other author
+
+    def test_system_message_breaks_group(self):
+        a1 = _grp_msg(1, self.BASE)
+        system = _grp_msg(None, self.BASE + timedelta(seconds=10))  # user=None
+        a2 = _grp_msg(1, self.BASE + timedelta(seconds=20))
+        annotate_message_grouping([a1, system, a2])
+        assert system.same_sender is False
+        assert a2.same_sender is False
+
+    def test_thread_reply_is_skipped_not_counted(self):
+        a1 = _grp_msg(1, self.BASE)
+        thread = _grp_msg(1, self.BASE + timedelta(seconds=10), reply_type="thread")
+        a2 = _grp_msg(1, self.BASE + timedelta(seconds=20))
+        annotate_message_grouping([a1, thread, a2])
+        assert thread.same_sender is False
+        # a2 groups with a1 because the (non-inline) thread reply is skipped
+        assert a2.same_sender is True
+
+    def test_midnight_boundary_does_not_group(self):
+        # 40 seconds apart but different calendar days → must not group.
+        late = _grp_msg(1, datetime(2026, 7, 11, 23, 59, 30))
+        early = _grp_msg(1, datetime(2026, 7, 12, 0, 0, 10))
+        annotate_message_grouping([late, early])
+        assert early.same_sender is False
+
+    def test_prev_message_carries_group_across_batch_seam(self):
+        prev = _grp_msg(1, self.BASE)
+        first = _grp_msg(1, self.BASE + timedelta(seconds=30))
+        annotate_message_grouping([first], prev_message=prev)
+        assert first.same_sender is True

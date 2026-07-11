@@ -10,7 +10,7 @@
             {% set _ = other_attachments.append(att) %}
         {% endif %}
     {% endfor %}
-    <div class="d-flex mb-1 message-container {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
+    <div class="d-flex mb-1 message-container {% if message.same_sender %}grouped-message{% endif %} {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
          id="message-{{ message.id }}"
          data-user-id="{{ message.user.id }}"
          data-raw-content="{{ message.content | e }}"
@@ -29,12 +29,14 @@
             <div class="flex-shrink-0" style="width: 40px; height: 40px;"></div>
         {% endif %}
         <div class="flex-grow-1 ms-3">
-            <div>
-                <strong class="me-2">{{ message.user.display_name or message.user.username }}</strong>
-                <small class="text-muted local-time"
-                       data-timestamp="{{ message.created_at.isoformat() }}Z">{{ message.created_at.strftime("%I:%M %p") }}</small>
-                {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
-            </div>
+            {% if not message.same_sender %}
+                <div>
+                    <strong class="me-2">{{ message.user.display_name or message.user.username }}</strong>
+                    <small class="text-muted local-time"
+                           data-timestamp="{{ message.created_at.isoformat() }}Z">{{ message.created_at.strftime("%I:%M %p") }}</small>
+                    {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
+                </div>
+            {% endif %}
             {% if message.parent_message and message.reply_type == 'quote' %}
                 <div class="quoted-reply p-2 mb-2 quoted-reply-clickable"
                      role="button"
