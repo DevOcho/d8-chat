@@ -772,3 +772,74 @@ def test_load_message_for_thread_edit(logged_in_client, setup_conversation):
     assert response.status_code == 200
     assert b"Editing Message" in response.data
     assert f'id="thread-input-container-{parent_message.id}"'.encode() in response.data
+
+
+# --- Access-control regressions: message pagination + forwarding ---
+#
+# get_messages_page and forward_message only enforced @login_required, not
+# conversation membership. That let any authenticated user page the history of
+# an arbitrary channel/DM (guessable conversation_id + any message id as the
+# cursor), and forward a message they couldn't see — now also exfiltrating its
+# attachments. Both must return 403 for non-members.
+
+
+def test_get_messages_page_denies_non_channel_member(logged_in_client, test_db):
+    """Paging a channel the logged-in user isn't a member of is forbidden."""
+    outsider = User.create(id=2, username="outsider", email="out@example.com")
+    channel = Channel.create(workspace_id=1, name="secret-channel")
+    conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel.id}", type="channel"
+    )
+    ChannelMember.create(user=outsider, channel=channel)  # user1 (id=1) is NOT a member
+    secret_msg = Message.create(user=outsider, conversation=conv, content="classified")
+
+    older = logged_in_client.get(
+        f"/chat/messages/channel_{channel.id}?before_message_id={secret_msg.id}"
+    )
+    newer = logged_in_client.get(
+        f"/chat/messages/channel_{channel.id}?after_message_id={secret_msg.id}"
+    )
+    assert older.status_code == 403
+    assert newer.status_code == 403
+
+
+def test_get_messages_page_denies_dm_outsider(logged_in_client, test_db):
+    """Paging a DM the logged-in user isn't part of is forbidden."""
+    alice = User.create(id=2, username="alice", email="a@example.com")
+    bob = User.create(id=3, username="bob", email="b@example.com")
+    conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"dm_{alice.id}_{bob.id}", type="dm"
+    )
+    private_msg = Message.create(user=alice, conversation=conv, content="private dm")
+
+    res = logged_in_client.get(
+        f"/chat/messages/dm_{alice.id}_{bob.id}?before_message_id={private_msg.id}"
+    )
+    assert res.status_code == 403
+
+
+def test_forward_denies_inaccessible_source(logged_in_client, test_db):
+    """Forwarding a message from a conversation the user can't see is forbidden."""
+    user1 = User.get_by_id(1)
+    outsider = User.create(id=2, username="outsider", email="out@example.com")
+
+    # Source channel the user is NOT a member of.
+    secret = Channel.create(workspace_id=1, name="secret")
+    secret_conv, _ = Conversation.get_or_create(
+        conversation_id_str=f"channel_{secret.id}", type="channel"
+    )
+    ChannelMember.create(user=outsider, channel=secret)
+    secret_msg = Message.create(
+        user=outsider, conversation=secret_conv, content="classified"
+    )
+
+    # Target channel the user IS a member of.
+    mine = Channel.create(workspace_id=1, name="mine")
+    Conversation.get_or_create(conversation_id_str=f"channel_{mine.id}", type="channel")
+    ChannelMember.create(user=user1, channel=mine)
+
+    res = logged_in_client.post(
+        f"/chat/message/{secret_msg.id}/forward",
+        data={"conversation_id_str": f"channel_{mine.id}", "optional_note": "leak"},
+    )
+    assert res.status_code == 403

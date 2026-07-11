@@ -14,6 +14,7 @@ from flask import (
 )
 
 from app import _sanitize_and_linkify, limiter
+from app.access import user_has_conversation_access
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
 from app.htmx_oob import oob_by_id
@@ -376,6 +377,15 @@ def get_messages_page(conversation_id):
     conversation = Conversation.get_or_none(conversation_id_str=conversation_id)
     if not conversation:
         return "Conversation not found", 404
+    # Authorize: only members may page a conversation's history. Without this,
+    # any authenticated user could read arbitrary channels/DMs by supplying a
+    # guessable conversation_id and any message id as the cursor.
+    try:
+        parsed = parse_conversation_id(conversation_id)
+    except ValueError:
+        return "Invalid conversation id", 400
+    if not user_has_conversation_access(g.user, parsed):
+        return "Unauthorized", 403
 
     if fetching_older:
         condition = Message.created_at < cursor_message.created_at
@@ -628,6 +638,18 @@ def forward_message(message_id):
     original_message = Message.get_or_none(id=message_id)
     if not original_message:
         return "Message not found", 404
+
+    # Authorize the SOURCE: forwarding copies the original's content and now its
+    # attachments, so a user who can't see the source conversation must not be
+    # able to forward (and thereby exfiltrate) a message by guessing its id.
+    try:
+        source_parsed = parse_conversation_id(
+            original_message.conversation.conversation_id_str
+        )
+    except ValueError:
+        return "Invalid source conversation", 400
+    if not user_has_conversation_access(g.user, source_parsed):
+        return "Unauthorized", 403
 
     target_conv_id_str = request.form.get("conversation_id_str")
     optional_note = request.form.get("optional_note", "").strip()
