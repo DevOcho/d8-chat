@@ -17,7 +17,7 @@ from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
 from flask_sock import Sock
 from flask_wtf.csrf import CSRFProtect
-from markupsafe import Markup
+from markupsafe import Markup, escape
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import Config
@@ -487,12 +487,23 @@ def register_template_filters(app):
 
     @app.template_filter("highlight")
     def highlight_filter(text, query):
-        if not query or not text:
+        if not text:
             return text
+        # HTML-escape the stored content FIRST. It reaches here raw (message
+        # bodies, usernames, channel names are stored unsanitized), and the
+        # Markup() wrapper below tells Jinja not to auto-escape — so without
+        # this, any HTML in `text` executes (stored XSS via the search bar).
+        escaped_text = str(escape(text))
+        if not query:
+            return Markup(escaped_text)
+        # Escape the query the same way so it still matches the escaped text
+        # (e.g. searching for "<" matches the escaped "&lt;"). The only literal
+        # HTML we emit is the <mark> tags we build ourselves.
+        pattern = re.escape(str(escape(query)))
         highlighted_text = re.sub(
-            f"({re.escape(query)})",
+            f"({pattern})",
             r"<mark>\1</mark>",
-            str(text),
+            escaped_text,
             flags=re.IGNORECASE,
         )
         return Markup(highlighted_text)

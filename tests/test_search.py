@@ -1,14 +1,15 @@
 # File: ./tests/test_search.py
 
 import pytest
+
 from app.models import (
-    User,
     Channel,
     ChannelMember,
     Conversation,
     Message,
-    WorkspaceMember,
+    User,
     UserConversationStatus,
+    WorkspaceMember,
 )
 
 SEARCH_PAGE_SIZE = 20
@@ -239,3 +240,97 @@ def test_search_for_message_in_dm_to_self(logged_in_client, search_setup):
     assert response.status_code == 200
     # The context should show the user's own name with "(you)"
     assert b"Test User (you)" in response.data
+
+
+# --- Stored-XSS regression: the `highlight` filter must never emit live HTML ---
+#
+# A security researcher demonstrated stored XSS by planting markup in a
+# searchable field (message body, channel name, username/display name) and then
+# searching for it: the custom `highlight` Jinja filter wrapped the raw value in
+# Markup() *without* HTML-escaping, so HTMX swapped a live payload straight into
+# the DOM (their PoC made the page "play Tetris"). These tests pin the fix —
+# every search sink must render the payload as inert, escaped text.
+
+XSS_PAYLOAD = "<img src=x onerror=alert(1)>"
+ESCAPED_PAYLOAD = b"&lt;img src=x onerror=alert(1)&gt;"
+LIVE_TAG = b"<img src=x onerror"
+
+
+def test_search_message_body_xss_is_escaped(logged_in_client, search_setup):
+    """A message body containing HTML is escaped in search results, not executed."""
+    pub_conv = Conversation.get(
+        conversation_id_str=f"channel_{search_setup['public_channel'].id}"
+    )
+    Message.create(
+        user=search_setup["user1"],
+        conversation=pub_conv,
+        content=f"{XSS_PAYLOAD} tetris",
+    )
+
+    res = logged_in_client.get("/chat/search?q=tetris")
+    assert res.status_code == 200
+    assert ESCAPED_PAYLOAD in res.data  # rendered as inert text...
+    assert LIVE_TAG not in res.data  # ...never as a live tag
+    assert b"<mark>tetris</mark>" in res.data  # highlighting still works
+
+
+def test_search_channel_name_xss_is_escaped(logged_in_client, search_setup):
+    """A channel name containing HTML is escaped in search results, not executed."""
+    user1 = search_setup["user1"]
+    workspace = WorkspaceMember.get(user=user1).workspace
+    evil_chan = Channel.create(workspace=workspace, name=f"{XSS_PAYLOAD}-tetrischan")
+    ChannelMember.create(user=user1, channel=evil_chan)
+
+    res = logged_in_client.get("/chat/search/channels?q=tetrischan")
+    assert res.status_code == 200
+    assert ESCAPED_PAYLOAD in res.data
+    assert LIVE_TAG not in res.data
+    assert b"<mark>tetrischan</mark>" in res.data
+
+
+def test_search_user_name_xss_is_escaped(logged_in_client, search_setup):
+    """A display name containing HTML is escaped in search results, not executed."""
+    user1 = search_setup["user1"]
+    workspace = WorkspaceMember.get(user=user1).workspace
+    evil_user = User.create(
+        id=99,
+        username="tetrisuser",
+        email="evil@example.com",
+        display_name=f"{XSS_PAYLOAD} tetrisname",
+    )
+    WorkspaceMember.create(user=evil_user, workspace=workspace)
+
+    res = logged_in_client.get("/chat/search/users?q=tetrisname")
+    assert res.status_code == 200
+    assert ESCAPED_PAYLOAD in res.data
+    assert LIVE_TAG not in res.data
+    assert b"<mark>tetrisname</mark>" in res.data
+
+
+def test_highlight_filter_escapes_content(app):
+    """Unit-level: the filter escapes stored content while still highlighting."""
+    with app.app_context():
+        from flask import render_template_string
+
+        out = render_template_string(
+            "{{ text | highlight(q) }}",
+            text=f"{XSS_PAYLOAD}hello",
+            q="hello",
+        )
+    assert "<img" not in out  # no live tag survives
+    assert "&lt;img src=x onerror=alert(1)&gt;" in out  # escaped instead
+    assert "<mark>hello</mark>" in out  # match still highlighted
+
+
+def test_highlight_filter_escapes_html_in_query(app):
+    """A query made of HTML metacharacters is escaped on both sides of the match."""
+    with app.app_context():
+        from flask import render_template_string
+
+        out = render_template_string(
+            "{{ text | highlight(q) }}",
+            text="a <b> tag",
+            q="<b>",
+        )
+    assert "<b>" not in out  # no live <b> element injected via the query
+    assert "<mark>&lt;b&gt;</mark>" in out  # matched, highlighted, escaped
