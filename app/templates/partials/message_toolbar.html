@@ -1,4 +1,19 @@
 <div class="message-toolbar">
+    {# Copy button #}
+    <button class="btn btn-sm btn-light"
+            data-message-id="{{ message.id }}"
+            hx-on:click="
+                const hiddenInput = this.querySelector('.copy-source');
+                navigator.clipboard.writeText(hiddenInput.value);
+                const icon = this.querySelector('i');
+                icon.className = 'bi bi-check2';
+                setTimeout(() => icon.className = 'bi bi-clipboard', 2000);
+            "
+            title="Copy to clipboard">
+        <i class="bi bi-clipboard"></i>
+        <!-- Hidden input holds the pure, unescaped raw string safely via Jinja -->
+        <input type="hidden" class="copy-source" value="{{ message.content | markdown_clean }}">
+    </button>
     {# Emoji Reaction button #}
     <button class="btn btn-sm btn-light"
             data-bs-toggle="popover"
