@@ -213,9 +213,7 @@
         <!-- Global Search Bar -->
         <div id="global-search-container" class="p-2 border-bottom">
             <div class="global-search-wrapper">
-                <form hx-get="{{ url_for('search.search') }}"
-                      hx-target="#search-results-overlay"
-                      hx-swap="innerHTML">
+                <form hx-target="#search-results-overlay" hx-swap="innerHTML" onsubmit="return false;">
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="search"
@@ -223,7 +221,11 @@
                                name="q"
                                class="form-control"
                                placeholder="Search DevOcho"
-                               autocomplete="off">
+                               autocomplete="off"
+                               hx-get="{{ url_for('search.search') }}"
+                               hx-trigger="keyup changed delay:300ms, search"
+                               hx-target="#search-results-overlay"
+                               hx-swap="innerHTML">
                     </div>
                 </form>
             </div>
