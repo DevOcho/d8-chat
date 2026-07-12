@@ -156,6 +156,115 @@ def test_api_get_dms_success(client):
     assert isinstance(data["dms"], list)
 
 
+def _login_token(client, username="testuser", password="password123"):
+    """Set a password on the given user and return a fresh API token."""
+    user = User.get(User.username == username)
+    user.set_password(password)
+    user.save()
+    res = client.post(
+        "/api/v1/auth/login", json={"username": username, "password": password}
+    )
+    return res.get_json()["api_token"]
+
+
+def test_api_create_dm_success(client, mocker):
+    """
+    GIVEN a valid token and a target user with no prior DM
+    WHEN POST /api/v1/dms is called with that user_id
+    THEN a DM is created (201), both status rows exist, and dm_created is
+         broadcast to the other user.
+    """
+    from app.models import Conversation, UserConversationStatus
+
+    other = User.create(username="dm_target", email="dmt@example.com")
+    mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
+
+    token = _login_token(client)
+    res = client.post(
+        "/api/v1/dms",
+        json={"user_id": other.id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 201
+    data = res.get_json()
+    ids = sorted([1, other.id])
+    expected_str = f"dm_{ids[0]}_{ids[1]}"
+    assert data["conversation_id_str"] == expected_str
+    assert data["other_user"]["id"] == other.id
+    assert data["unread_count"] == 0
+
+    conv = Conversation.get(conversation_id_str=expected_str)
+    assert conv.type == "dm"
+    assert UserConversationStatus.get_or_none(user=1, conversation=conv) is not None
+    assert (
+        UserConversationStatus.get_or_none(user=other.id, conversation=conv) is not None
+    )
+
+    # The other user is notified with a dm_created event whose other_user is the caller.
+    mock_send.assert_called_once()
+    assert mock_send.call_args[0][0] == other.id
+    api_data = mock_send.call_args[0][1]["api_data"]
+    assert api_data["type"] == "dm_created"
+    assert api_data["data"]["conversation_id_str"] == expected_str
+    assert api_data["data"]["other_user"]["id"] == 1
+
+
+def test_api_create_dm_idempotent(client, mocker):
+    """
+    GIVEN a DM that already exists
+    WHEN POST /api/v1/dms is called again for the same user
+    THEN it returns 200 with the same conversation and does NOT re-broadcast.
+    """
+    other = User.create(username="dm_again", email="dma@example.com")
+    token = _login_token(client)
+
+    first = client.post(
+        "/api/v1/dms",
+        json={"user_id": other.id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert first.status_code == 201
+
+    mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
+    second = client.post(
+        "/api/v1/dms",
+        json={"user_id": other.id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert second.status_code == 200
+    assert (
+        second.get_json()["conversation_id_str"]
+        == first.get_json()["conversation_id_str"]
+    )
+    mock_send.assert_not_called()
+
+
+def test_api_create_dm_user_not_found(client):
+    """POST /api/v1/dms with an unknown user_id returns 404."""
+    token = _login_token(client)
+    res = client.post(
+        "/api/v1/dms",
+        json={"user_id": 999999},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 404
+    assert res.get_json()["error"] == "User not found"
+
+
+def test_api_create_dm_invalid_user_id(client):
+    """POST /api/v1/dms with a missing/invalid user_id returns 400."""
+    token = _login_token(client)
+    for payload in ({}, {"user_id": "abc"}, {"user_id": None}, {"user_id": True}):
+        res = client.post(
+            "/api/v1/dms",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert res.status_code == 400, payload
+
+
 def test_api_get_messages_success(client):
     """
     GIVEN a valid api_token and a conversation with messages

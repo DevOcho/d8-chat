@@ -626,6 +626,108 @@ def get_dms():
     return jsonify({"dms": results}), 200
 
 
+@api_v1_bp.route("/dms", methods=["POST"])
+@api_token_required
+@limiter.limit("30 per minute", key_func=_api_user_key)
+def create_dm():
+    """Get-or-create a DM conversation with another user (mobile parity with web).
+
+    The web opens a DM lazily via ``dms.get_dm_chat`` (an HTMX/session route),
+    which ``get_or_create``s the ``Conversation`` and both participants'
+    ``UserConversationStatus`` rows. The JSON API had no equivalent, so mobile
+    clients couldn't start a brand-new DM — ``get``/``post`` on
+    ``/conversations/dm_x_y/messages`` 404'd until the conversation existed.
+
+    Body: ``{"user_id": <int>}`` — the person to DM.
+
+    Idempotent: returns the existing DM (200) if it's already there, otherwise
+    creates it (201). Mirrors the DM-record half of ``get_dm_chat`` and, on a
+    brand-new conversation, broadcasts the same ``dm_created`` event to the
+    other user so their sidebar updates live.
+    """
+    from flask import render_template
+
+    from app.chat_manager import chat_manager
+
+    data = request.get_json(silent=True) or {}
+    user_id = data.get("user_id")
+
+    # Accept a JSON number or a numeric string; reject bools (which are ints)
+    # and anything non-integer.
+    if isinstance(user_id, bool):
+        user_id = None
+    elif isinstance(user_id, str) and user_id.strip().lstrip("-").isdigit():
+        user_id = int(user_id)
+    if not isinstance(user_id, int):
+        return jsonify({"error": "A valid integer user_id is required"}), 400
+
+    other_user = User.get_or_none(User.id == user_id)
+    if not other_user:
+        return jsonify({"error": "User not found"}), 404
+
+    user_ids = sorted([g.api_user.id, other_user.id])
+    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
+
+    conversation, created = Conversation.get_or_create(
+        conversation_id_str=conv_id_str, defaults={"type": "dm"}
+    )
+
+    # Ensure both participants have a status record so the DM shows up in each
+    # user's sidebar / GET /dms.
+    status, _ = UserConversationStatus.get_or_create(
+        user=g.api_user, conversation=conversation
+    )
+    UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
+
+    unread_count = (
+        Message.select()
+        .where(
+            (Message.conversation == conversation)
+            & (Message.created_at > status.last_read_timestamp)
+            & (Message.user != g.api_user)
+        )
+        .count()
+    )
+
+    # On a brand-new conversation, notify the other user so their sidebar
+    # updates live — same payload the web emits from get_dm_chat. Skipped for
+    # self-DMs (nobody else to tell) and for already-existing DMs (idempotent).
+    if created and other_user.id != g.api_user.id:
+        new_contact_html = render_template(
+            "partials/dm_list_item_oob.html",
+            user=g.api_user,
+            conv_id_str=conv_id_str,
+            is_online=chat_manager.is_user_online_in_cluster(g.api_user.id),
+        )
+        subscription_html = render_template(
+            "partials/subscribe_oob.html", conv_id_str=conv_id_str
+        )
+        chat_manager.send_to_user(
+            other_user.id,
+            {
+                "_raw_html": new_contact_html + subscription_html,
+                "api_data": {
+                    "type": "dm_created",
+                    "data": {
+                        "conversation_id_str": conv_id_str,
+                        "other_user": user_to_dict(g.api_user),
+                    },
+                },
+            },
+        )
+
+    return (
+        jsonify(
+            {
+                "conversation_id_str": conv_id_str,
+                "other_user": user_to_dict(other_user),
+                "unread_count": unread_count,
+            }
+        ),
+        201 if created else 200,
+    )
+
+
 @api_v1_bp.route("/conversations/<conv_id_str>/messages", methods=["GET"])
 @api_token_required
 def get_messages(conv_id_str):
