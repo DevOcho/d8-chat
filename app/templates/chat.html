@@ -138,14 +138,17 @@
                                 {% with user=g.user, size=24 %}
                                     {% include 'partials/_avatar_display.html' %}
                                 {% endwith %}
-                                <!-- Presence Indicator Dot -->
-                                {% set presence_class = "presence-away" %} {# Default offline #}
+                                <!-- Presence Indicator Dot. This is the current
+                                     user's own dot: they are, by definition,
+                                     present while viewing the page, so render it
+                                     straight from their chosen status rather than
+                                     the activity set (which isn't stamped until
+                                     the on-load ping fires, after this render). -->
+                                {% set presence_class = "presence-online" %}
                                 {% if g.user.presence_status == 'busy' %}
                                     {% set presence_class = "presence-busy" %}
                                 {% elif g.user.presence_status == 'away' %}
                                     {% set presence_class = "presence-away" %}
-                                {% elif g.user.id in online_users and g.user.id in active_users %}
-                                    {% set presence_class = "presence-online" %}
                                 {% endif %}
                                 <span id="status-dot-{{ g.user.id }}"
                                       class="presence-indicator {{ presence_class }}"></span>
