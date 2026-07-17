@@ -1976,6 +1976,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- Scrolling logic for new messages in a thread ---
         if (target && target.id.startsWith('thread-replies-list-')) {
+            // Localize the appended reply's timestamp (see note in the
+            // message-list branch); otherwise live thread replies show UTC.
+            formatLocalTimes(target);
+
             const scrollableContainer = target.closest('.flex-grow-1[style*="overflow-y: auto"]');
             if (scrollableContainer) {
                 const isNearBottom = scrollableContainer.scrollHeight - scrollableContainer.clientHeight - scrollableContainer.scrollTop < 150;
@@ -2008,6 +2012,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (seenIds.has(el.id)) el.remove();
                 else seenIds.add(el.id);
             });
+
+            // Localize timestamps on every freshly appended message. The server
+            // renders times in UTC as a fallback; without this, live/broadcast
+            // and catch-up messages stay in UTC until a full page reload. Runs on
+            // the whole list (idempotent via the .time-processed guard) so a
+            // multi-message catch-up backfill localizes all of them, not just the
+            // last one.
+            formatLocalTimes(target);
 
             const messagesContainer = document.getElementById('chat-messages-container');
             const mainContent = document.querySelector('main.main-content');
@@ -2123,7 +2135,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Process new elements in the message list
             initializeReactionPopovers(messagesContainer);
             processCodeBlocks(messagesContainer);
-            formatLocalTimes(target);
+            formatLocalTimes(messagesContainer);
 
             const conversationDiv = messagesContainer.querySelector('[data-conversation-db-id]');
             if (conversationDiv) {
@@ -2231,4 +2243,77 @@ document.addEventListener('DOMContentLoaded', () => {
     updateReactionHighlights(document.body);
     initializeTooltips(document.body);
     formatLocalTimes(document.body);
+
+    // --- Presence: idle/away detection -------------------------------------
+    // A live WebSocket only tells us a tab is open, not that someone is at the
+    // keyboard — so a tab left open overnight would show green all morning.
+    // Here the browser reports real activity: we stamp "active" while the user
+    // interacts and "away" after IDLE_MS of no input, and the server maps that
+    // to the online/away dot. A manually-chosen busy/away is honored as-is and
+    // never auto-flipped.
+    (function initPresence() {
+        const main = document.querySelector('main.main-content');
+        const activityUrl = main && main.dataset.activityUrl;
+        if (!main || !activityUrl) return;
+
+        const IDLE_MS = 15 * 60 * 1000;      // idle before we report "away"
+        const KEEPALIVE_MS = 4 * 60 * 1000;  // refresh "active" while present
+        const CHECK_MS = 30 * 1000;          // how often we re-evaluate
+
+        // The status the user explicitly chose. Auto-away only manages the
+        // 'online' case; 'busy'/'away' are left exactly as the user set them.
+        let manualStatus = main.dataset.currentUserStatus || 'online';
+        let lastActivity = Date.now();
+        let lastPing = 0;
+        let autoAway = false;
+
+        const send = (state) => {
+            // keepalive lets a final ping survive a tab closing/navigating away.
+            fetch(activityUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ state }),
+                keepalive: true,
+            }).catch(() => {});
+            lastPing = Date.now();
+        };
+
+        const onActivity = () => {
+            lastActivity = Date.now();
+            if (autoAway && manualStatus === 'online') {
+                autoAway = false;
+                send('active'); // returned from idle -> back online
+            }
+        };
+
+        ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'].forEach((evt) => {
+            document.addEventListener(evt, onActivity, { passive: true });
+        });
+
+        // Follow manual status choices from the profile menu so auto-away never
+        // fights a deliberate away/busy. Delegated so it survives OOB re-renders.
+        document.body.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-presence-choice]');
+            if (!btn) return;
+            manualStatus = btn.dataset.presenceChoice;
+            autoAway = false;
+            lastActivity = Date.now();
+        });
+
+        setInterval(() => {
+            if (manualStatus !== 'online') return; // busy/away: leave untouched
+            if (Date.now() - lastActivity >= IDLE_MS) {
+                if (!autoAway) {
+                    autoAway = true;
+                    send('away');
+                }
+            } else if (Date.now() - lastPing >= KEEPALIVE_MS) {
+                send('active'); // keep the score fresh so fresh loads stay green
+            }
+        }, CHECK_MS);
+
+        // Stamp presence on load: present users (online/busy) go into the active
+        // set immediately; a manually-away user is left as-is (no ping).
+        if (manualStatus !== 'away') send('active');
+    })();
 });

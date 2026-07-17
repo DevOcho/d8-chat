@@ -140,12 +140,12 @@
                                 {% endwith %}
                                 <!-- Presence Indicator Dot -->
                                 {% set presence_class = "presence-away" %} {# Default offline #}
-                                {% if g.user.id in online_users %}
-                                    {% if g.user.presence_status == 'busy' %}
-                                        {% set presence_class = "presence-busy" %}
-                                    {% else %}
-                                        {% set presence_class = "presence-online" %}
-                                    {% endif %}
+                                {% if g.user.presence_status == 'busy' %}
+                                    {% set presence_class = "presence-busy" %}
+                                {% elif g.user.presence_status == 'away' %}
+                                    {% set presence_class = "presence-away" %}
+                                {% elif g.user.id in online_users and g.user.id in active_users %}
+                                    {% set presence_class = "presence-online" %}
                                 {% endif %}
                                 <span id="status-dot-{{ g.user.id }}"
                                       class="presence-indicator {{ presence_class }}"></span>
@@ -178,12 +178,12 @@
                                     {% endwith %}
                                     <!-- Presence Indicator Dot -->
                                     {% set presence_class = "presence-away" %} {# Default to offline #}
-                                    {% if user.id in online_users %}
-                                        {% if user.presence_status == 'busy' %}
-                                            {% set presence_class = "presence-busy" %}
-                                        {% else %}
-                                            {% set presence_class = "presence-online" %}
-                                        {% endif %}
+                                    {% if user.presence_status == 'busy' %}
+                                        {% set presence_class = "presence-busy" %}
+                                    {% elif user.presence_status == 'away' %}
+                                        {% set presence_class = "presence-away" %}
+                                    {% elif user.id in online_users and user.id in active_users %}
+                                        {% set presence_class = "presence-online" %}
                                     {% endif %}
                                     <span id="status-dot-{{ user.id }}"
                                           class="presence-indicator {{ presence_class }}"></span>
@@ -209,7 +209,9 @@
           data-notification-sound="{{ g.user.notification_sound }}"
           data-send-on-enter="{{ 'true' if g.user.send_on_enter else 'false' }}"
           data-current-user-id="{{ g.user.id }}"
-          data-current-user-username="{{ g.user.username }}">
+          data-current-user-username="{{ g.user.username }}"
+          data-current-user-status="{{ g.user.presence_status }}"
+          data-activity-url="{{ url_for('profile.update_activity') }}">
         <!-- Global Search Bar -->
         <div id="global-search-container" class="p-2 border-bottom">
             <div class="global-search-wrapper">

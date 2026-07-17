@@ -578,7 +578,14 @@ def get_channels():
 @api_v1_bp.route("/dms", methods=["GET"])
 @api_token_required
 def get_dms():
-    """Returns active DM conversations for the user with unread counts."""
+    """Returns active DM conversations for the user with unread counts.
+
+    Mirrors the web sidebar (``routes.chat_interface``): a DM is shown only when
+    it has had a message in the last 30 days OR has unread messages, and self-DMs
+    (the current user) are excluded. Without these filters the mobile list drifted
+    from the web's — it surfaced long-stale conversations and could list the user
+    themselves — which is the "different set of people" the mobile team saw.
+    """
     dm_convs = (
         Conversation.select()
         .join(UserConversationStatus)
@@ -587,18 +594,19 @@ def get_dms():
         )
     )
 
-    results = []
+    activity_cutoff = utc_now() - datetime.timedelta(days=30)
+    rows = []
     for conv in dm_convs:
-        # Extract the partner ID from the string, handling self-DMs correctly
+        # Extract the partner ID from the string; skip self-DMs (no partner
+        # other than the current user), matching the web's `uid != g.user.id`.
         try:
             user_ids = parse_conversation_id(conv.conversation_id_str).user_ids
         except ValueError:
             continue
-        partner_id = next(
-            (uid for uid in user_ids if uid != g.api_user.id), g.api_user.id
-        )
+        partner_id = next((uid for uid in user_ids if uid != g.api_user.id), None)
+        if partner_id is None:
+            continue
         partner = User.get_or_none(User.id == partner_id)
-
         if not partner:
             continue
 
@@ -615,15 +623,32 @@ def get_dms():
             .count()
         )
 
-        results.append(
-            {
-                "conversation_id_str": conv.conversation_id_str,
-                "other_user": user_to_dict(partner),
-                "unread_count": unread_count,
-            }
+        # Visibility: recent within 30 days OR has unread. Ordering: most recent
+        # activity first, same as the web sidebar.
+        last_msg = (
+            Message.select(Message.created_at)
+            .where(Message.conversation == conv)
+            .order_by(Message.created_at.desc())
+            .first()
+        )
+        last_at = last_msg.created_at if last_msg else None
+        is_recent = last_at is not None and last_at >= activity_cutoff
+        if not is_recent and unread_count == 0:
+            continue
+
+        rows.append(
+            (
+                last_at or datetime.datetime.min,
+                {
+                    "conversation_id_str": conv.conversation_id_str,
+                    "other_user": user_to_dict(partner),
+                    "unread_count": unread_count,
+                },
+            )
         )
 
-    return jsonify({"dms": results}), 200
+    rows.sort(key=lambda r: r[0], reverse=True)
+    return jsonify({"dms": [r[1] for r in rows]}), 200
 
 
 @api_v1_bp.route("/dms", methods=["POST"])
@@ -698,6 +723,7 @@ def create_dm():
             user=g.api_user,
             conv_id_str=conv_id_str,
             is_online=chat_manager.is_user_online_in_cluster(g.api_user.id),
+            is_active=chat_manager.is_user_active(g.api_user.id),
         )
         subscription_html = render_template(
             "partials/subscribe_oob.html", conv_id_str=conv_id_str
@@ -1713,6 +1739,13 @@ def update_presence():
 
     g.api_user.presence_status = status
     g.api_user.save()
+
+    # Keep the activity set aligned with an explicit choice, same as the web
+    # endpoint: online/busy means present, away means not.
+    if status == "away":
+        chat_manager.mark_inactive(g.api_user.id)
+    else:
+        chat_manager.mark_active(g.api_user.id)
 
     presence_class_map = {
         "online": "presence-online",

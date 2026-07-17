@@ -12,12 +12,12 @@
                         {% endwith %}
                         <!-- Presence Indicator Dot -->
                         {% set presence_class = "presence-away" %} {# Default offline #}
-                        {% if is_online %}
-                            {% if user.presence_status == 'busy' %}
-                                {% set presence_class = "presence-busy" %}
-                            {% else %}
-                                {% set presence_class = "presence-online" %}
-                            {% endif %}
+                        {% if user.presence_status == 'busy' %}
+                            {% set presence_class = "presence-busy" %}
+                        {% elif user.presence_status == 'away' %}
+                            {% set presence_class = "presence-away" %}
+                        {% elif is_online and is_active %}
+                            {% set presence_class = "presence-online" %}
                         {% endif %}
                         <span id="status-dot-{{ user.id }}"
                               class="presence-indicator {{ presence_class }}"></span>

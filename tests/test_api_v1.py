@@ -1,7 +1,14 @@
 # tests/test_api_v1.py
+import datetime
 import io
 
-from app.models import User
+from app.models import (
+    Conversation,
+    Message,
+    User,
+    UserConversationStatus,
+    utc_now,
+)
 
 
 def test_api_login_success(client):
@@ -154,6 +161,59 @@ def test_api_get_dms_success(client):
     assert "dms" in data
     # By default in conftest, testuser doesn't have any active DMs initialized
     assert isinstance(data["dms"], list)
+
+
+def _make_dm(me, partner_id, last_msg_age_days, unread):
+    """Create a DM conversation from ``me`` to ``partner_id`` with one message
+    aged ``last_msg_age_days`` and (un)read per ``unread``. Returns the conv."""
+    ids = sorted([me.id, partner_id])
+    conv = Conversation.create(
+        conversation_id_str=f"dm_{ids[0]}_{ids[1]}", type="dm"
+    )
+    last_at = utc_now() - datetime.timedelta(days=last_msg_age_days)
+    # An unread DM has its read cursor before the message; a read one after it.
+    last_read = (
+        last_at - datetime.timedelta(minutes=1)
+        if unread
+        else last_at + datetime.timedelta(minutes=1)
+    )
+    UserConversationStatus.create(
+        user=me, conversation=conv, last_read_timestamp=last_read
+    )
+    # Message from the partner (so it counts toward *my* unread), unless it's a
+    # self-DM where the only possible author is me.
+    author_id = partner_id if partner_id != me.id else me.id
+    Message.create(
+        conversation=conv,
+        user=author_id,
+        content="hi",
+        created_at=last_at,
+    )
+    return conv
+
+
+def test_api_get_dms_matches_web_filtering(client):
+    """GET /api/v1/dms mirrors the web sidebar: recent-or-unread DMs only, and
+    never the user themselves. Guards the mobile/web list drift."""
+    me = User.get_by_id(1)
+    recent = User.create(id=2, username="recent", email="r@x.com")
+    stale = User.create(id=3, username="stale", email="s@x.com")
+    stale_unread = User.create(id=4, username="staleunread", email="su@x.com")
+
+    _make_dm(me, recent.id, last_msg_age_days=1, unread=False)  # recent -> shown
+    _make_dm(me, stale.id, last_msg_age_days=45, unread=False)  # stale+read -> hidden
+    _make_dm(me, stale_unread.id, last_msg_age_days=45, unread=True)  # unread -> shown
+    _make_dm(me, me.id, last_msg_age_days=1, unread=False)  # self-DM -> hidden
+
+    token = _login_token(client)
+    res = client.get("/api/v1/dms", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200
+
+    partner_ids = {d["other_user"]["id"] for d in res.get_json()["dms"]}
+    assert recent.id in partner_ids
+    assert stale_unread.id in partner_ids
+    assert stale.id not in partner_ids  # stale & read: dropped, like the web
+    assert me.id not in partner_ids  # self never appears
 
 
 def _login_token(client, username="testuser", password="password123"):

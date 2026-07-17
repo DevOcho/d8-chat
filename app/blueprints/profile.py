@@ -155,6 +155,14 @@ def update_presence_status():
     user = g.user
     user.presence_status = new_status
     user.save()
+    # Keep the activity set in step with an explicit choice: picking online/busy
+    # means the user is present at the keyboard right now; picking away means
+    # they aren't. Otherwise a manual "online" could still render as away until
+    # the next activity ping arrives.
+    if new_status == "away":
+        chat_manager.mark_inactive(user.id)
+    else:
+        chat_manager.mark_active(user.id)
     presence_class_map = {
         "online": "presence-online",
         "away": "presence-away",
@@ -175,6 +183,52 @@ def update_presence_status():
         "outerHTML", "#sidebar-profile-button", sidebar_button_html
     )
     return make_response(profile_header_html + sidebar_oob_swap)
+
+
+@profile_bp.route("/profile/activity", methods=["POST"])
+@login_required
+def update_activity():
+    """Client-driven activity heartbeat that drives the online-vs-away dot.
+
+    The browser stamps ``state=active`` while the user is interacting and
+    ``state=away`` once they've been idle past the threshold (see PresenceManager
+    in chat.js). Connection alone can't tell "present" from "tab left open" — this
+    can. A manually-chosen ``busy``/``away`` status always wins over activity, so
+    an active ping never overrides someone who set themselves Do-Not-Disturb.
+    """
+    state = request.form.get("state", "active")
+    user = g.user
+    # Compare before/after so a periodic keepalive ping (active -> still active)
+    # doesn't rebroadcast an unchanged dot to the whole cluster.
+    was_active = chat_manager.is_user_active(user.id)
+    if state == "away":
+        chat_manager.mark_inactive(user.id)
+        active = False
+    else:
+        chat_manager.mark_active(user.id)
+        active = True
+
+    if active == was_active:
+        return "", 204
+
+    if user.presence_status == "busy":
+        status_class = "presence-busy"
+    elif user.presence_status == "away":
+        status_class = "presence-away"
+    elif active:
+        status_class = "presence-online"
+    else:
+        status_class = "presence-away"
+
+    chat_manager.broadcast_to_all(
+        {
+            "type": "presence_update",
+            "user_id": user.id,
+            "status_class": status_class,
+            "status": user.presence_status,
+        }
+    )
+    return "", 204
 
 
 @profile_bp.route("/profile/theme", methods=["PUT"])

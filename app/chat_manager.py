@@ -21,6 +21,17 @@ PRESENCE_TTL = 90  # a score newer than this many seconds counts as online
 PRESENCE_HEARTBEAT_INTERVAL = 30  # how often each worker re-stamps its users
 PRESENCE_SWEEP_MAX_AGE = 300  # prune members older than this on heartbeat
 
+# Activity presence is a SECOND Redis sorted set, distinct from the connection
+# presence above. Connection presence answers "does this user hold a live
+# socket anywhere?" — but a tab left open overnight keeps that true forever, so
+# everyone shows green in the morning. Activity presence answers "has this user
+# actually touched the keyboard/mouse recently?": the client stamps it while the
+# user is active and stops when idle, so an idle-but-connected user ages out and
+# renders as "away". The online (green) dot requires BOTH a live socket and a
+# fresh activity score.
+ACTIVE_KEY = "presence:active"
+ACTIVE_TTL = 900  # 15 minutes of no client activity ping -> considered "away"
+
 # Cap per-user sockets on a single worker so a runaway client can't open
 # unbounded connections. When exceeded, the oldest-tracked socket is closed to
 # make room for the new one.
@@ -34,6 +45,9 @@ class ChatManager:
     def __init__(self):
         self.clients = set()
         self.online_users = {}
+        # Local (no-Redis) fallback view of who is actively using the app, kept
+        # in parity with the presence:active ZSET by mark_active/mark_inactive.
+        self.active_users = set()
         self.all_clients = {}
         self.typing_users = {}
         self.redis_client = None
@@ -164,13 +178,31 @@ class ChatManager:
             return
         self._last_presence_heartbeat = now
         user_ids = list(self.all_clients.keys())
+        # Mobile (API) clients don't send browser activity pings, so keep their
+        # activity score fresh from the live socket instead — a mobile app drops
+        # its socket when backgrounded, so socket-alive is a fair "present"
+        # proxy for them. Web clients are deliberately excluded here: their
+        # activity comes only from real input (see PresenceManager in chat.js),
+        # which is what stops an open-but-idle browser tab showing green.
+        api_user_ids = [
+            uid
+            for uid, socks in list(self.all_clients.items())
+            if any(getattr(s, "is_api_client", False) for s in (socks or ()))
+        ]
         try:
             if user_ids:
                 self.redis_client.zadd(
                     PRESENCE_KEY, {str(uid): now for uid in user_ids}
                 )
+            if api_user_ids:
+                self.redis_client.zadd(
+                    ACTIVE_KEY, {str(uid): now for uid in api_user_ids}
+                )
             self.redis_client.zremrangebyscore(
                 PRESENCE_KEY, "-inf", now - PRESENCE_SWEEP_MAX_AGE
+            )
+            self.redis_client.zremrangebyscore(
+                ACTIVE_KEY, "-inf", now - ACTIVE_TTL
             )
         except Exception:  # pylint: disable=broad-exception-caught
             current_app.logger.exception("presence heartbeat failed")
@@ -463,6 +495,64 @@ class ChatManager:
                     continue
             return result
         return set(self.online_users.keys())
+
+    def mark_active(self, user_id):
+        """Record that a user is actively using the app right now (client sent
+        an activity ping). Stamps the presence:active ZSET so the online dot can
+        distinguish a present user from an idle-but-connected one."""
+        self.active_users.add(user_id)
+        if self.redis_client:
+            try:
+                self.redis_client.zadd(ACTIVE_KEY, {str(user_id): time.time()})
+            except Exception:  # pylint: disable=broad-exception-caught
+                current_app.logger.exception("activity zadd failed")
+
+    def mark_inactive(self, user_id):
+        """Record that a user has gone idle (client reported an away transition).
+        Removes them from the activity set so they render as "away" immediately,
+        rather than waiting out ACTIVE_TTL."""
+        self.active_users.discard(user_id)
+        if self.redis_client:
+            try:
+                self.redis_client.zrem(ACTIVE_KEY, str(user_id))
+            except Exception:  # pylint: disable=broad-exception-caught
+                current_app.logger.exception("activity zrem failed")
+
+    def is_user_active(self, user_id):
+        """True if the user has a fresh activity score on ANY worker."""
+        if self.redis_client:
+            try:
+                score = self.redis_client.zscore(ACTIVE_KEY, str(user_id))
+            except Exception:  # pylint: disable=broad-exception-caught
+                return user_id in self.active_users
+            if not isinstance(score, (int, float)):
+                return user_id in self.active_users
+            return score >= time.time() - ACTIVE_TTL
+        return user_id in self.active_users
+
+    def active_user_ids(self):
+        """Set of user ids with a fresh activity ping anywhere in the cluster.
+
+        Mirrors online_user_ids(): falls back to this worker's local view when
+        Redis is unavailable or a test double returns a non-list.
+        """
+        if self.redis_client:
+            try:
+                raw = self.redis_client.zrangebyscore(
+                    ACTIVE_KEY, time.time() - ACTIVE_TTL, "+inf"
+                )
+            except Exception:  # pylint: disable=broad-exception-caught
+                return set(self.active_users)
+            if not isinstance(raw, (list, tuple, set)):
+                return set(self.active_users)
+            result = set()
+            for member in raw:
+                try:
+                    result.add(int(member))
+                except (TypeError, ValueError):
+                    continue
+            return result
+        return set(self.active_users)
 
     def broadcast_to_all(self, message):
         """Publishes a message to all users globally."""

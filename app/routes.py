@@ -434,8 +434,11 @@ def chat_interface():
         channels=user_channels,
         direct_message_users=direct_message_users,
         # Cluster-wide presence (a set of online user ids) so the sidebar dots
-        # reflect users connected to any worker, not just this one.
+        # reflect users connected to any worker, not just this one. active_users
+        # additionally require a recent client activity ping, so an idle user who
+        # left a tab open renders as "away" rather than a stale green dot.
         online_users=chat_manager.online_user_ids(),
+        active_users=chat_manager.active_user_ids(),
         unread_info=unread_info,
         has_unreads=has_unreads,
         has_unread_threads=has_unread_threads,
@@ -1017,6 +1020,11 @@ def _setup_ws(ws, user, is_api=False):
         ws.is_api_client = True
     harden_ws(ws)
     chat_manager.set_online(user.id, ws)
+    # Mobile clients don't send browser activity pings, so treat a fresh API
+    # socket as "present" immediately (the heartbeat then keeps it fresh). Web
+    # clients are stamped active by their own input-driven pings instead.
+    if is_api:
+        chat_manager.mark_active(user.id)
     _broadcast_presence(user.id, user.presence_status)
     _ws_db_close()
 

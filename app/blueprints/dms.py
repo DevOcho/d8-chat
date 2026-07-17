@@ -206,6 +206,7 @@ def get_dm_chat(other_user_id):
             user=other_user,
             conv_id_str=conv_id_str,
             is_online=chat_manager.is_user_online_in_cluster(other_user.id),
+            is_active=chat_manager.is_user_active(other_user.id),
         )
 
         # Render the correct partials for the recipient
@@ -214,6 +215,7 @@ def get_dm_chat(other_user_id):
             user=g.user,
             conv_id_str=conv_id_str,
             is_online=chat_manager.is_user_online_in_cluster(g.user.id),
+            is_active=chat_manager.is_user_active(g.user.id),
         )
         subscription_html = render_template(
             "partials/subscribe_oob.html", conv_id_str=conv_id_str
