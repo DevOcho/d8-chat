@@ -2012,6 +2012,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (seenIds.has(el.id)) el.remove();
                 else seenIds.add(el.id);
             });
+            // Same for date dividers: the server sends one with the first
+            // message of a new day, so a deduped message can leave its divider
+            // stranded next to an identical one.
+            target.querySelectorAll('.date-separator').forEach((el) => {
+                const prev = el.previousElementSibling;
+                if (prev && prev.classList.contains('date-separator') &&
+                    prev.textContent.trim() === el.textContent.trim()) {
+                    el.remove();
+                }
+            });
 
             // Localize timestamps on every freshly appended message. The server
             // renders times in UTC as a fallback; without this, live/broadcast

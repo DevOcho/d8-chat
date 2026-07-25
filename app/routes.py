@@ -204,6 +204,32 @@ def previous_visible_message(new_message):
     )
 
 
+def date_separator_oob(message, prev_message):
+    """
+    OOB append of a date divider above ``message`` when it opens a new day.
+
+    The page templates emit a divider whenever a row's calendar day differs from
+    the row above it. Realtime appends render one message at a time with no list
+    in hand, so the same check happens here against ``prev_message`` (the message
+    directly above it in the flow — see ``previous_visible_message``). Without
+    this, a day's first message only grows its divider on the next full reload.
+
+    Returns "" when the day hasn't changed or ``message`` isn't rendered inline.
+    """
+    if message.reply_type == "thread":
+        return ""
+    if (
+        prev_message is not None
+        and prev_message.created_at.date() == message.created_at.date()
+    ):
+        return ""
+    return oob_to_selector(
+        "beforeend",
+        "#message-list",
+        render_template("partials/date_separator.html", date_obj=message.created_at),
+    )
+
+
 def check_and_get_read_state_oob(current_user, just_read_conversation):
     """
     Checks if a user has other unread messages. If not, returns HTML to
@@ -483,12 +509,14 @@ def catch_up_messages(conv_id_str, last_id):
     reactions_map = get_reactions_for_messages(messages)
     attachments_map = get_attachments_for_messages(messages)
     # Continue grouping from the last message the client already has on screen.
+    prev = previous_visible_message(messages[0]) if messages else None
     if messages:
-        annotate_message_grouping(
-            messages, prev_message=previous_visible_message(messages[0])
-        )
+        annotate_message_grouping(messages, prev_message=prev)
     parts = []
     for m in messages:
+        # Same day-change check the page render does, carried across the gap the
+        # client is backfilling.
+        parts.append(date_separator_oob(m, prev))
         msg_html = render_template(
             "partials/message.html",
             message=m,
@@ -497,6 +525,8 @@ def catch_up_messages(conv_id_str, last_id):
             Message=Message,
         )
         parts.append(oob_to_selector("beforeend", "#message-list", msg_html))
+        if m.reply_type != "thread":
+            prev = m
 
     resp = make_response("".join(parts))
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
@@ -738,9 +768,8 @@ def _broadcast_regular_message(sender, new_message, conv_id_str):
     attachments_map = get_attachments_for_messages(list((new_message,)))
     # Group under the previous message if it's the same author within the
     # window, so a realtime-appended message matches the grouped page render.
-    annotate_message_grouping(
-        [new_message], prev_message=previous_visible_message(new_message)
-    )
+    prev_message = previous_visible_message(new_message)
+    annotate_message_grouping([new_message], prev_message=prev_message)
     new_message_html = render_template(
         "partials/message.html",
         message=new_message,
@@ -748,9 +777,9 @@ def _broadcast_regular_message(sender, new_message, conv_id_str):
         attachments_map=attachments_map,
         Message=Message,
     )
-    message_to_broadcast = oob_to_selector(
-        "beforeend", "#message-list", new_message_html
-    )
+    message_to_broadcast = date_separator_oob(
+        new_message, prev_message
+    ) + oob_to_selector("beforeend", "#message-list", new_message_html)
 
     api_data = {
         "type": "new_message",
@@ -1050,7 +1079,10 @@ def _teardown_ws(ws, label):
 
 
 # --- WebSocket Handler ---
-@sock.route("/ws/chat")
+# Registered via sock.route(...)(fn) rather than as a decorator: flask_sock's
+# decorator returns None, which would leave the module-level name unbound and
+# the handler unreachable for direct testing (see tests/test_route_auth.py,
+# which asserts these two handlers reject unauthenticated connections).
 def chat(ws):
     """Handles all real-time WebSocket communication."""
     user = User.get_active_by_id(session.get("user_id"))
@@ -1086,8 +1118,10 @@ def chat(ws):
         _teardown_ws(ws, "Client")
 
 
+sock.route("/ws/chat")(chat)
+
+
 # --- API JSON WebSocket Handler ---
-@sock.route("/ws/api/v1")
 def api_ws(ws):
     """Handles JSON WebSocket connections for mobile/API clients."""
     from app.blueprints.api_v1 import verify_api_token
@@ -1126,3 +1160,6 @@ def api_ws(ws):
             _safe_handle_frame(ws, ws.receive())
     finally:
         _teardown_ws(ws, "API client")
+
+
+sock.route("/ws/api/v1")(api_ws)

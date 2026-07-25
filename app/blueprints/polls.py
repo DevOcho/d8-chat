@@ -5,9 +5,11 @@ from app.chat_manager import chat_manager
 from app.htmx_oob import oob_to_selector
 from app.models import Conversation, Message, Poll, PollOption, Vote, db
 from app.routes import (
+    date_separator_oob,
     get_attachments_for_messages,
     get_reactions_for_messages,
     login_required,
+    previous_visible_message,
 )
 
 polls_bp = Blueprint("polls", __name__)
@@ -101,7 +103,9 @@ def create_poll():
         attachments_map=attachments_map,
         Message=Message,
     )
-    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
+    broadcast_html = date_separator_oob(
+        poll_message, previous_visible_message(poll_message)
+    ) + oob_to_selector("beforeend", "#message-list", new_message_html)
 
     # Broadcast the new poll to everyone in the channel. Include api_data so
     # mobile clients receive the poll as a structured new_message instead of raw
