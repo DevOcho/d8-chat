@@ -3,6 +3,7 @@
 
 # pylint: disable=import-error
 
+import hashlib
 import os
 import re
 import threading
@@ -399,6 +400,67 @@ def _register_security_headers(app):
         return response
 
 
+# Cache-busting tokens for static assets, keyed by absolute file path so two
+# apps with different static folders (tests) can't read each other's entries.
+# Value is (mtime, token).
+_static_tokens = {}
+
+
+def _static_token(static_folder, filename, always_fresh=False):
+    """Short content hash of a static file, or None if it can't be read.
+
+    Hashing (not mtime) is the token because the production init container
+    copies static files into the nginx sidecar's volume with ``cp -r`` and no
+    ``-p``, so mtimes differ per replica — an mtime token would hand each pod a
+    different URL for identical bytes and thrash caches across the fleet for no
+    benefit. The hash is computed once per process and cached; with
+    ``always_fresh`` (debug) the file is re-read when its mtime moves, so a
+    local CSS/JS edit shows up without restarting the server.
+    """
+    path = os.path.join(static_folder or "", filename)
+    cached = _static_tokens.get(path)
+    if cached and not always_fresh:
+        return cached[1]
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        with open(path, "rb") as handle:
+            token = hashlib.sha256(handle.read()).hexdigest()[:8]
+    except OSError:
+        return None
+    _static_tokens[path] = (mtime, token)
+    return token
+
+
+def register_template_globals(app):
+    """Registers template globals for the application."""
+
+    @app.template_global("static_url")
+    def static_url(filename):
+        """URL for a static asset with a ``?v=<content hash>`` cache buster.
+
+        Production nginx serves /css/, /js/, /img/ and /audio/ with
+        ``expires 1d``, while the HTML that references them is served fresh by
+        Flask. Without a changing URL, a deploy's JS and CSS reach browsers up
+        to a day after the markup they belong to — and in a server-rendered htmx
+        app the two are coupled, since the handlers match on ids and classes the
+        templates emit. Renaming a target id would ship a broken UI for a day
+        with no way to reproduce it locally.
+
+        Falls back to the plain URL when the file can't be read, so a missing or
+        unreadable asset degrades to a 404 for that asset instead of a 500 for
+        the whole page.
+        """
+        token = _static_token(app.static_folder, filename, always_fresh=app.debug)
+        if token is None:
+            return url_for("static", filename=filename)
+        return url_for("static", filename=filename, v=token)
+
+
 def register_template_filters(app):
     """Registers all custom template filters for the application."""
 
@@ -785,6 +847,7 @@ def create_app(config_class=Config, start_listener=True):
         listener_thread.start()
 
     register_template_filters(app)
+    register_template_globals(app)
     register_blueprints(app)
     _register_security_headers(app)
 

@@ -218,7 +218,9 @@
         <!-- Global Search Bar -->
         <div id="global-search-container" class="p-2 border-bottom">
             <div class="global-search-wrapper">
-                <form hx-target="#search-results-overlay" hx-swap="innerHTML" onsubmit="return false;">
+                <form hx-target="#search-results-overlay"
+                      hx-swap="innerHTML"
+                      onsubmit="return false;">
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="search"
@@ -359,6 +361,6 @@
 {% endblock %}
 {% block scripts %}
     <script type="module"
-            src="{{ url_for('static', filename='js/local/emoji-picker-element.bundle.min.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/chat.js') }}" defer></script>
+            src="{{ static_url('js/local/emoji-picker-element.bundle.min.js') }}"></script>
+    <script src="{{ static_url('js/chat.js') }}" defer></script>
 {% endblock %}

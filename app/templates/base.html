@@ -6,24 +6,25 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
         <!-- CSS & Icons -->
-        <link rel="stylesheet" href="/css/local/bootstrap.min.css">
-        <link rel="stylesheet" href="/css/local/bootstrap-icons.css">
-        <link rel="stylesheet" href="/css/style.css">
-        <link rel="stylesheet" href="/css/syntax.css">
+        <link rel="stylesheet"
+              href="{{ static_url('css/local/bootstrap.min.css') }}">
+        <link rel="stylesheet"
+              href="{{ static_url('css/local/bootstrap-icons.css') }}">
+        <link rel="stylesheet" href="{{ static_url('css/style.css') }}">
+        <link rel="stylesheet" href="{{ static_url('css/syntax.css') }}">
         <title>D8 - Chat</title>
         <link rel="icon"
               type="image/png"
               sizes="32x32"
-              href="{{ url_for('static', filename='favicon-32x32.png') }}">
+              href="{{ static_url('favicon-32x32.png') }}">
         <link rel="icon"
               type="image/png"
               sizes="16x16"
-              href="{{ url_for('static', filename='favicon-16x16.png') }}">
+              href="{{ static_url('favicon-16x16.png') }}">
         <link rel="apple-touch-icon"
               sizes="180x180"
-              href="{{ url_for('static', filename='apple-touch-icon.png') }}">
-        <link rel="manifest"
-              href="{{ url_for('static', filename='site.webmanifest') }}">
+              href="{{ static_url('apple-touch-icon.png') }}">
+        <link rel="manifest" href="{{ static_url('site.webmanifest') }}">
     </head>
     <body class="{% block body_class %}{% endblock %}">
         <div class="main-layout">
@@ -34,10 +35,10 @@
             {% endblock layout %}
         </div>
         <!-- Bootstrap, HTMX, and HTMX Websockets -->
-        <script src="/js/local/bootstrap.bundle.min.js"></script>
-        <script src="/js/local/htmx.min.js"></script>
-        <script src="/js/local/htmx-ws.js"></script>
-        <script src="/js/local/turndown.js"></script>
+        <script src="{{ static_url('js/local/bootstrap.bundle.min.js') }}"></script>
+        <script src="{{ static_url('js/local/htmx.min.js') }}"></script>
+        <script src="{{ static_url('js/local/htmx-ws.js') }}"></script>
+        <script src="{{ static_url('js/local/turndown.js') }}"></script>
         <script>
       // Attach the CSRF token to every state-changing HTMX request.
       (function () {
