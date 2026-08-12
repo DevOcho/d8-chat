@@ -1,4 +1,6 @@
-<div id="chat-header-container" hx-swap-oob="true">
+<div id="chat-header-container"
+     class="d-flex align-items-center justify-content-between"
+     hx-swap-oob="true">
     {# Wrap the header content in a div that triggers the offcanvas #}
     <div {% if other_user.id != g.user.id %} style="cursor: pointer" hx-get="{{ url_for('dms.get_dm_details', other_user_id=other_user.id) }}" hx-target="#right-panel-offcanvas" title="View user details" {% endif %}
          class="d-flex align-items-center p-3">
@@ -14,4 +16,15 @@
             <h4 class="mb-0">{{ other_user.display_name or other_user.username }}</h4>
         {% endif %}
     </div>
+    {% if other_user.id != g.user.id %}
+        <button type="button"
+                class="btn btn-sm text-secondary me-3"
+                id="start-huddle-btn"
+                data-other-user-id="{{ other_user.id }}"
+                data-other-user-name="{{ other_user.display_name or other_user.username }}"
+                title="Start a huddle"
+                onclick="window.Huddle && window.Huddle.start(this.dataset.otherUserId, this.dataset.otherUserName)">
+            <i class="bi bi-camera-video-fill"></i>
+        </button>
+    {% endif %}
 </div>

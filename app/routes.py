@@ -870,10 +870,73 @@ def _safe_handle_frame(ws, raw):
         _ws_db_close()
 
 
+# Huddle (1:1 WebRTC call) signaling event types. All are relayed verbatim,
+# point-to-point, to the other DM participant via chat_manager.send_to_user —
+# the server never inspects SDP/ICE payloads, it only authorizes the sender.
+_HUDDLE_SIGNAL_TYPES = {
+    "huddle_invite",
+    "huddle_offer",
+    "huddle_answer",
+    "huddle_ice",
+    "huddle_decline",
+    "huddle_cancel",
+    "huddle_end",
+}
+
+
+def _huddle_peer_id(ws, conv_id_str):
+    """Return the other participant's user id for a 1:1 DM huddle signal, or
+    None if conv_id_str isn't a 2-person DM the sender belongs to."""
+    if not conv_id_str:
+        return None
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return None
+    if parsed.type != "dm" or len(parsed.user_ids) != 2:
+        return None
+    if not user_has_conversation_access(ws.user, parsed):
+        return None
+    other = [uid for uid in parsed.user_ids if uid != ws.user.id]
+    return other[0] if other else None
+
+
 def _process_ws_event(ws, data):
     """Processes a single WebSocket event."""
     event_type = data.get("type")
     conv_id_str = data.get("conversation_id") or getattr(ws, "channel_id", None)
+
+    if event_type in _HUDDLE_SIGNAL_TYPES:
+        peer_id = _huddle_peer_id(ws, data.get("conversation_id"))
+        if peer_id is None:
+            current_app.logger.warning(
+                "WS huddle event %r blocked: user %s not a DM participant of %r",
+                event_type,
+                getattr(ws.user, "id", None),
+                data.get("conversation_id"),
+            )
+            return
+        # Tracked so a dropped connection can politely end the call for the
+        # other side (see _teardown_ws) instead of leaving them hanging.
+        ws.huddle_peer_id = (
+            None if event_type in ("huddle_decline", "huddle_cancel", "huddle_end") else peer_id
+        )
+        relay = dict(data)
+        relay["from_user_id"] = ws.user.id
+        chat_manager.send_to_user(peer_id, relay)
+        if event_type == "huddle_answer":
+            # The callee may have several tabs/devices ringing; only one
+            # answered, so tell the rest to stop.
+            chat_manager.send_to_user(
+                ws.user.id,
+                {
+                    "type": "huddle_cancel",
+                    "call_id": data.get("call_id"),
+                    "from_user_id": ws.user.id,
+                    "reason": "answered_elsewhere",
+                },
+            )
+        return
 
     if event_type == "subscribe":
         if not conv_id_str:
@@ -1073,6 +1136,12 @@ def _teardown_ws(ws, label):
         if went_offline:
             _broadcast_presence(user.id, "away")
         chat_manager.unsubscribe(ws)
+        peer_id = getattr(ws, "huddle_peer_id", None)
+        if peer_id:
+            chat_manager.send_to_user(
+                peer_id,
+                {"type": "huddle_end", "from_user_id": user.id, "reason": "disconnected"},
+            )
     finally:
         _ws_db_close()
     current_app.logger.info("%s connection closed for '%s'.", label, user.username)

@@ -11,7 +11,7 @@ from flask import (
     session,
     url_for,
 )
-from flask_login import login_user, logout_user
+from flask_login import current_user, login_user, logout_user
 
 from app import external_url_for, limiter, login_username_key
 from app.auth_tokens import make_password_reset_token, verify_password_reset_token
@@ -24,6 +24,8 @@ auth_bp = Blueprint("auth", __name__)
 
 @auth_bp.route("/")
 def index():
+    if current_user.is_authenticated:
+        return redirect(url_for("main.chat_interface"))
     return render_template("index.html")
 
 

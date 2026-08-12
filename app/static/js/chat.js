@@ -1633,6 +1633,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.body.addEventListener('htmx:wsOpen', function(evt) {
         console.log("WebSocket Connection Opened.");
+        // huddle.js has no ws-send element of its own (signaling is driven by
+        // RTCPeerConnection callbacks, not DOM triggers), so it sends frames
+        // straight through the socket wrapper htmx-ws hands us here.
+        window.d8Socket = evt.detail.socketWrapper;
         const wasReconnecting = isReconnecting;
         if (isReconnecting && connectionStatusBar) {
             connectionStatusBar.classList.replace('bg-warning', 'bg-success');
@@ -2108,6 +2112,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 if (data.type === 'notification') NotificationManager.showNotification(data);
                 else if (data.type === 'sound') NotificationManager.playSound();
+                else if (data.type.startsWith('huddle_') && window.Huddle) window.Huddle.handleSignal(data);
                 return; // End processing for JSON events.
             }
         } catch (e) {

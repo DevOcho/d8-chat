@@ -347,6 +347,39 @@
                 <span>Drop files to attach them</span>
             </div>
         </div>
+        <!-- Huddle (WebRTC call) overlay: populated/mutated by huddle.js, not HTMX -->
+        <div class="modal fade" id="huddle-modal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+            <div class="modal-dialog modal-lg modal-dialog-centered">
+                <div class="modal-content bg-dark text-white">
+                    <div class="modal-body text-center p-4">
+                        <div id="huddle-status" class="mb-3 fs-5"></div>
+                        <div id="huddle-videos" class="d-flex gap-2 justify-content-center flex-wrap mb-3">
+                            <video id="huddle-remote-video" autoplay playsinline class="rounded" style="max-width: 100%; max-height: 50vh; display: none;"></video>
+                            <video id="huddle-local-video" autoplay playsinline muted class="rounded" style="max-width: 30%; max-height: 20vh; display: none;"></video>
+                        </div>
+                        <div id="huddle-incoming-actions" style="display: none;">
+                            <button type="button" class="btn btn-success me-2" onclick="window.Huddle.accept()">
+                                <i class="bi bi-telephone-fill"></i> Accept
+                            </button>
+                            <button type="button" class="btn btn-danger" onclick="window.Huddle.decline()">
+                                <i class="bi bi-telephone-x-fill"></i> Decline
+                            </button>
+                        </div>
+                        <div id="huddle-active-actions" style="display: none;">
+                            <button type="button" class="btn btn-secondary me-2" id="huddle-toggle-mic-btn" onclick="window.Huddle.toggleMic()">
+                                <i class="bi bi-mic-fill"></i>
+                            </button>
+                            <button type="button" class="btn btn-secondary me-2" id="huddle-toggle-camera-btn" onclick="window.Huddle.toggleCamera()">
+                                <i class="bi bi-camera-video-fill"></i>
+                            </button>
+                            <button type="button" class="btn btn-danger" onclick="window.Huddle.hangup()">
+                                <i class="bi bi-telephone-x-fill"></i> Hang up
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
         <!-- Notification permission -->
         <div id="enable-notifications-banner"
              class="bg-primary text-white text-center p-2 position-fixed bottom-0 start-0 w-100 shadow-lg"
@@ -363,4 +396,5 @@
     <script type="module"
             src="{{ static_url('js/local/emoji-picker-element.bundle.min.js') }}"></script>
     <script src="{{ static_url('js/chat.js') }}" defer></script>
+    <script src="{{ static_url('js/huddle.js') }}" defer></script>
 {% endblock %}

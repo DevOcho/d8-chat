@@ -25,7 +25,7 @@ from app.models import (
     Workspace,
     WorkspaceMember,
 )
-from app.routes import _process_ws_event, _safe_handle_frame
+from app.routes import _process_ws_event, _safe_handle_frame, _teardown_ws
 
 
 @pytest.fixture
@@ -289,6 +289,163 @@ class TestSubscribeAuth:
             _process_ws_event(ws, {"type": "subscribe", "conversation_id": "garbage"})
 
             sub.assert_not_called()
+
+
+class TestHuddleSignaling:
+    """huddle_* frames must be relayed only to the other DM participant, and
+    only when the sender is actually in that DM — the same hole `subscribe`
+    was fixed for, but for WebRTC call signaling instead of chat traffic."""
+
+    def test_dm_participant_offer_relays_to_peer(self, app, dm_with_partner, mocker):
+        with app.app_context():
+            partner_id, conv_id = dm_with_partner
+            ws = _ws_for(1)
+            send_to_user = mocker.patch("app.routes.chat_manager.send_to_user")
+
+            _process_ws_event(
+                ws,
+                {
+                    "type": "huddle_invite",
+                    "conversation_id": conv_id,
+                    "call_id": "abc123",
+                    "sdp": {"type": "offer", "sdp": "v=0..."},
+                },
+            )
+
+            send_to_user.assert_called_once()
+            target_id, payload = send_to_user.call_args[0]
+            assert target_id == partner_id
+            assert payload["type"] == "huddle_invite"
+            assert payload["from_user_id"] == 1
+            assert payload["call_id"] == "abc123"
+
+    def test_outsider_offer_to_dm_is_dropped(self, app, dm_with_partner, mocker):
+        with app.app_context():
+            _, conv_id = dm_with_partner
+            workspace = Workspace.get(Workspace.name == "DevOcho")
+            outsider = User.create(
+                username="ws-huddle-outsider",
+                email="ws-huddle-outsider@example.com",
+                display_name="Huddle Outsider",
+            )
+            WorkspaceMember.create(user=outsider, workspace=workspace)
+
+            ws = _ws_for(outsider.id)
+            send_to_user = mocker.patch("app.routes.chat_manager.send_to_user")
+
+            _process_ws_event(
+                ws,
+                {
+                    "type": "huddle_invite",
+                    "conversation_id": conv_id,
+                    "call_id": "abc123",
+                    "sdp": {"type": "offer", "sdp": "v=0..."},
+                },
+            )
+
+            send_to_user.assert_not_called()
+
+    def test_huddle_signal_to_channel_conversation_is_dropped(
+        self, app, channel_and_member, mocker
+    ):
+        # Huddles are DM-only for now — a channel id must never resolve to a
+        # peer to relay to.
+        with app.app_context():
+            ws = _ws_for(1)
+            send_to_user = mocker.patch("app.routes.chat_manager.send_to_user")
+
+            _process_ws_event(
+                ws,
+                {
+                    "type": "huddle_invite",
+                    "conversation_id": f"channel_{channel_and_member}",
+                    "call_id": "abc123",
+                    "sdp": {"type": "offer", "sdp": "v=0..."},
+                },
+            )
+
+            send_to_user.assert_not_called()
+
+    def test_huddle_answer_also_cancels_senders_other_tabs(
+        self, app, dm_with_partner, mocker
+    ):
+        with app.app_context():
+            partner_id, conv_id = dm_with_partner
+            ws = _ws_for(1)
+            send_to_user = mocker.patch("app.routes.chat_manager.send_to_user")
+
+            _process_ws_event(
+                ws,
+                {
+                    "type": "huddle_answer",
+                    "conversation_id": conv_id,
+                    "call_id": "abc123",
+                    "sdp": {"type": "answer", "sdp": "v=0..."},
+                },
+            )
+
+            assert send_to_user.call_count == 2
+            targets = [call.args[0] for call in send_to_user.call_args_list]
+            assert targets == [partner_id, 1]
+            cancel_payload = send_to_user.call_args_list[1].args[1]
+            assert cancel_payload["type"] == "huddle_cancel"
+            assert cancel_payload["call_id"] == "abc123"
+
+    def test_huddle_end_clears_call_state_tracked_on_socket(
+        self, app, dm_with_partner, mocker
+    ):
+        with app.app_context():
+            _, conv_id = dm_with_partner
+            ws = _ws_for(1)
+            mocker.patch("app.routes.chat_manager.send_to_user")
+
+            _process_ws_event(
+                ws,
+                {"type": "huddle_offer", "conversation_id": conv_id, "call_id": "x"},
+            )
+            assert ws.huddle_peer_id is not None
+
+            _process_ws_event(
+                ws, {"type": "huddle_end", "conversation_id": conv_id, "call_id": "x"}
+            )
+            assert ws.huddle_peer_id is None
+
+
+class TestHuddleTeardown:
+    """A dropped connection mid-call must not leave the other side hanging
+    silently — _teardown_ws should relay huddle_end using the peer id
+    TestHuddleSignaling confirms gets tracked on the socket."""
+
+    def test_disconnect_mid_call_ends_huddle_for_peer(self, app, dm_with_partner, mocker):
+        with app.app_context():
+            partner_id, _ = dm_with_partner
+            ws = _ws_for(1)
+            ws.huddle_peer_id = partner_id
+            mocker.patch("app.routes.chat_manager.set_offline", return_value=True)
+            mocker.patch("app.routes.chat_manager.unsubscribe")
+            mocker.patch("app.routes._broadcast_presence")
+            send_to_user = mocker.patch("app.routes.chat_manager.send_to_user")
+
+            _teardown_ws(ws, "Client")
+
+            send_to_user.assert_called_once()
+            target_id, payload = send_to_user.call_args[0]
+            assert target_id == partner_id
+            assert payload["type"] == "huddle_end"
+            assert payload["reason"] == "disconnected"
+
+    def test_disconnect_without_active_call_sends_nothing(self, app, mocker):
+        with app.app_context():
+            ws = _ws_for(1)
+            ws.huddle_peer_id = None  # Mock() auto-vivifies attrs; be explicit.
+            mocker.patch("app.routes.chat_manager.set_offline", return_value=True)
+            mocker.patch("app.routes.chat_manager.unsubscribe")
+            mocker.patch("app.routes._broadcast_presence")
+            send_to_user = mocker.patch("app.routes.chat_manager.send_to_user")
+
+            _teardown_ws(ws, "Client")
+
+            send_to_user.assert_not_called()
 
 
 class TestNoopEvents:

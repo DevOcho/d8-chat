@@ -386,7 +386,8 @@ def _register_security_headers(app):
             "Referrer-Policy", "strict-origin-when-cross-origin"
         )
         response.headers.setdefault(
-            "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+            "Permissions-Policy",
+            "camera=(self), microphone=(self), geolocation=()",
         )
         # Only emit HSTS over HTTPS to avoid pinning HTTP-only dev hosts.
         if request.is_secure:
