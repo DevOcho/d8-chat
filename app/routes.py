@@ -597,6 +597,21 @@ def catch_up_sidebar():
             partner = User.get_or_none(id=partner_id) if partner_id else None
             if not partner:
                 continue
+            # Materialize the sidebar row before badging it: a DM created
+            # while this client's socket was down has no row in its DOM, so
+            # the badge's OOB target wouldn't exist and the conversation
+            # would stay invisible until a full page reload. The client
+            # drops the row if it already has one (htmx:oobBeforeSwap
+            # dedupe in chat.js).
+            parts.append(
+                render_template(
+                    "partials/dm_list_item_oob.html",
+                    user=partner,
+                    conv_id_str=conv.conversation_id_str,
+                    is_online=chat_manager.is_user_online_in_cluster(partner.id),
+                    is_active=chat_manager.is_user_active(partner.id),
+                )
+            )
             parts.append(
                 render_template(
                     "partials/unread_badge.html",

@@ -167,7 +167,7 @@
                 {% set user_ids = [g.user.id, user.id] | sort %}
                 {% set conv_id_str = "dm_" ~ user_ids|join('_') %}
                 {% set info = unread_info.get(conv_id_str, {'mentions': 0, 'has_unread': False}) %}
-                <li class="mt-1">
+                <li class="mt-1" id="dm-item-{{ conv_id_str }}">
                     <a href="#"
                        class="sidebar-item-link"
                        hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"

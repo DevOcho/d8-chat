@@ -1034,6 +1034,15 @@ a.mention-link:hover {
     border-radius: 4px;
 }
 
+/* Mention pill inside the rich composer (inserted by the @-autocomplete) */
+.mention-token {
+    color: #d8487b;
+    background-color: #fbe4ed;
+    font-weight: 500;
+    padding: 1px 4px;
+    border-radius: 4px;
+}
+
 /* Dark Mode Overrides for Mentions */
 [data-bs-theme="dark"] a.mention-link {
     color: #ec729c; /* Use the theme pink for the text color */
@@ -1050,6 +1059,11 @@ a.mention-link:hover {
 [data-bs-theme="dark"] .mention-special {
     color: #80bfff;
     background-color: #0d6efd40; /* Blue with alpha */
+}
+
+[data-bs-theme="dark"] .mention-token {
+    color: #ec729c;
+    background-color: #ec729c33; /* Theme pink with alpha */
 }
 
 /* --- Channel mentions --- */

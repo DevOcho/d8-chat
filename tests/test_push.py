@@ -374,9 +374,11 @@ def test_dm_pushes_to_offline_recipient(app, monkeypatch):
     assert kwargs["data"]["message_id"] == msg.id
 
 
-def test_dm_skips_online_recipient(app, monkeypatch):
+def test_dm_skips_actively_online_recipient(app, monkeypatch):
+    """Connected AND recently active — the only state that suppresses push."""
     monkeypatch.setattr(push_service, "is_configured", lambda: True)
     monkeypatch.setattr(chat_manager, "is_user_online_in_cluster", lambda uid: True)
+    monkeypatch.setattr(chat_manager, "is_user_active", lambda uid, max_age=None: True)
     sent = MagicMock()
     monkeypatch.setattr(push_service, "send_to_user", sent)
 
@@ -387,6 +389,24 @@ def test_dm_skips_online_recipient(app, monkeypatch):
         chat_service.send_notifications_for_new_message(msg, sender)
 
     sent.assert_not_called()
+
+
+def test_dm_pushes_to_idle_but_connected_recipient(app, monkeypatch):
+    """A tab left open (online, no recent activity) must not eat the push."""
+    monkeypatch.setattr(push_service, "is_configured", lambda: True)
+    monkeypatch.setattr(chat_manager, "is_user_online_in_cluster", lambda uid: True)
+    monkeypatch.setattr(chat_manager, "is_user_active", lambda uid, max_age=None: False)
+    sent = MagicMock()
+    monkeypatch.setattr(push_service, "send_to_user", sent)
+
+    with app.app_context():
+        sender = User.get_by_id(1)
+        other, conv = _make_dm(other_id=44)
+        msg = Message.create(user=sender, conversation=conv, content="hello")
+        chat_service.send_notifications_for_new_message(msg, sender)
+
+    sent.assert_called_once()
+    assert sent.call_args.args[0] == other.id
 
 
 def test_sender_never_pushed_for_own_message(app, monkeypatch):

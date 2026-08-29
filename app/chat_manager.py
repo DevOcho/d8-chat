@@ -201,9 +201,7 @@ class ChatManager:
             self.redis_client.zremrangebyscore(
                 PRESENCE_KEY, "-inf", now - PRESENCE_SWEEP_MAX_AGE
             )
-            self.redis_client.zremrangebyscore(
-                ACTIVE_KEY, "-inf", now - ACTIVE_TTL
-            )
+            self.redis_client.zremrangebyscore(ACTIVE_KEY, "-inf", now - ACTIVE_TTL)
         except Exception:  # pylint: disable=broad-exception-caught
             current_app.logger.exception("presence heartbeat failed")
 
@@ -518,8 +516,15 @@ class ChatManager:
             except Exception:  # pylint: disable=broad-exception-caught
                 current_app.logger.exception("activity zrem failed")
 
-    def is_user_active(self, user_id):
-        """True if the user has a fresh activity score on ANY worker."""
+    def is_user_active(self, user_id, max_age=None):
+        """True if the user has a fresh activity score on ANY worker.
+
+        ``max_age`` (seconds) narrows the freshness window below ACTIVE_TTL:
+        the push gate wants "touched the app in the last few minutes", not the
+        looser presence-dot window. Only meaningful with Redis — the local
+        fallback set carries no timestamps.
+        """
+        window = ACTIVE_TTL if max_age is None else max_age
         if self.redis_client:
             try:
                 score = self.redis_client.zscore(ACTIVE_KEY, str(user_id))
@@ -527,7 +532,7 @@ class ChatManager:
                 return user_id in self.active_users
             if not isinstance(score, (int, float)):
                 return user_id in self.active_users
-            return score >= time.time() - ACTIVE_TTL
+            return score >= time.time() - window
         return user_id in self.active_users
 
     def active_user_ids(self):

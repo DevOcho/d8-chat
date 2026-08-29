@@ -1,5 +1,7 @@
 <div hx-swap-oob="beforeend:#dm-list">
-    <li class="mt-1">
+    {# The id lets the client (htmx:oobBeforeSwap in chat.js) drop this append
+       when the row is already in its sidebar. #}
+    <li class="mt-1" id="dm-item-{{ conv_id_str }}">
         <a href="#"
            class="sidebar-item-link"
            hx-get="{{ url_for('dms.get_dm_chat', other_user_id=user.id) }}"

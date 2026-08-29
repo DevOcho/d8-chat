@@ -420,7 +420,11 @@ const createMentionManager = function(editorState) {
             const selection = window.getSelection();
             if (selection.rangeCount === 0) return;
             const range = selection.getRangeAt(0);
-            text = editor.textContent;
+            // Range offsets are local to the caret's text node, so the trigger
+            // search must run on that node's text — not the whole editor's —
+            // or the two disagree as soon as the editor holds multiple nodes.
+            const node = range.startContainer;
+            text = node.nodeType === Node.TEXT_NODE ? node.textContent : '';
             cursorPosition = range.startOffset;
         }
         const textUpToCursor = text.substring(0, cursorPosition);
@@ -481,11 +485,31 @@ const createMentionManager = function(editorState) {
             editor.focus();
             const selection = window.getSelection();
             const range = selection.getRangeAt(0);
-            let textNode = range.startContainer;
-            range.setStart(textNode, state.triggerPosition);
-            range.setEnd(textNode, range.startOffset);
+            const textNode = range.startContainer;
+            // The caret offset must be captured before setStart mutates the
+            // range: setEnd(textNode, range.startOffset) after setStart made a
+            // collapsed range, so the typed "@quer" was never deleted and the
+            // mention landed next to it ("@josue_sahad @jose").
+            const caretOffset = range.startOffset;
+            if (textNode.nodeType === Node.TEXT_NODE && state.triggerPosition <= caretOffset) {
+                range.setStart(textNode, state.triggerPosition);
+                range.setEnd(textNode, caretOffset);
+            }
             range.deleteContents();
-            document.execCommand('insertText', false, `@${username} `);
+            const pill = document.createElement('span');
+            pill.className = 'mention-token';
+            pill.setAttribute('contenteditable', 'false');
+            pill.textContent = `@${username}`;
+            range.insertNode(pill);
+            // NBSP rather than ' ': a plain trailing space collapses at the
+            // end of a contenteditable line and the caret sticks to the pill.
+            // Serialization normalizes it back to a regular space.
+            const spacer = document.createTextNode('\u00A0');
+            pill.after(spacer);
+            range.setStart(spacer, 1);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
         }
         hidePopover();
         (isMarkdownMode ? markdownView : editor).dispatchEvent(new Event('input', { bubbles: true }));
@@ -789,6 +813,14 @@ const createEditor = function(idSuffix = '') {
             }
         });
 
+        // Mention pills serialize as their literal "@username" — the default
+        // text pipeline would escape underscores ("@josue\_sahad"), which
+        // breaks the server's mention parsing for those users.
+        turndownService.addRule('mentionToken', {
+            filter: (node) => node.nodeName === 'SPAN' && node.classList.contains('mention-token'),
+            replacement: (content, node) => node.textContent
+        });
+
         Object.assign(state, {
             idSuffix,
             ...elements,
@@ -959,7 +991,8 @@ const createEditor = function(idSuffix = '') {
         } = state;
         if (!editor || !hiddenInput || !turndownService) return;
         const htmlContent = editor.innerHTML;
-        const markdownContent = turndownService.turndown(htmlContent).trim();
+        // The NBSP spacers that follow mention pills become plain spaces.
+        const markdownContent = turndownService.turndown(htmlContent).replace(/\u00A0/g, ' ').trim();
         hiddenInput.value = markdownContent;
         const commands = ['bold', 'italic', 'strikethrough', 'insertUnorderedList', 'insertOrderedList'];
         if (topToolbar) {
@@ -1962,6 +1995,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    document.body.addEventListener('htmx:oobBeforeSwap', function(evt) {
+        // DM notifications and the reconnect sidebar catch-up ride a sidebar
+        // row along with the unread badge, so a client whose sidebar predates
+        // the conversation can materialize it. Skip the append when the row
+        // is already present.
+        const frag = evt.detail.fragment;
+        if (!frag || !frag.querySelector) return;
+        const row = frag.matches && frag.matches('li[id^="dm-item-"]')
+            ? frag
+            : frag.querySelector('li[id^="dm-item-"]');
+        if (row && document.getElementById(row.id)) evt.preventDefault();
+    });
+
     document.body.addEventListener('htmx:oobAfterSwap', function(evt) {
         const target = evt.detail.target; // The element that was swapped.
 
@@ -2317,8 +2363,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     autoAway = true;
                     send('away');
                 }
-            } else if (Date.now() - lastPing >= KEEPALIVE_MS) {
-                send('active'); // keep the score fresh so fresh loads stay green
+            } else if (Date.now() - lastPing >= KEEPALIVE_MS && lastActivity > lastPing) {
+                // Re-stamp only when there was real input since the last ping:
+                // the stamp's age is what the server's push gate reads as
+                // "actively using the web app", so an untouched tab must let
+                // its score go stale (mobile pushes resume) even before the
+                // 15-minute away flip.
+                send('active');
             }
         }, CHECK_MS);
 

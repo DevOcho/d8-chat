@@ -2,13 +2,7 @@
 import datetime
 import io
 
-from app.models import (
-    Conversation,
-    Message,
-    User,
-    UserConversationStatus,
-    utc_now,
-)
+from app.models import Conversation, Message, User, UserConversationStatus, utc_now
 
 
 def test_api_login_success(client):
@@ -167,9 +161,7 @@ def _make_dm(me, partner_id, last_msg_age_days, unread):
     """Create a DM conversation from ``me`` to ``partner_id`` with one message
     aged ``last_msg_age_days`` and (un)read per ``unread``. Returns the conv."""
     ids = sorted([me.id, partner_id])
-    conv = Conversation.create(
-        conversation_id_str=f"dm_{ids[0]}_{ids[1]}", type="dm"
-    )
+    conv = Conversation.create(conversation_id_str=f"dm_{ids[0]}_{ids[1]}", type="dm")
     last_at = utc_now() - datetime.timedelta(days=last_msg_age_days)
     # An unread DM has its read cursor before the message; a read one after it.
     last_read = (
@@ -898,10 +890,16 @@ def test_api_app_config(client, mocker):
     WHEN the /api/v1/app-config endpoint is hit
     THEN it should return the server branding and SSO flags
     """
-    # Mock the external Authlib call to prevent real HTTP requests during testing
+    # Mock the external Authlib call to prevent real HTTP requests during
+    # testing. Authlib's Flask client returns a dict (not a tuple) — the
+    # endpoint reads the URL by key, so the mock must match that shape.
     mocker.patch(
         "app.blueprints.api_v1.oauth.authentik.create_authorization_url",
-        return_value=("https://mock-sso-url.com/auth", "mock_state"),
+        return_value={
+            "url": "https://mock-sso-url.com/auth",
+            "state": "mock_state",
+            "nonce": "mock_nonce",
+        },
     )
 
     res = client.get("/api/v1/app-config")

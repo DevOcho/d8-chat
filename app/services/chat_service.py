@@ -24,6 +24,12 @@ from app.models import (
 )
 from app.services import push_service
 
+# How recent a user's activity stamp must be for a mobile push to be
+# suppressed. Deliberately tighter than chat_manager.ACTIVE_TTL (the 15-minute
+# presence-dot window): within ~5 minutes of walking away from the web app,
+# new-message pushes start reaching the phone again.
+PUSH_ACTIVE_MAX_AGE = 300
+
 
 def handle_new_message(
     sender: User,
@@ -168,6 +174,14 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
         )
     else:  # DM
         members = User.select().where(User.id.in_(list(parsed_conv.user_ids)))
+        # Guarantee both participants a status row even when they're offline.
+        # The web sidebar and GET /api/v1/dms join through this table, so a
+        # missing row hides the conversation entirely — the recipient never
+        # saw the DM until they searched for the sender and started one
+        # themselves. (The loop below get_or_creates too, but only after
+        # skipping offline members.)
+        for member in members:
+            UserConversationStatus.get_or_create(user=member, conversation=conversation)
 
     # Loop through every member to see if they need a notification
     for member in members:
@@ -243,7 +257,20 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 .count()
             )
             if new_count > 0:
-                notification_html = render_template(
+                # A sidebar row rides along with the badge: if this DM isn't in
+                # the client's sidebar yet (brand-new conversation, or the
+                # dm_created frame was lost while their socket was down), the
+                # badge's OOB target doesn't exist and the whole notification
+                # would be silently dropped. The client skips the row when it
+                # already has one (htmx:oobBeforeSwap dedupe in chat.js).
+                sidebar_row_html = render_template(
+                    "partials/dm_list_item_oob.html",
+                    user=sender_user,
+                    conv_id_str=conv_id_str,
+                    is_online=chat_manager.is_user_online_in_cluster(sender_user.id),
+                    is_active=chat_manager.is_user_active(sender_user.id),
+                )
+                notification_html = sidebar_row_html + render_template(
                     "partials/unread_badge.html",
                     conv_id_str=conv_id_str,
                     count=new_count,
@@ -414,7 +441,16 @@ def _dispatch_push_notifications(new_message, sender_user, conversation, parsed_
         payload_data["parent_message_id"] = new_message.parent_message_id
 
     for user_id in recipients:
-        if chat_manager.is_user_online_in_cluster(user_id):
+        # Suppress the mobile push only while the person is really using the
+        # app somewhere: a live socket AND a recent activity stamp. A browser
+        # tab left open on another desk used to count as "online" and swallow
+        # the push forever. Web input pings re-stamp activity every ≤4 minutes
+        # while someone is at the keyboard, and a foregrounded mobile app's
+        # socket heartbeat re-stamps every 30s, so anyone genuinely present
+        # stays inside PUSH_ACTIVE_MAX_AGE.
+        if chat_manager.is_user_online_in_cluster(
+            user_id
+        ) and chat_manager.is_user_active(user_id, max_age=PUSH_ACTIVE_MAX_AGE):
             continue
         try:
             push_service.send_to_user(
