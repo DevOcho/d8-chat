@@ -49,7 +49,10 @@ auto tag d8-chat && auto restart d8-chat && sleep 10 && auto seed d8-chat
 ```
 `auto seed` recreates the DB (via `init_db.py`), creates the schema, and seeds
 the default workspace/channels + admin user, then `seed.py` sets the admin
-password to `d8_admin` and creates the `kp` user (password `kp555`). The
+password to `d8_admin` and creates the `kp` user (password `kp555`). It also
+seeds the on-call cast: `engineer` (`engineer555`) and `robert` (`robert555`,
+group `devops-lead`) in the "DevOps Primary" rotation, `emilio` (`emilio555`,
+group `director`), and `kp` in group `ceo`. The
 `sleep 10` lets the freshly restarted pod settle before the seed pod runs.
 
 > Since Python changes hot-reload, the `auto tag`/`auto restart` here are only
@@ -220,7 +223,8 @@ at-most-once, so gaps are the client's job to fill).
 | `files_bp` | `/files` | Upload/download |
 | `admin_bp` | `/admin` | User and workspace management |
 | `polls_bp` | `/polls` | Poll creation and voting |
-| `api_v1_bp` | `/api/v1` | REST + WebSocket API for mobile clients |
+| `api_v1_bp` | `/api/v1` | REST + WebSocket API for mobile clients; Uptime Kuma webhook (`/integrations/uptime-kuma`) |
+| `oncall_bp` | `/oncall` | Pager endpoints: acknowledge/resolve incidents, active pages, test page (admin on-call UI lives in `admin_oncall.py` on `admin_bp`) |
 
 ### Key Modules
 
@@ -230,7 +234,8 @@ at-most-once, so gaps are the client's job to fill).
 - `app/ws_utils.py` — WebSocket send-lock / `LockedSocket` hardening; `app/background.py` — `spawn_background` for off-hot-path work
 - `GET /healthz` — realtime-aware readiness check (Redis ping + listener heartbeat age + trivial DB query); wired to the k8s readiness probe, not liveness
 - `app/chat_service.py` — Business logic for message creation, mentions, notifications
-- `app/sso.py` — OIDC SSO integration (Authlib)
+- `app/sso.py` — OIDC SSO integration (Authlib); syncs the IdP `groups` claim into `UserGroup` (`app/groups.py`) at each login
+- `app/services/oncall_service.py` — On-call paging (see `ONCALL_PLAN.md`): weekly rotations + overrides, escalation policies, incidents opened by Uptime Kuma DOWN events. Each worker runs `run_ticker` (started beside the listener) to escalate unacknowledged incidents and re-send pages; DB compare-and-set claims keep that safe with many workers. The web pager is `static/js/pager.js`
 - `config.py` — `Config` (production) and `TestConfig` (SQLite, no Redis) classes
 
 ### Conversation IDs

@@ -1,0 +1,235 @@
+{% extends "admin/layout.html" %}
+{% macro target_fields(prefix, level=None) %}
+    {% set current_type = level.target_type if level else 'group' %}
+    <select class="form-select form-select-sm level-target-type"
+            name="target_type"
+            data-prefix="{{ prefix }}">
+        <option value="schedule"
+                {% if current_type == 'schedule' %}selected{% endif %}>On call in rotation</option>
+        <option value="group" {% if current_type == 'group' %}selected{% endif %}>Group</option>
+        <option value="user" {% if current_type == 'user' %}selected{% endif %}>User</option>
+    </select>
+    <select class="form-select form-select-sm mt-1 level-target {{ prefix }}-schedule"
+            name="target_schedule_id">
+        {% for schedule in schedules %}
+            <option value="{{ schedule.id }}"
+                    {% if level and level.target_schedule_id == schedule.id %}selected{% endif %}>
+                {{ schedule.name }}
+            </option>
+        {% endfor %}
+    </select>
+    <input type="text"
+           class="form-control form-control-sm mt-1 level-target {{ prefix }}-group"
+           name="target_group"
+           list="known-groups"
+           placeholder="e.g. director"
+           value="{{ level.target_group if level and level.target_group else '' }}">
+    <select class="form-select form-select-sm mt-1 level-target {{ prefix }}-user"
+            name="target_user_id">
+        {% for user in users %}
+            <option value="{{ user.id }}"
+                    {% if level and level.target_user_id == user.id %}selected{% endif %}>
+                {{ oncall_display_name(user) }} ({{ user.username }})
+            </option>
+        {% endfor %}
+    </select>
+{% endmacro %}
+{% block content %}
+    <a href="{{ url_for('admin.oncall_overview') }}" class="small">← On-Call</a>
+    <h1 class="mt-2">
+        Escalation policy:
+        <small class="text-muted">{{ policy.name }}</small>
+    </h1>
+    {% include 'admin/_flash.html' %}
+    <p class="text-muted">
+        DOWN events in <strong>#{{ policy.channel.name }}</strong> page level 1 immediately. Each later level is paged
+        its delay after the previous one if nobody has acknowledged. Everyone paged keeps ringing until someone
+        acknowledges. A level that would page nobody new (e.g. the team lead is on call this week) is skipped.
+    </p>
+    <datalist id="known-groups">
+        {% for name in groups %}<option value="{{ name }}">{% endfor %}
+        </datalist>
+        <!-- Levels -->
+        <table class="table align-middle mt-3">
+            <thead>
+                <tr>
+                    <th scope="col" style="width: 90px">Level</th>
+                    <th scope="col" style="width: 140px">Delay (min)</th>
+                    <th scope="col">Target</th>
+                    <th scope="col">Would page now</th>
+                    <th scope="col"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in levels %}
+                    {% set level = item.level %}
+                    {% set form_id = 'level-form-' ~ level.id %}
+                    <tr>
+                        <td>
+                            <input form="{{ form_id }}"
+                                   type="number"
+                                   min="1"
+                                   class="form-control form-control-sm"
+                                   name="level"
+                                   value="{{ level.level }}"
+                                   required>
+                        </td>
+                        <td>
+                            <input form="{{ form_id }}"
+                                   type="number"
+                                   min="0"
+                                   class="form-control form-control-sm"
+                                   name="delay_minutes"
+                                   value="{{ level.delay_minutes }}"
+                                   required>
+                            {% if loop.first %}<div class="form-text">First level fires immediately.</div>{% endif %}
+                        </td>
+                        <td>
+                            <form id="{{ form_id }}"
+                                  action="{{ url_for('admin.oncall_update_level', policy_id=policy.id, level_id=level.id) }}"
+                                  method="POST">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                {{ target_fields('level-' ~ level.id, level) }}
+                            </form>
+                        </td>
+                        <td class="small">
+                            {% for user in item.targets %}
+                                {{ oncall_display_name(user) }}{{ ", " if not loop.last else "" }}
+                            {% else %}
+                                <span class="text-warning">nobody</span>
+                            {% endfor %}
+                        </td>
+                        <td class="text-end text-nowrap">
+                            <button form="{{ form_id }}" type="submit" class="btn btn-sm btn-primary">Save</button>
+                            <form action="{{ url_for('admin.oncall_delete_level', policy_id=policy.id, level_id=level.id) }}"
+                                  method="POST"
+                                  class="d-inline"
+                                  onsubmit="return confirm('Remove level {{ level.level }}?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="5" class="text-muted text-center">No levels — DOWN events will page workspace admins.</td>
+                    </tr>
+                {% endfor %}
+                <!-- Add level -->
+                <tr class="table-light">
+                    <td>
+                        <input form="level-form-new"
+                               type="number"
+                               min="1"
+                               class="form-control form-control-sm"
+                               name="level"
+                               value="{{ next_level }}"
+                               required>
+                    </td>
+                    <td>
+                        <input form="level-form-new"
+                               type="number"
+                               min="0"
+                               class="form-control form-control-sm"
+                               name="delay_minutes"
+                               value="10"
+                               required>
+                    </td>
+                    <td>
+                        <form id="level-form-new"
+                              action="{{ url_for('admin.oncall_add_level', policy_id=policy.id) }}"
+                              method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            {{ target_fields("level-new") }}
+                        </form>
+                    </td>
+                    <td></td>
+                    <td class="text-end">
+                        <button form="level-form-new" type="submit" class="btn btn-sm btn-success">Add level</button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        <!-- Settings -->
+        <h3 class="mt-5">Settings</h3>
+        <form action="{{ url_for('admin.oncall_policy_settings', policy_id=policy.id) }}"
+              method="POST"
+              style="max-width: 640px">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="mb-3">
+                <label class="form-label" for="policy-name">Name</label>
+                <input type="text"
+                       class="form-control"
+                       id="policy-name"
+                       name="name"
+                       value="{{ policy.name }}"
+                       required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label" for="no-oncall-level">When nobody is on call, start at level</label>
+                <input type="number"
+                       min="1"
+                       class="form-control"
+                       id="no-oncall-level"
+                       name="no_oncall_start_level"
+                       value="{{ policy.no_oncall_start_level or '' }}">
+                <div class="form-text">
+                    Used when a rotation level has nobody on call (time off with no cover, empty rotation). Leave blank to
+                    just move on to the next level.
+                </div>
+            </div>
+            <div class="mb-3 form-check form-switch">
+                <input class="form-check-input"
+                       type="checkbox"
+                       role="switch"
+                       id="policy-active"
+                       name="is_active"
+                       {% if policy.is_active %}checked{% endif %}>
+                <label class="form-check-label" for="policy-active">
+                    Paging enabled (off = DOWN events are posted but nobody is paged)
+                </label>
+            </div>
+            <button type="submit" class="btn btn-primary">Save settings</button>
+        </form>
+        <!-- Groups -->
+        <h3 class="mt-5">Groups</h3>
+        <p class="small text-muted">
+            Group levels page every active member. Membership comes from the SSO <code>groups</code> claim (refreshed each
+            time the user signs in with SSO) or is set by an admin in the user editor.
+        </p>
+        <table class="table table-sm" style="max-width: 640px">
+            <tbody>
+                {% for name, members in groups.items() %}
+                    <tr>
+                        <td>
+                            <code>{{ name }}</code>
+                        </td>
+                        <td>
+                            {% for user in members %}{{ oncall_display_name(user) }}{{ ", " if not loop.last else "" }}{% endfor %}
+                        </td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td class="text-muted">No groups yet.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endblock %}
+    {% block admin_scripts %}
+        <script>
+      // Show only the target input that matches each row's target type.
+      function syncLevelTarget(select) {
+        const prefix = select.dataset.prefix;
+        ['schedule', 'group', 'user'].forEach((kind) => {
+          document.querySelectorAll(`.${prefix}-${kind}`).forEach((el) => {
+            el.hidden = select.value !== kind;
+          });
+        });
+      }
+      document.querySelectorAll('.level-target-type').forEach((select) => {
+        syncLevelTarget(select);
+        select.addEventListener('change', () => syncLevelTarget(select));
+      });
+        </script>
+    {% endblock %}

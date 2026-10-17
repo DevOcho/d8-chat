@@ -1,0 +1,66 @@
+{# Incident card under an Uptime Kuma DOWN message. Viewer-agnostic: the same
+   HTML is broadcast to the whole channel as an OOB swap whenever the incident
+   changes, so buttons show for everyone and the server enforces who may act. #}
+<div id="incident-card-{{ incident.id }}"
+     class="incident-card incident-{{ incident.state }} mt-2"
+     {% if oob %}hx-swap-oob="outerHTML"{% endif %}>
+    <div class="d-flex align-items-center flex-wrap gap-2">
+        {% if incident.state == 'triggered' %}
+            <span class="badge bg-danger"><i class="bi bi-broadcast me-1"></i>Paging</span>
+        {% elif incident.state == 'acknowledged' %}
+            <span class="badge bg-warning text-dark"><i class="bi bi-person-check me-1"></i>Acknowledged</span>
+        {% else %}
+            <span class="badge bg-success"><i class="bi bi-check2-circle me-1"></i>Resolved</span>
+        {% endif %}
+        <span class="small text-muted">Incident #{{ incident.id }}</span>
+    </div>
+    <div class="small mt-1">
+        {% set pages = incident.pages %}
+        {% if incident.state == 'triggered' %}
+            {% if pages.count() %}
+                Paging
+                {% for page in pages %}
+                    <strong>{{ oncall_display_name(page.user) }}</strong>{{ ", " if not loop.last else "" }}
+                {% endfor %}
+                {% if incident.next_escalation_at %}
+                    · escalates at
+                    <span class="incident-time"
+                          data-timestamp="{{ incident.next_escalation_at.isoformat() }}Z">{{ incident.next_escalation_at.strftime("%H:%M") }} UTC</span>
+                {% endif %}
+            {% else %}
+                Nobody could be paged — check the escalation policy.
+            {% endif %}
+        {% elif incident.state == 'acknowledged' %}
+            Acknowledged by <strong>{{ oncall_display_name(incident.acknowledged_by) }}</strong>
+            at
+            <span class="incident-time"
+                  data-timestamp="{{ incident.acknowledged_at.isoformat() }}Z">{{ incident.acknowledged_at.strftime("%H:%M") }} UTC</span>
+        {% else %}
+            {% if incident.resolved_by %}
+                Resolved by <strong>{{ oncall_display_name(incident.resolved_by) }}</strong>
+            {% else %}
+                Resolved automatically (monitor back up)
+            {% endif %}
+            at
+            <span class="incident-time"
+                  data-timestamp="{{ incident.resolved_at.isoformat() }}Z">{{ incident.resolved_at.strftime("%H:%M") }} UTC</span>
+        {% endif %}
+    </div>
+    {% if incident.state != 'resolved' %}
+        <div class="mt-2 d-flex gap-2">
+            {% if incident.state == 'triggered' %}
+                <button type="button"
+                        class="btn btn-sm btn-danger"
+                        hx-post="{{ url_for('oncall.acknowledge_incident', incident_id=incident.id) }}"
+                        hx-swap="none">
+                    <i class="bi bi-hand-thumbs-up me-1"></i>Acknowledge
+                </button>
+            {% endif %}
+            <button type="button"
+                    class="btn btn-sm btn-outline-secondary"
+                    hx-post="{{ url_for('oncall.resolve_incident', incident_id=incident.id) }}"
+                    hx-confirm="Resolve incident #{{ incident.id }}? Normally it resolves itself when the monitor comes back up."
+                    hx-swap="none">Resolve</button>
+        </div>
+    {% endif %}
+</div>

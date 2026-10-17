@@ -1,0 +1,296 @@
+{% extends "admin/layout.html" %}
+{% block content %}
+    <a href="{{ url_for('admin.oncall_overview') }}" class="small">← On-Call</a>
+    <h1 class="mt-2">
+        Rotation:
+        <small class="text-muted">{{ schedule.name }}</small>
+    </h1>
+    {% include 'admin/_flash.html' %}
+    <div class="alert {{ 'alert-success' if on_call else 'alert-warning' }} mt-3">
+        {% if on_call %}
+            <strong>{{ oncall_display_name(on_call) }}</strong> is on call now.
+        {% else %}
+            <strong>Nobody is on call right now.</strong> DOWN events page the policy's no-on-call level (the director) first.
+        {% endif %}
+        Shifts hand off every <strong>{{ weekday_names[schedule.handoff_weekday] }} at {{ schedule.handoff_time }}</strong>
+        ({{ schedule.timezone }}).
+    </div>
+    <!-- Next 8 weeks -->
+    <h3 class="mt-4">Next 8 weeks</h3>
+    <table class="table table-sm mt-2">
+        <thead>
+            <tr>
+                <th scope="col">Shift ({{ schedule.timezone }})</th>
+                <th scope="col">Rotation</th>
+                <th scope="col">Overrides</th>
+                <th scope="col"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for shift in shifts %}
+                <tr class="{{ 'table-active' if shift.is_current else '' }}">
+                    <td class="text-nowrap">
+                        {{ shift.start_local.strftime("%a %b %-d, %H:%M") }} → {{ shift.end_local.strftime("%a %b %-d") }}
+                        {% if shift.is_current %}<span class="badge bg-primary ms-1">now</span>{% endif %}
+                    </td>
+                    <td>
+                        {{ oncall_display_name(shift.rotation_user) if shift.rotation_user else '—' }}
+                        {% if shift.rotation_user and not shift.rotation_user.is_active %}
+                            <span class="badge bg-secondary">inactive</span>
+                        {% endif %}
+                    </td>
+                    <td class="small">
+                        {% for override in shift.overrides %}
+                            <div>
+                                {% if override.user %}
+                                    <strong>{{ oncall_display_name(override.user) }}</strong>
+                                {% else %}
+                                    <strong class="text-warning">Nobody</strong>
+                                {% endif %}
+                                {{ to_local(override.start_at).strftime("%a %-d %H:%M") }} → {{ to_local(override.end_at).strftime("%a %-d %H:%M") }}
+                                {% if override.reason %}<span class="text-muted">· {{ override.reason }}</span>{% endif %}
+                            </div>
+                        {% endfor %}
+                    </td>
+                    <td class="text-end">
+                        <button type="button"
+                                class="btn btn-sm btn-outline-secondary use-shift-dates"
+                                data-start="{{ shift.start_local.strftime('%Y-%m-%dT%H:%M') }}"
+                                data-end="{{ shift.end_local.strftime('%Y-%m-%dT%H:%M') }}">Override this week</button>
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="row g-4 mt-2">
+        <!-- Override form -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title" id="override-form-title">Cover or time off</h5>
+                    <p class="small text-muted">
+                        Replaces the rotation for the window. Choose <em>Nobody</em> for time off with no cover —
+                        pages then go to the director, then the CEO. Times are in {{ schedule.timezone }}.
+                    </p>
+                    <form action="{{ url_for('admin.oncall_add_override', schedule_id=schedule.id) }}"
+                          method="POST"
+                          id="override-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="mb-2">
+                            <label class="form-label" for="override-user">On call instead</label>
+                            <select class="form-select" name="user_id" id="override-user">
+                                <option value="">Nobody (no cover)</option>
+                                {% for user in users %}
+                                    <option value="{{ user.id }}">{{ oncall_display_name(user) }} ({{ user.username }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="row g-2 mb-2">
+                            <div class="col">
+                                <label class="form-label" for="override-start">Start</label>
+                                <input type="datetime-local"
+                                       class="form-control"
+                                       name="start"
+                                       id="override-start"
+                                       required>
+                            </div>
+                            <div class="col">
+                                <label class="form-label" for="override-end">End</label>
+                                <input type="datetime-local"
+                                       class="form-control"
+                                       name="end"
+                                       id="override-end"
+                                       required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="override-reason">Reason</label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="reason"
+                                   id="override-reason"
+                                   maxlength="255"
+                                   placeholder="e.g. Bob on vacation">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Add override</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <!-- Swap form -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">Swap two weeks</h5>
+                    <p class="small text-muted">Each person takes the other's week. Everyone still does the same number of turns.</p>
+                    <form action="{{ url_for('admin.oncall_swap', schedule_id=schedule.id) }}"
+                          method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        {% for field in ['shift_a', 'shift_b'] %}
+                            <div class="mb-2">
+                                <label class="form-label" for="{{ field }}">{{ 'Week' if loop.first else 'with week' }}</label>
+                                <select class="form-select" name="{{ field }}" id="{{ field }}" required>
+                                    <option value="" selected disabled>Choose a week…</option>
+                                    {% for shift in swap_shifts if shift.rotation_user %}
+                                        <option value="{{ shift.start_utc.isoformat() }}">
+                                            {{ shift.start_local.strftime("%b %-d") }} — {{ oncall_display_name(shift.rotation_user) }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        {% endfor %}
+                        <button type="submit" class="btn btn-primary mt-2">Swap</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Upcoming overrides -->
+    <h3 class="mt-5">Current and upcoming overrides</h3>
+    <ul class="list-group mt-2">
+        {% for override in overrides %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    {% if override.user %}
+                        <strong>{{ oncall_display_name(override.user) }}</strong>
+                    {% else %}
+                        <strong class="text-warning">Nobody (no cover)</strong>
+                    {% endif %}
+                    · {{ to_local(override.start_at).strftime("%a %b %-d %H:%M") }} → {{ to_local(override.end_at).strftime("%a %b %-d %H:%M") }}
+                    {% if override.reason %}<span class="text-muted">· {{ override.reason }}</span>{% endif %}
+                </div>
+                <form action="{{ url_for('admin.oncall_delete_override', schedule_id=schedule.id, override_id=override.id) }}"
+                      method="POST"
+                      onsubmit="return confirm('Remove this override?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                </form>
+            </li>
+        {% else %}
+            <li class="list-group-item text-muted">No overrides.</li>
+        {% endfor %}
+    </ul>
+    <!-- Members -->
+    <h3 class="mt-5">Rotation order</h3>
+    <p class="small text-muted">
+        Engineers take one week each, in this order. Reordering keeps whoever is on call this week on call until
+        the next handoff — use an override to change the current week.
+    </p>
+    <ul class="list-group">
+        {% for member in members %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    <span class="text-muted me-2">{{ loop.index }}.</span>
+                    {{ oncall_display_name(member.user) }}
+                    <small class="text-muted">({{ member.user.username }})</small>
+                    {% if not member.user.is_active %}<span class="badge bg-secondary">inactive — counts as nobody</span>{% endif %}
+                </div>
+                <div class="d-flex gap-1">
+                    {% for direction, icon, disabled in [('up', 'bi-arrow-up', loop.first), ('down', 'bi-arrow-down', loop.last)] %}
+                        <form action="{{ url_for('admin.oncall_move_member', schedule_id=schedule.id, member_id=member.id) }}"
+                              method="POST">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="direction" value="{{ direction }}">
+                            <button type="submit"
+                                    class="btn btn-sm btn-outline-secondary"
+                                    title="Move {{ direction }}"
+                                    {% if disabled %}disabled{% endif %}>
+                                <i class="bi {{ icon }}"></i>
+                            </button>
+                        </form>
+                    {% endfor %}
+                    <form action="{{ url_for('admin.oncall_remove_member', schedule_id=schedule.id, member_id=member.id) }}"
+                          method="POST"
+                          onsubmit="return confirm('Remove {{ member.user.username }} from the rotation?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+                    </form>
+                </div>
+            </li>
+        {% else %}
+            <li class="list-group-item text-muted">Nobody in the rotation yet.</li>
+        {% endfor %}
+    </ul>
+    <form action="{{ url_for('admin.oncall_add_member', schedule_id=schedule.id) }}"
+          method="POST"
+          class="mt-3"
+          style="max-width: 480px">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="input-group">
+            <select class="form-select" name="user_id" required>
+                <option value="" selected disabled>Add an engineer…</option>
+                {% for user in users_to_add %}
+                    <option value="{{ user.id }}">{{ oncall_display_name(user) }} ({{ user.username }})</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-success" type="submit">Add</button>
+        </div>
+    </form>
+    <!-- Settings -->
+    <h3 class="mt-5">Settings</h3>
+    <form action="{{ url_for('admin.oncall_schedule_settings', schedule_id=schedule.id) }}"
+          method="POST"
+          style="max-width: 640px">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-3">
+            <label class="form-label" for="schedule-name">Name</label>
+            <input type="text"
+                   class="form-control"
+                   id="schedule-name"
+                   name="name"
+                   value="{{ schedule.name }}"
+                   required>
+        </div>
+        <div class="row g-2 mb-3">
+            <div class="col-md-5">
+                <label class="form-label" for="schedule-timezone">Timezone</label>
+                <input type="text"
+                       class="form-control"
+                       id="schedule-timezone"
+                       name="timezone"
+                       value="{{ schedule.timezone }}"
+                       required>
+                <div class="form-text">IANA name, e.g. America/Santo_Domingo (Atlantic, no DST).</div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label" for="schedule-weekday">Handoff day</label>
+                <select class="form-select" id="schedule-weekday" name="handoff_weekday">
+                    {% for name in weekday_names %}
+                        <option value="{{ loop.index0 }}"
+                                {% if schedule.handoff_weekday == loop.index0 %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label" for="schedule-time">Handoff time</label>
+                <input type="time"
+                       class="form-control"
+                       id="schedule-time"
+                       name="handoff_time"
+                       value="{{ schedule.handoff_time }}"
+                       required>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Save settings</button>
+    </form>
+    <form action="{{ url_for('admin.oncall_delete_schedule', schedule_id=schedule.id) }}"
+          method="POST"
+          class="mt-5"
+          onsubmit="return confirm('Delete this rotation? Escalation levels that use it will page nobody until you fix them.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-outline-danger">Delete rotation</button>
+    </form>
+{% endblock %}
+{% block admin_scripts %}
+    <script>
+      // "Override this week" fills the override form with that shift's bounds.
+      document.querySelectorAll('.use-shift-dates').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          document.getElementById('override-start').value = btn.dataset.start;
+          document.getElementById('override-end').value = btn.dataset.end;
+          document.getElementById('override-form-title').scrollIntoView({ behavior: 'smooth' });
+          document.getElementById('override-user').focus();
+        });
+      });
+    </script>
+{% endblock %}

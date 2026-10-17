@@ -2160,6 +2160,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     });
                     return;
                 }
+                // On-call pages ring regardless of focus or the open channel (pager.js).
+                if (data.type === 'page' || data.type === 'page_cleared') {
+                    if (window.PagerManager) window.PagerManager.handleFrame(data);
+                    return;
+                }
                 if (data.type === 'notification') NotificationManager.showNotification(data);
                 else if (data.type === 'sound') NotificationManager.playSound();
                 return; // End processing for JSON events.

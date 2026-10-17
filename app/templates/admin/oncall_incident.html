@@ -1,0 +1,54 @@
+{% extends "admin/layout.html" %}
+{% block content %}
+    <a href="{{ url_for('admin.oncall_overview') }}" class="small">← On-Call</a>
+    <h1 class="mt-2">
+        Incident #{{ incident.id }}:
+        <small class="text-muted">{{ incident.title }}</small>
+    </h1>
+    {% include 'admin/_flash.html' %}
+    <dl class="row mt-3" style="max-width: 720px">
+        <dt class="col-sm-3">State</dt>
+        <dd class="col-sm-9">
+            {{ incident.state | capitalize }}
+        </dd>
+        <dt class="col-sm-3">Channel</dt>
+        <dd class="col-sm-9">
+            #{{ incident.channel.name }}
+        </dd>
+        {% if incident.source_url %}
+            <dt class="col-sm-3">Target</dt>
+            <dd class="col-sm-9">
+                {{ incident.source_url }}
+            </dd>
+        {% endif %}
+        {% if incident.details %}
+            <dt class="col-sm-3">Details</dt>
+            <dd class="col-sm-9">
+                {{ incident.details }}
+            </dd>
+        {% endif %}
+        <dt class="col-sm-3">Paged</dt>
+        <dd class="col-sm-9">
+            {% for user, level in paged %}
+                {{ oncall_display_name(user) }} <span class="text-muted small">(L{{ level }})</span>{{ ", " if not loop.last else "" }}
+            {% else %}
+                nobody
+            {% endfor %}
+        </dd>
+    </dl>
+    <h3 class="mt-4">Timeline (UTC)</h3>
+    <ul class="list-group mt-2" style="max-width: 720px">
+        {% for row in events %}
+            {% set event = row.event %}
+            <li class="list-group-item">
+                <span class="text-muted me-2">{{ event.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</span>
+                <strong>{{ event.kind | replace('_', ' ') }}</strong>
+                {% if event.user %}· {{ oncall_display_name(event.user) }}{% endif %}
+                {% if row.details.level %}· level {{ row.details.level }}{% endif %}
+                {% if row.details.jump_to %}→ level {{ row.details.jump_to }}{% endif %}
+                {% if row.details.detail %}<span class="text-muted">· {{ row.details.detail }}</span>{% endif %}
+                {% if row.details.auto %}<span class="text-muted">· automatic</span>{% endif %}
+            </li>
+        {% endfor %}
+    </ul>
+{% endblock %}

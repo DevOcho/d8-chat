@@ -15,10 +15,12 @@ from peewee import (
     BooleanField,
     CharField,
     CompositeKey,
+    DateField,
     DateTimeField,
     DeferredForeignKey,
     ForeignKeyField,
     IdentityField,
+    IntegerField,
     Model,
     Proxy,
     TextField,
@@ -436,3 +438,207 @@ class DeviceToken(BaseModel):
         # Lookups are almost always "all tokens for this user" when dispatching
         # a push, so index that explicitly.
         indexes = ((("user",), False),)
+
+
+class UserGroup(BaseModel):
+    """A named group a user belongs to, e.g. ``devops-lead`` or ``director``.
+
+    Used by on-call escalation levels that target "whoever is in group X"
+    instead of a hard-coded user. ``source`` records where the membership came
+    from: ``sso`` rows mirror the IdP's ``groups`` claim and are rewritten on
+    every SSO login (see ``app.groups.sync_sso_groups``); ``local`` rows are
+    managed by admins in the user editor and never touched by SSO sync, so
+    password-login deployments (and local dev) can use groups too.
+
+    ``name`` is stored normalized (stripped, lowercased) so "DevOps-Lead" in
+    Authentik and "devops-lead" on an escalation level match.
+    """
+
+    id = PrimaryKeyField()
+    user = ForeignKeyField(User, backref="groups", on_delete="CASCADE")
+    name = CharField(max_length=150, index=True)
+    source = CharField(max_length=16, default="local")  # 'sso' or 'local'
+
+    class Meta:
+        """Peewee Meta class."""
+
+        indexes = ((("user", "name"), True),)
+
+
+class OnCallSchedule(BaseModel):
+    """A weekly on-call rotation.
+
+    Each shift starts at ``handoff_time`` on ``handoff_weekday`` in the
+    schedule's ``timezone`` and lasts seven days. Members take turns in
+    ``position`` order. ``anchor_date`` is the local date of a handoff on which
+    the member at position 0 started a turn — the rotation index for any shift
+    is ``weeks since anchor_date`` modulo the member count. Roster edits
+    re-anchor so this week's person doesn't change mid-shift (see
+    ``oncall_service.reanchor_schedule``).
+
+    All math runs on local wall-clock time, so a DST timezone keeps the
+    handoff at the same local hour year-round.
+    """
+
+    id = PrimaryKeyField()
+    name = CharField(max_length=120, unique=True)
+    timezone = CharField(max_length=64, default="America/Santo_Domingo")
+    handoff_weekday = IntegerField(default=0)  # Monday = 0 … Sunday = 6
+    handoff_time = CharField(max_length=5, default="08:00")  # "HH:MM", local
+    anchor_date = DateField()
+
+
+class OnCallScheduleMember(BaseModel):
+    """One engineer's slot in a rotation; lower ``position`` goes first."""
+
+    id = PrimaryKeyField()
+    schedule = ForeignKeyField(OnCallSchedule, backref="members", on_delete="CASCADE")
+    user = ForeignKeyField(User, backref="oncall_memberships", on_delete="CASCADE")
+    position = IntegerField(default=0)
+
+    class Meta:
+        """Peewee Meta class."""
+
+        indexes = ((("schedule", "user"), True),)
+
+
+class OnCallOverride(BaseModel):
+    """Replaces the rotation for a window of time (vacation, swap, cover).
+
+    ``user`` null means "nobody is on call" for the window — the escalation
+    policy then starts at its ``no_oncall_start_level``. When overrides
+    overlap, the most recently created one wins. Times are naive UTC like
+    every other timestamp in the app.
+    """
+
+    id = PrimaryKeyField()
+    schedule = ForeignKeyField(OnCallSchedule, backref="overrides", on_delete="CASCADE")
+    user = ForeignKeyField(
+        User, backref="oncall_overrides", null=True, on_delete="CASCADE"
+    )
+    start_at = DateTimeField(index=True)
+    end_at = DateTimeField(index=True)
+    reason = CharField(max_length=255, null=True)
+    created_by = ForeignKeyField(
+        User, backref="created_oncall_overrides", null=True, on_delete="SET NULL"
+    )
+
+
+class EscalationPolicy(BaseModel):
+    """Who gets paged, and in what order, for incidents raised in a channel.
+
+    ``no_oncall_start_level``: when a schedule level resolves to nobody (empty
+    rotation, or an override with no cover), paging jumps straight to this
+    level instead of walking the chain level by level. Null disables the jump.
+    """
+
+    id = PrimaryKeyField()
+    name = CharField(max_length=120)
+    channel = ForeignKeyField(
+        Channel, backref="escalation_policies", unique=True, on_delete="CASCADE"
+    )
+    no_oncall_start_level = IntegerField(null=True, default=3)
+    is_active = BooleanField(default=True)
+
+
+class EscalationLevel(BaseModel):
+    """One step of an escalation policy.
+
+    ``delay_minutes`` is how long after the previous level was paged this one
+    fires (ignored for the first level, which fires immediately). Exactly one
+    target is set, selected by ``target_type``:
+
+    * ``schedule`` — whoever is on call in ``target_schedule`` right now
+    * ``group``    — every active user in ``target_group`` (a ``UserGroup`` name)
+    * ``user``     — ``target_user``
+    """
+
+    id = PrimaryKeyField()
+    policy = ForeignKeyField(EscalationPolicy, backref="levels", on_delete="CASCADE")
+    level = IntegerField()
+    delay_minutes = IntegerField(default=10)
+    target_type = CharField(max_length=16)
+    target_schedule = ForeignKeyField(
+        OnCallSchedule, backref="escalation_levels", null=True, on_delete="SET NULL"
+    )
+    target_group = CharField(max_length=150, null=True)
+    target_user = ForeignKeyField(
+        User, backref="escalation_levels", null=True, on_delete="SET NULL"
+    )
+
+    class Meta:
+        """Peewee Meta class."""
+
+        indexes = ((("policy", "level"), True),)
+
+
+class Incident(BaseModel):
+    """A paging incident, opened by a monitor DOWN event.
+
+    Lifecycle: ``triggered`` (paging, escalating) → ``acknowledged`` (paging
+    stopped, someone is on it) → ``resolved`` (monitor back UP, or resolved by
+    hand). ``dedupe_key`` (e.g. ``uptime-kuma:12``) ties repeat DOWN / UP
+    events to the open incident for the same monitor.
+
+    Escalation state lives here so it survives worker restarts:
+    ``current_level`` is the last level paged and ``next_escalation_at`` is
+    when the next one fires (null at the last level or once acknowledged).
+    Every worker's ticker races for due rows with a compare-and-set update, so
+    each escalation happens exactly once (see ``oncall_service``).
+    """
+
+    id = PrimaryKeyField()
+    policy = ForeignKeyField(
+        EscalationPolicy, backref="incidents", null=True, on_delete="SET NULL"
+    )
+    channel = ForeignKeyField(Channel, backref="incidents", on_delete="CASCADE")
+    source = CharField(max_length=32, default="uptime-kuma")
+    dedupe_key = CharField(max_length=255, index=True)
+    title = CharField(max_length=255)
+    details = TextField(null=True)
+    source_url = TextField(null=True)
+    state = CharField(max_length=16, default="triggered", index=True)
+    current_level = IntegerField(default=0)
+    next_escalation_at = DateTimeField(null=True, index=True)
+    last_page_sent_at = DateTimeField(null=True)
+    acknowledged_by = ForeignKeyField(
+        User, backref="acknowledged_incidents", null=True, on_delete="SET NULL"
+    )
+    acknowledged_at = DateTimeField(null=True)
+    resolved_by = ForeignKeyField(
+        User, backref="resolved_incidents", null=True, on_delete="SET NULL"
+    )
+    resolved_at = DateTimeField(null=True)
+    message = ForeignKeyField(
+        Message, backref="incidents", null=True, on_delete="SET NULL"
+    )
+
+
+class IncidentPage(BaseModel):
+    """A user being paged for an incident. Pages are cumulative: everyone with
+    a row keeps ringing until the incident leaves ``triggered``."""
+
+    id = PrimaryKeyField()
+    incident = ForeignKeyField(Incident, backref="pages", on_delete="CASCADE")
+    user = ForeignKeyField(User, backref="incident_pages", on_delete="CASCADE")
+    level = IntegerField()
+
+    class Meta:
+        """Peewee Meta class."""
+
+        indexes = ((("incident", "user"), True),)
+
+
+class IncidentEvent(BaseModel):
+    """Timeline entry for an incident (triggered, paged, escalated, …).
+
+    ``details`` is a JSON string, like ``AuditLog.details``.
+    """
+
+    id = PrimaryKeyField()
+    incident = ForeignKeyField(Incident, backref="events", on_delete="CASCADE")
+    kind = CharField(max_length=32)
+    user = ForeignKeyField(
+        User, backref="incident_events", null=True, on_delete="SET NULL"
+    )
+    details = TextField(null=True)

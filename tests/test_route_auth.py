@@ -51,6 +51,7 @@ PUBLIC_ENDPOINTS = {
     # Not decorator-guarded, but authenticated inside the view/handler.
     # Asserted separately below so they can't quietly lose their check.
     "api_v1.internal_notify": "X-Internal-Key shared secret, compared in constant time",
+    "api_v1.uptime_kuma_webhook": "Bearer UPTIME_KUMA_WEBHOOK_KEY, compared in constant time",
     "chat": "WebSocket: session check + Origin check inside the handler",
     "api_ws": "WebSocket: bearer token via Sec-WebSocket-Protocol",
     # Infrastructure.
@@ -201,7 +202,7 @@ def test_every_guarded_route_rejects_an_anonymous_request(app, client):
     )
 
 
-# --- The three routes that authenticate inside the view/handler -------------
+# --- The routes that authenticate inside the view/handler --------------------
 
 
 def test_internal_notify_requires_the_shared_secret(client):
@@ -220,6 +221,28 @@ def test_internal_notify_fails_closed_when_no_key_is_configured(app, client):
         "/api/v1/internal/notify",
         json={"channel_name": "general", "message": "hi"},
         headers={"X-Internal-Key": ""},
+    )
+    assert res.status_code == 401
+
+
+def test_uptime_kuma_webhook_requires_the_bearer_key(client):
+    body = {"heartbeat": {"status": 0}, "monitor": {"id": 1, "name": "x"}}
+    assert client.post("/api/v1/integrations/uptime-kuma", json=body).status_code == 401
+    res = client.post(
+        "/api/v1/integrations/uptime-kuma",
+        json=body,
+        headers={"Authorization": "Bearer wrong"},
+    )
+    assert res.status_code == 401
+
+
+def test_uptime_kuma_webhook_fails_closed_when_no_key_is_configured(app, client):
+    """An unset UPTIME_KUMA_WEBHOOK_KEY must lock the endpoint, not open it."""
+    app.config["UPTIME_KUMA_WEBHOOK_KEY"] = None
+    res = client.post(
+        "/api/v1/integrations/uptime-kuma",
+        json={"msg": "hi"},
+        headers={"Authorization": "Bearer "},
     )
     assert res.status_code == 401
 

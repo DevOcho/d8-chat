@@ -54,6 +54,26 @@
                     {% if workspace_member.role == 'admin' %}selected{% endif %}>Admin</option>
         </select>
     </div>
+    <div class="mb-3">
+        <label for="local_groups" class="form-label">Groups</label>
+        {% set sso_groups = user_groups | selectattr(1, 'equalto', 'sso') | map(attribute=0) | list %}
+        {% if sso_groups %}
+            <div class="mb-2">
+                {% for name in sso_groups %}<span class="badge bg-secondary me-1" title="From SSO">{{ name }}</span>{% endfor %}
+                <span class="form-text">from SSO (refreshed at each SSO sign-in)</span>
+            </div>
+        {% endif %}
+        <input type="text"
+               class="form-control"
+               id="local_groups"
+               name="local_groups"
+               value="{{ user_groups | selectattr(1, 'equalto', 'local') | map(attribute=0) | join(', ') }}"
+               placeholder="e.g. devops-lead, director">
+        <div class="form-text">
+            Comma-separated. Used by on-call escalation levels that target a group. Groups set here are kept
+            even if SSO doesn't send them.
+        </div>
+    </div>
     <button type="submit" class="btn btn-primary">Save Changes</button>
     <button type="button"
             class="btn btn-secondary"

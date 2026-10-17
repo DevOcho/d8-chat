@@ -552,6 +552,17 @@ def register_template_filters(app):
 
         return {"get_poll_context": get_poll_context}
 
+    @app.context_processor
+    def inject_oncall_helpers():
+        # pylint: disable=import-outside-toplevel
+        from .services import oncall_service
+
+        return {
+            "incident_for_message": oncall_service.incident_for_message,
+            "oncall_status_for_user": oncall_service.oncall_status_for_user,
+            "oncall_display_name": oncall_service.display_name,
+        }
+
     @app.template_filter("emojize")
     def emojize_filter(content):
         return emoji.emojize(content, language="alias")
@@ -608,6 +619,9 @@ def register_template_filters(app):
 def register_blueprints(app):
     """Registers all blueprints for the application."""
     # pylint: disable=import-outside-toplevel
+    from .blueprints import (  # noqa: F401  (adds on-call routes to admin_bp)
+        admin_oncall,
+    )
     from .blueprints.activity import activity_bp
     from .blueprints.admin import admin_bp
     from .blueprints.api_v1 import api_v1_bp
@@ -616,6 +630,7 @@ def register_blueprints(app):
     from .blueprints.dms import dms_bp
     from .blueprints.files import files_bp
     from .blueprints.messages import messages_bp
+    from .blueprints.oncall import oncall_bp
     from .blueprints.polls import polls_bp
     from .blueprints.profile import profile_bp
     from .blueprints.search import search_bp
@@ -631,6 +646,7 @@ def register_blueprints(app):
     app.register_blueprint(activity_bp)
     app.register_blueprint(messages_bp)
     app.register_blueprint(polls_bp)
+    app.register_blueprint(oncall_bp)
     app.register_blueprint(profile_bp)
     app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
 
@@ -845,6 +861,15 @@ def create_app(config_class=Config, start_listener=True):
 
         listener_thread = threading.Thread(target=run_listener, daemon=True)
         listener_thread.start()
+
+        # On-call escalation ticker: escalates unacknowledged incidents and
+        # re-sends pages. One per worker; DB compare-and-set claims make the
+        # duplicates safe (see oncall_service).
+        from .services import oncall_service
+
+        threading.Thread(
+            target=oncall_service.run_ticker, args=(app,), daemon=True
+        ).start()
 
     register_template_filters(app)
     register_template_globals(app)

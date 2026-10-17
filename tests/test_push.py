@@ -13,6 +13,7 @@ the public API of the service rather than firebase_admin internals. That
 keeps the test surface stable across firebase-admin versions.
 """
 
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -512,3 +513,98 @@ def test_at_channel_does_not_push(app, monkeypatch):
         chat_service.send_notifications_for_new_message(msg, sender)
 
     sent.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# On-call page pushes, built with the real firebase-admin message classes
+# ---------------------------------------------------------------------------
+
+
+def _built_message(app, monkeypatch, send, **kwargs):
+    """Run ``send`` for a user with one device and return the built message."""
+    from firebase_admin import messaging
+
+    user = User.get_by_id(1)
+    DeviceToken.create(user=user, platform="ios", token="page-token")
+    monkeypatch.setattr(push_service, "_firebase_app", object())
+    sent = MagicMock(
+        return_value=SimpleNamespace(
+            responses=[SimpleNamespace(success=True, exception=None)]
+        )
+    )
+    monkeypatch.setattr(messaging, "send_each_for_multicast", sent)
+    with app.app_context():
+        send(user.id, **kwargs)
+    sent.assert_called_once()
+    return sent.call_args.args[0]
+
+
+def _page(app, monkeypatch):
+    return _built_message(
+        app,
+        monkeypatch,
+        push_service.send_page,
+        title="🚨 DOWN: Acme Portal",
+        body="timeout",
+        data={"type": "page", "incident_id": 17},
+    )
+
+
+def test_page_push_is_public_and_short_lived(app, monkeypatch):
+    before = int(time.time())
+    msg = _page(app, monkeypatch)
+
+    android = msg.android
+    assert android.priority == "high"
+    assert android.ttl == 120
+    assert android.collapse_key == "incident-17"
+    assert android.notification.visibility == "public"
+    assert android.notification.channel_id == "oncall_pages"
+    assert android.notification.tag == "incident-17"
+    assert android.notification.priority == "max"
+
+    headers = msg.apns.headers
+    assert headers["apns-priority"] == "10"
+    assert headers["apns-collapse-id"] == "incident-17"
+    assert before + 120 <= int(headers["apns-expiration"]) <= int(time.time()) + 120
+    aps = msg.apns.payload.aps
+    assert (aps.sound.name, aps.sound.critical, aps.sound.volume) == (
+        "pager.caf",
+        True,
+        1.0,
+    )
+    assert aps.custom_data == {"interruption-level": "critical"}
+
+
+def test_page_push_has_the_acknowledge_category(app, monkeypatch):
+    assert _page(app, monkeypatch).apns.payload.aps.category == "ONCALL_PAGE"
+
+
+def test_page_cleared_quietly_replaces_the_ios_alert(app, monkeypatch):
+    msg = _built_message(
+        app,
+        monkeypatch,
+        push_service.send_page_cleared,
+        alert="✅ Acme Portal acknowledged by Robert",
+        data={"type": "page_cleared", "incident_id": 17, "state": "acknowledged"},
+    )
+    assert msg.notification is None
+    assert msg.data == {
+        "type": "page_cleared",
+        "incident_id": "17",
+        "state": "acknowledged",
+    }
+    assert msg.android.priority == "high"
+    assert msg.android.notification is None
+
+    assert msg.apns.headers == {
+        "apns-push-type": "alert",
+        "apns-priority": "10",
+        "apns-collapse-id": "incident-17",
+    }
+    aps = msg.apns.payload.aps
+    assert aps.alert == "✅ Acme Portal acknowledged by Robert"
+    assert aps.sound is None
+    assert aps.content_available is True
+    assert aps.thread_id == "incident-17"
+    assert aps.custom_data == {"interruption-level": "passive"}

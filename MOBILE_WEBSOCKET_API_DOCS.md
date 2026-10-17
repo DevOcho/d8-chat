@@ -159,7 +159,8 @@ Many of the events below utilize a standardized `Message` and `User` object payl
         "count": 1
       }
     ]
-  }
+  },
+  "incident": null // Incident Object on an Uptime Kuma DOWN message that opened one (see §6)
 }
 ```
 
@@ -705,3 +706,191 @@ When a message triggers a notification (e.g., a direct mention or a DM while the
   "tag": "channel_5"
 }
 ```
+
+---
+
+## 6. On-Call Paging
+
+Uptime Kuma posts monitor events into `#devops-uptime`. A **DOWN** event opens
+an *incident* and **pages** the on-call engineer. If nobody acknowledges, it
+escalates every 10 minutes (team lead → director → CEO). Pages are cumulative:
+everyone paged so far keeps being paged until someone **acknowledges**. The
+monitor's **UP** event resolves the incident automatically.
+
+The phone is the real pager, so the app should alert as loudly as the OS
+allows, keep alerting until the page is acknowledged or cleared, and let the
+user acknowledge from the alert.
+
+### `Incident` Object
+```json
+{
+  "id": 17,
+  "title": "Acme Portal",                      // monitor name
+  "details": "connect ECONNREFUSED 10.0.0.5:443",
+  "source": "uptime-kuma",
+  "source_url": "https://portal.acme.example",
+  "state": "triggered",                         // "triggered" | "acknowledged" | "resolved"
+  "current_level": 2,                           // last escalation level paged
+  "triggered_at": "2026-10-10T16:00:52.784415", // naive UTC, like every API timestamp
+  "next_escalation_at": "2026-10-10T16:11:55.713491", // null at the last level / once acknowledged
+  "acknowledged_at": null,
+  "acknowledged_by": null,                      // { "id", "username", "display_name" }
+  "resolved_at": null,
+  "resolved_by": null,                          // null + resolved_at set = resolved automatically
+  "channel_id": 4,
+  "channel_name": "devops-uptime",
+  "conversation_id_str": "channel_4",
+  "message_id": 123,                            // the DOWN message (deep link target)
+  "paged_users": [
+    { "id": 3, "username": "engineer", "display_name": "DevOps Engineer", "level": 1 },
+    { "id": 4, "username": "robert", "display_name": "Robert", "level": 2 }
+  ]
+}
+```
+
+### My on-call status
+`GET /api/v1/oncall/me`
+
+```json
+{
+  "on_call": { "schedule_id": 1, "schedule_name": "DevOps Primary", "until": "2026-10-12T12:00:00" },
+  "upcoming_shifts": [
+    {
+      "schedule_id": 1,
+      "schedule_name": "DevOps Primary",
+      "start": "2026-10-19T12:00:00",
+      "end": "2026-10-26T12:00:00",
+      "is_rotation_turn": true,   // false = only covering via an override
+      "overrides": [ { "id": 3, "user_id": 5, "start": "...", "end": "...", "reason": "Vacation" } ]
+    }
+  ],
+  "active_pages": [ ...Incident Objects paging me... ]
+}
+```
+`on_call` is `null` when the caller isn't on call right now. `upcoming_shifts`
+covers the next 8 weeks. Overrides are listed per shift; a shift can contain
+partial overrides.
+
+### Active pages
+`GET /api/v1/oncall/incidents/active` → `{ "incidents": [ ...Incident Objects... ] }`
+
+Incidents currently paging the caller (state `triggered`). **Call this on app
+launch, on foreground, and after every WebSocket reconnect.** Pub/sub delivery
+is at-most-once, so this is how a missed `page` frame is recovered.
+
+### Incident detail
+`GET /api/v1/oncall/incidents/<id>` → `{ "incident": { ...Incident Object..., "events": [...] } }`
+
+`events` is the timeline: `{ "kind", "at", "user_id", "details" }` where
+`kind` is one of `triggered`, `paged`, `escalated`, `level_skipped`,
+`no_oncall`, `fallback_admins`, `repeat_down`, `acknowledged`, `resolved`.
+Returns `403` unless the caller is a member of the incident's channel or in its
+escalation chain.
+
+### Acknowledge
+`POST /api/v1/oncall/incidents/<id>/ack` → `200 { "incident": {...} }`
+
+Stops paging and escalation **for everyone**. Allowed for anyone in the
+escalation chain (rotation members, the lead/director/CEO groups, anyone
+already paged, workspace admins). `403` outside the chain. `409` with the
+current `incident` if it's no longer `triggered` (someone acknowledged first,
+or it resolved). Treat that as success and stop alerting.
+
+### Resolve
+`POST /api/v1/oncall/incidents/<id>/resolve` → `200 { "incident": {...} }`
+
+Manual resolve, which is rarely needed because the UP event resolves
+automatically. Same permissions as acknowledge. `409` if it's already resolved.
+
+### Test my pager
+`POST /api/v1/oncall/test-page` → `204`
+
+Rings the caller's own pager: a `page` WS frame with `"test": true` on every
+socket, plus a page push to every registered device. No incident is created
+and nobody else is paged, so acknowledging a test page is purely local (don't
+call `/ack`, since its `id` is a string, not an incident). Rate limited to 6 per minute.
+
+### WS: `page`
+Sent to each paged user when they're paged, and **re-sent every ~60s** while
+the incident stays `triggered`. `repeat: true` marks a re-send. If the
+incident is already showing, just make sure the alert is still going; don't
+stack a second alert.
+```json
+{
+  "type": "page",
+  "repeat": false,
+  "test": false,            // true for "Test my pager" (no incident exists; "id" is a string)
+  "incident": { ...Incident Object... }
+}
+```
+
+### WS: `page_cleared`
+The page stopped: it was acknowledged by someone, or resolved. Stop the alarm and
+dismiss the alert for `incident_id`.
+```json
+{ "type": "page_cleared", "incident_id": 17, "state": "acknowledged", "incident": { ... } }
+```
+
+### Incident card on messages
+Every Message Object has an `incident` key. On the Uptime Kuma DOWN message
+that opened an incident, it is the Incident Object, so draw the card from it.
+On every other message it is `null`. It is set wherever messages are
+serialized: history (including `?around_message_id=`), threads, and the live
+`new_message` frame for the DOWN message itself. It reflects the incident's
+state when the message was fetched, so keep it current with `incident_update`.
+
+### WS: `incident_update`
+Broadcast to everyone subscribed to the incident's channel whenever its state
+changes. Use it to refresh the incident card under the DOWN message
+(`incident.message_id`).
+```json
+{ "type": "incident_update", "data": { ...Incident Object... } }
+```
+
+### Push: page
+Pages go to **every** registered device of each paged user. Unlike chat pushes,
+they are **not** suppressed when the user is active on the web. They are re-sent
+about every 60s until the page is acknowledged or cleared.
+
+- `notification`: `title` `"🚨 DOWN: <monitor>"`, `body` = details.
+- `data`: `{ "type": "page", "incident_id": "17", "conversation_id_str": "channel_4", "message_id": "123" }`
+  (a test page has `"test": "1"` and a string `incident_id`).
+- **Lifetime:** a page that can't be delivered expires after **120 s** (Android
+  `ttl`, iOS `apns-expiration`). A phone that was off or offline won't ring for
+  a page that ended long ago when it reconnects. Active pages repeat about
+  every 60 s, so this loses nothing.
+- **Android:** high-priority message with `ttl: 120s` and `collapse_key: incident-<id>`
+  (an offline phone gets only the newest page per incident). Notification
+  `channel_id` **`oncall_pages`**, priority `max`, tag `incident-<id>`, and
+  visibility **`public`**, so the monitor name shows on lock screens that hide
+  sensitive content. Create the `oncall_pages` channel with `IMPORTANCE_HIGH`, an alarm sound, and vibration,
+  and consider a full-screen intent. Repeats reuse the tag, so they replace the
+  notification and alert again instead of stacking.
+- **iOS:** `apns-priority: 10`, `apns-collapse-id: incident-<id>`,
+  `apns-expiration` 120 s out, and a **critical** alert (`interruption-level:
+  critical`, critical sound **`pager.caf`** at volume 1.0, category
+  **`ONCALL_PAGE`**). Bundle a `pager.caf` (under 30 s) in the app for the
+  alarm sound; without it iOS plays the default alert sound. Register the
+  `ONCALL_PAGE` category with an Acknowledge action that calls
+  `POST /api/v1/oncall/incidents/<id>/ack`. Until the app registers it, iOS ignores the category. A critical alert plays through silent mode and Do Not Disturb, but
+  **only once Apple grants the app the Critical Alerts entitlement**. Request it
+  from Apple early, because approval is manual. Without it, iOS delivers the page as a normal alert.
+
+### Push: page cleared
+`data`: `{ "type": "page_cleared", "incident_id": "17", "state": "acknowledged" }`
+(`state` is `acknowledged` or `resolved`).
+
+- **Android:** data-only, high priority, with no `notification`. Cancel the
+  notification tagged `incident-<id>` and stop any in-app alarm.
+- **iOS:** a quiet visible alert that **replaces the page in place**:
+  `apns-push-type: alert`, `apns-priority: 10`, and the page's own
+  `apns-collapse-id: incident-<id>`. The `aps` is `alert` `"✅ <monitor> acknowledged by <name>"`
+  (or `"✅ <monitor> resolved"`), `interruption-level: passive`, `thread-id:
+  incident-<id>`, no sound, and `content-available: 1`, so a running app still
+  gets the data and can stop its alarm. Unlike a background push, this
+  reaches a force-quit app, so a page someone else acknowledged doesn't stay
+  on the lock screen.
+- **No expiration**, unlike the page. A phone that received a page and then
+  went offline still gets the clear when it reconnects, so the stale page is
+  replaced. The cost is that a phone offline for the whole incident may show a
+  quiet ✅ for a page it never saw.

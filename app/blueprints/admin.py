@@ -16,6 +16,7 @@ from peewee import JOIN, IntegrityError, fn
 
 from ..audit import audit
 from ..chat_manager import chat_manager
+from ..groups import group_names_for, set_local_groups
 from ..models import (
     Channel,
     ChannelMember,
@@ -252,6 +253,8 @@ def edit_user(user_id):
         user.display_name = request.form.get("display_name")
         user.email = request.form.get("email")
         workspace_member.role = request.form.get("role")
+        old_groups = group_names_for(user)
+        local_groups = (request.form.get("local_groups") or "").split(",")
 
         new_password = request.form.get("password")
         if new_password:
@@ -262,6 +265,7 @@ def edit_user(user_id):
                     "admin/edit_user_content.html",
                     user=user,
                     workspace_member=workspace_member,
+                    user_groups=old_groups,
                 )
             user.set_password(new_password)
 
@@ -269,12 +273,15 @@ def edit_user(user_id):
             with db.atomic():
                 user.save()
                 workspace_member.save()
+                set_local_groups(user, local_groups)
             audit(
                 "user.updated",
                 target=user,
                 role_before=old_role,
                 role_after=workspace_member.role,
                 password_changed=bool(new_password),
+                groups_before=[name for name, _ in old_groups],
+                groups_after=[name for name, _ in group_names_for(user)],
             )
             flash(f"User '{user.username}' updated successfully.", "success")
         except IntegrityError:
@@ -284,6 +291,7 @@ def edit_user(user_id):
                 "admin/edit_user_content.html",
                 user=user,
                 workspace_member=workspace_member,
+                user_groups=old_groups,
             )
 
         response = make_response()
@@ -296,7 +304,12 @@ def edit_user(user_id):
         if "HX-Request" in request.headers
         else "admin/edit_user.html"
     )
-    return render_template(template_name, user=user, workspace_member=workspace_member)
+    return render_template(
+        template_name,
+        user=user,
+        workspace_member=workspace_member,
+        user_groups=group_names_for(user),
+    )
 
 
 def _render_user_list():

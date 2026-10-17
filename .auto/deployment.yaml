@@ -84,6 +84,11 @@ spec:
         # Mirrored on the new-d8 side as [helpdesk] chat_internal_key.
         - name: INTERNAL_NOTIFY_KEY
           value: "dev-helpdesk-notify-shared-secret"
+        # Bearer key for POST /api/v1/integrations/uptime-kuma. Uptime Kuma
+        # sends it via the webhook's Additional Headers as
+        # {"Authorization": "Bearer <key>"}.
+        - name: UPTIME_KUMA_WEBHOOK_KEY
+          value: "dev-uptime-kuma-webhook-key"
         # Path inside the pod where the Firebase service-account JSON is
         # mounted (see the firebase-credentials Secret volume below). When
         # the Secret is absent the file simply isn't there and

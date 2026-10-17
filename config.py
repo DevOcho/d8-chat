@@ -58,6 +58,14 @@ class Config:
     # rejects every request with 401.
     INTERNAL_NOTIFY_KEY = os.environ.get("INTERNAL_NOTIFY_KEY")
 
+    # Uptime Kuma webhook (POST /api/v1/integrations/uptime-kuma). Uptime Kuma
+    # sends this value as "Authorization: Bearer <key>" via the webhook's
+    # Additional Headers. If unset, the endpoint rejects every request with
+    # 401. Events are posted into UPTIME_KUMA_CHANNEL; DOWN events page the
+    # on-call engineer when that channel has an escalation policy.
+    UPTIME_KUMA_WEBHOOK_KEY = os.environ.get("UPTIME_KUMA_WEBHOOK_KEY")
+    UPTIME_KUMA_CHANNEL = os.environ.get("UPTIME_KUMA_CHANNEL", "devops-uptime")
+
     # flask-sock passes these to simple_websocket.Server. Listing "d8_sec" as a
     # known subprotocol lets the API WebSocket route negotiate it back to the
     # client when the client offers it via the Sec-WebSocket-Protocol header.
@@ -155,3 +163,7 @@ class TestConfig(Config):
 
     # Fixed shared secret for the internal notify endpoint in tests.
     INTERNAL_NOTIFY_KEY = "test-internal-notify-key"
+
+    # Fixed bearer key for the Uptime Kuma webhook in tests.
+    UPTIME_KUMA_WEBHOOK_KEY = "test-uptime-kuma-key"
+    UPTIME_KUMA_CHANNEL = "devops-uptime"

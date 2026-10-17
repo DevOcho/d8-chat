@@ -6,6 +6,7 @@
 from authlib.integrations.flask_client import OAuth
 from flask import current_app, redirect, session, url_for
 
+from .groups import sync_sso_groups
 from .models import (
     Channel,
     ChannelMember,
@@ -124,6 +125,28 @@ def _create_or_link_sso_user(sso_id, email, base_username, display_name):
     return user
 
 
+def groups_claim(token, user_info):
+    """The IdP's ``groups`` claim as a list, or ``None`` if it wasn't sent.
+
+    Authentik's default ``profile`` scope mapping includes ``groups`` in the
+    ID token. If a provider only exposes it from the userinfo endpoint, fall
+    back to fetching that. ``None`` (not ``[]``) tells
+    ``sync_sso_groups`` to leave existing memberships alone.
+    """
+    groups = user_info.get("groups")
+    if groups is None:
+        groups = (token.get("userinfo") or {}).get("groups")
+    if groups is None:
+        try:
+            groups = oauth.authentik.userinfo(token=token).get("groups")
+        except Exception:  # pylint: disable=broad-exception-caught
+            current_app.logger.warning(
+                "SSO userinfo fetch for groups failed", exc_info=True
+            )
+            return None
+    return groups if isinstance(groups, (list, str)) else None
+
+
 def handle_auth_callback():
     """
     Handles the authentication callback from the SSO provider.
@@ -158,6 +181,7 @@ def handle_auth_callback():
 
     with db.atomic():
         user = _create_or_link_sso_user(sso_id, email, base_username, display_name)
+        sync_sso_groups(user, groups_claim(token, user_info))
 
     # Refuse to log in a deactivated account even if the IdP still considers
     # them valid — we treat is_active as the local source of truth.

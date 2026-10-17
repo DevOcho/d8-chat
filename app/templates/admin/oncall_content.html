@@ -1,0 +1,173 @@
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>On-Call</h1>
+</div>
+{% include 'admin/_flash.html' %}
+<p class="text-muted">
+    Uptime Kuma posts monitor events into a channel. A <strong>DOWN</strong> event in a channel with an
+    escalation policy pages the on-call engineer and escalates every few minutes until someone
+    acknowledges. The matching <strong>UP</strong> event resolves the incident.
+</p>
+<!-- Schedules -->
+<div class="d-flex justify-content-between align-items-center mt-4">
+    <h3 class="mb-0">Rotations</h3>
+    <form action="{{ url_for('admin.oncall_create_schedule') }}"
+          method="POST"
+          class="d-flex gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text"
+               name="name"
+               class="form-control form-control-sm"
+               placeholder="New rotation name"
+               required>
+        <button type="submit" class="btn btn-sm btn-primary text-nowrap">Create</button>
+    </form>
+</div>
+<table class="table table-hover mt-3">
+    <thead>
+        <tr>
+            <th scope="col">Rotation</th>
+            <th scope="col">On call now</th>
+            <th scope="col">Shift ends</th>
+            <th scope="col">Members</th>
+            <th scope="col"></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in schedules %}
+            <tr>
+                <td>{{ row.schedule.name }}</td>
+                <td>
+                    {% if row.on_call %}
+                        <strong>{{ oncall_display_name(row.on_call) }}</strong>
+                    {% else %}
+                        <span class="badge bg-warning text-dark">Nobody — pages start at the no-on-call level</span>
+                    {% endif %}
+                    {% if row.override %}<span class="badge bg-info text-dark ms-1">override</span>{% endif %}
+                </td>
+                <td>{{ row.shift_end_local.strftime("%a %b %-d, %H:%M") }} ({{ row.schedule.timezone }})</td>
+                <td>{{ row.member_count }}</td>
+                <td class="text-end">
+                    <a href="{{ url_for('admin.oncall_schedule', schedule_id=row.schedule.id) }}"
+                       class="btn btn-sm btn-secondary">Manage</a>
+                </td>
+            </tr>
+        {% else %}
+            <tr>
+                <td colspan="5" class="text-center text-muted">No rotations yet.</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+<!-- Policies -->
+<div class="d-flex justify-content-between align-items-center mt-5">
+    <h3 class="mb-0">Escalation policies</h3>
+    <form action="{{ url_for('admin.oncall_create_policy') }}"
+          method="POST"
+          class="d-flex gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="text"
+               name="name"
+               class="form-control form-control-sm"
+               placeholder="New policy name"
+               required>
+        <select name="channel_id" class="form-select form-select-sm" required>
+            <option value="" selected disabled>Channel…</option>
+            {% for channel in channels %}<option value="{{ channel.id }}">#{{ channel.name }}</option>{% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm btn-primary text-nowrap">Create</button>
+    </form>
+</div>
+{% for row in policies %}
+    <div class="card mt-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <h5 class="card-title mb-1">
+                        {{ row.policy.name }}
+                        {% if not row.policy.is_active %}<span class="badge bg-secondary ms-1">Paging off</span>{% endif %}
+                    </h5>
+                    <div class="small text-muted mb-2">#{{ row.policy.channel.name }}</div>
+                </div>
+                <a href="{{ url_for('admin.oncall_policy', policy_id=row.policy.id) }}"
+                   class="btn btn-sm btn-secondary">Edit</a>
+            </div>
+            <ol class="mb-0">
+                {% for item in row.levels %}
+                    <li value="{{ item.level.level }}">
+                        {{ item.label }}
+                        <span class="text-muted small">
+                            {% if loop.first %}
+                                · immediately
+                            {% else %}
+                                · after {{ item.level.delay_minutes }} min
+                            {% endif %}
+                        </span>
+                    </li>
+                {% else %}
+                    <li class="text-muted">No levels — DOWN events will page workspace admins.</li>
+                {% endfor %}
+            </ol>
+        </div>
+    </div>
+{% else %}
+    <p class="text-muted mt-3">No escalation policies yet.</p>
+{% endfor %}
+<!-- Test page -->
+<h3 class="mt-5">Test a pager</h3>
+<p class="text-muted small mb-2">
+    Rings the user's pager with a fake incident so they can confirm the alarm plays on their machine.
+    Everyone on the rotation should do this once.
+</p>
+<form action="{{ url_for('admin.oncall_test_page') }}"
+      method="POST"
+      class="d-flex gap-2"
+      style="max-width: 480px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="user_id" class="form-select" required>
+        <option value="" selected disabled>Choose a user…</option>
+        {% for user in users %}
+            <option value="{{ user.id }}">{{ oncall_display_name(user) }} ({{ user.username }})</option>
+        {% endfor %}
+    </select>
+    <button type="submit" class="btn btn-warning text-nowrap">Send test page</button>
+</form>
+<!-- Incidents -->
+<h3 class="mt-5">Recent incidents</h3>
+<table class="table table-sm table-hover mt-3">
+    <thead>
+        <tr>
+            <th scope="col">#</th>
+            <th scope="col">Monitor</th>
+            <th scope="col">State</th>
+            <th scope="col">Triggered (UTC)</th>
+            <th scope="col">Acknowledged by</th>
+            <th scope="col">Resolved (UTC)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for incident in incidents %}
+            <tr>
+                <td>
+                    <a href="{{ url_for('admin.oncall_incident', incident_id=incident.id) }}">{{ incident.id }}</a>
+                </td>
+                <td>{{ incident.title }}</td>
+                <td>
+                    {% if incident.state == 'triggered' %}
+                        <span class="badge bg-danger">Paging</span>
+                    {% elif incident.state == 'acknowledged' %}
+                        <span class="badge bg-warning text-dark">Acknowledged</span>
+                    {% else %}
+                        <span class="badge bg-success">Resolved</span>
+                    {% endif %}
+                </td>
+                <td>{{ incident.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                <td>{{ oncall_display_name(incident.acknowledged_by) if incident.acknowledged_by else '—' }}</td>
+                <td>{{ incident.resolved_at.strftime("%Y-%m-%d %H:%M") if incident.resolved_at else '—' }}</td>
+            </tr>
+        {% else %}
+            <tr>
+                <td colspan="6" class="text-center text-muted">No incidents yet.</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>

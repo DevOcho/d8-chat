@@ -17,6 +17,7 @@ deactivated device stops eating delivery attempts.
 
 import logging
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,140 @@ def send_to_user(user_id, *, title, body, data=None):
     the mobile app can deep-link from the notification tap back to the
     right conversation.
     """
+
+    def build(messaging, token_strings, payload_data):
+        return messaging.MulticastMessage(
+            tokens=token_strings,
+            notification=messaging.Notification(title=title, body=body),
+            data=payload_data,
+        )
+
+    _send(user_id, data, build)
+
+
+# Android notification channel the mobile app registers for on-call pages
+# (high importance, alarm sound). Sent on every page so the app can route it
+# without inspecting the payload.
+PAGE_ANDROID_CHANNEL_ID = "oncall_pages"
+
+# iOS sound for pages, bundled by the mobile app. iOS plays the default alert
+# sound when the app doesn't ship a file by this name, so this is safe to send
+# before the app has it.
+PAGE_IOS_SOUND = "pager.caf"
+
+# iOS notification category on pages. The app registers it with an
+# Acknowledge action; iOS ignores a category the app hasn't registered.
+PAGE_IOS_CATEGORY = "ONCALL_PAGE"
+
+# How long FCM / APNs hold an undelivered page. By default they keep a push for
+# weeks, so a phone that was off would ring for a page that ended long ago once
+# it reconnects. Active pages repeat about every 60 s, so 120 s loses nothing.
+PAGE_TTL_SECONDS = 120
+
+
+def send_page(user_id, *, title, body, data=None):
+    """Send an on-call page: the most intrusive push the platforms allow.
+
+    Android: high-priority message on the ``oncall_pages`` channel with max
+    notification priority. iOS: priority-10 critical alert — it only breaks
+    through silent / Do Not Disturb once Apple grants the app the Critical
+    Alerts entitlement; until then iOS delivers it as a normal alert.
+    Repeat pages share a tag / collapse id per incident, so a re-send
+    re-alerts and replaces the previous notification instead of stacking.
+    Pages expire after ``PAGE_TTL_SECONDS`` undelivered, and the Android
+    collapse key keeps only the newest one per incident for an offline phone.
+    Unlike chat pushes, callers do not suppress pages for users active on
+    the web — a page should reach every device.
+    """
+    tag = f"incident-{(data or {}).get('incident_id', '')}"
+
+    def build(messaging, token_strings, payload_data):
+        return messaging.MulticastMessage(
+            tokens=token_strings,
+            notification=messaging.Notification(title=title, body=body),
+            data=payload_data,
+            android=messaging.AndroidConfig(
+                priority="high",
+                ttl=PAGE_TTL_SECONDS,
+                collapse_key=tag,
+                notification=messaging.AndroidNotification(
+                    channel_id=PAGE_ANDROID_CHANNEL_ID,
+                    tag=tag,
+                    priority="max",
+                    default_sound=True,
+                    default_vibrate_timings=True,
+                    # The default (private) shows "Contents hidden" on lock
+                    # screens that hide sensitive content.
+                    visibility="public",
+                ),
+            ),
+            apns=messaging.APNSConfig(
+                headers={
+                    "apns-priority": "10",
+                    "apns-collapse-id": tag,
+                    "apns-expiration": str(int(time.time()) + PAGE_TTL_SECONDS),
+                },
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(
+                        sound=messaging.CriticalSound(
+                            PAGE_IOS_SOUND, critical=True, volume=1.0
+                        ),
+                        category=PAGE_IOS_CATEGORY,
+                        thread_id=tag,
+                        custom_data={"interruption-level": "critical"},
+                    )
+                ),
+            ),
+        )
+
+    _send(user_id, data, build)
+
+
+def send_page_cleared(user_id, *, alert, data=None):
+    """Tell the user's devices a page was acknowledged/resolved.
+
+    Android: data-only, so the app dismisses the page notification by tag
+    (``incident-<id>``) and stops any in-app alarm. iOS: a quiet visible
+    ``alert`` with the page's collapse id, so it replaces the critical alert
+    in place. A background push alone is throttled and never reaches a
+    force-quit app, which would leave a cleared page on the lock screen;
+    content-available still hands the data to a running app. No expiration on
+    purpose: a phone that got the page and then went offline needs this clear,
+    however late, to replace the stale page alert.
+    """
+    tag = f"incident-{(data or {}).get('incident_id', '')}"
+
+    def build(messaging, token_strings, payload_data):
+        return messaging.MulticastMessage(
+            tokens=token_strings,
+            data=payload_data,
+            android=messaging.AndroidConfig(priority="high"),
+            apns=messaging.APNSConfig(
+                headers={
+                    "apns-push-type": "alert",
+                    "apns-priority": "10",
+                    "apns-collapse-id": tag,
+                },
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(
+                        alert=alert,
+                        content_available=True,
+                        thread_id=tag,
+                        custom_data={"interruption-level": "passive"},
+                    )
+                ),
+            ),
+        )
+
+    _send(user_id, data, build)
+
+
+def _send(user_id, data, build):
+    """Deliver ``build(messaging, tokens, data)`` to every device of ``user_id``.
+
+    Shared by every public sender: no-ops when unconfigured or tokenless,
+    stamps ``last_used_at`` on success, and prunes stale tokens.
+    """
     if not is_configured():
         return
 
@@ -119,11 +254,7 @@ def send_to_user(user_id, *, title, body, data=None):
         logger.warning("firebase-admin missing at send time; skipping push.")
         return
 
-    message = messaging.MulticastMessage(
-        tokens=token_strings,
-        notification=messaging.Notification(title=title, body=body),
-        data=payload_data,
-    )
+    message = build(messaging, token_strings, payload_data)
 
     try:
         response = messaging.send_each_for_multicast(message, app=_firebase_app)

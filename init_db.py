@@ -17,22 +17,32 @@ from app.models import (
     ChannelMember,
     Conversation,
     DeviceToken,
+    EscalationLevel,
+    EscalationPolicy,
     Hashtag,
+    Incident,
+    IncidentEvent,
+    IncidentPage,
     Mention,
     Message,
     MessageAttachment,
     MessageHashtag,
+    OnCallOverride,
+    OnCallSchedule,
+    OnCallScheduleMember,
     Poll,
     PollOption,
     Reaction,
     UploadedFile,
     User,
     UserConversationStatus,
+    UserGroup,
     Vote,
     Workspace,
     WorkspaceMember,
     db,
 )
+from app.services import oncall_service
 from config import Config
 
 ALL_MODELS = [
@@ -55,6 +65,15 @@ ALL_MODELS = [
     Vote,
     AuditLog,
     DeviceToken,
+    UserGroup,
+    OnCallSchedule,
+    OnCallScheduleMember,
+    OnCallOverride,
+    EscalationPolicy,
+    EscalationLevel,
+    Incident,
+    IncidentPage,
+    IncidentEvent,
 ]
 
 
@@ -196,6 +215,14 @@ def seed_initial_data():
     )
     ChannelMember.get_or_create(user=helpdesk_bot, channel=helpdesk_channel)
 
+    # Uptime Kuma channel + uptime-bot (POST /api/v1/integrations/uptime-kuma)
+    # and the default on-call rotation/escalation policy for it. Mirrored in
+    # migrations 0006/0007 for existing prod databases.
+    _uptime_bot, uptime_channel = oncall_service.ensure_uptime_channel(
+        workspace, Config.UPTIME_KUMA_CHANNEL or "devops-uptime"
+    )
+    oncall_service.ensure_default_oncall(uptime_channel)
+
     # Create the default admin user if they don't exist
     admin_user, created = User.get_or_create(
         username="admin",
@@ -226,6 +253,7 @@ def seed_initial_data():
         # Add admin to the default channels
         ChannelMember.create(user=admin_user, channel=general_channel)
         ChannelMember.create(user=admin_user, channel=announcements_channel)
+        ChannelMember.create(user=admin_user, channel=uptime_channel)
 
         creds_path = None
         if not from_env:

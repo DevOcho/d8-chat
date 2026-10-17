@@ -113,6 +113,14 @@
                                 Classic (Slack)
                             </option>
                         </select>
+                        <hr>
+                        <p class="small text-muted mb-2">On-call pages use a loud alarm that ignores this setting. Test that it plays here.</p>
+                        <button type="button"
+                                class="btn btn-sm btn-outline-danger"
+                                hx-post="{{ url_for('oncall.test_page') }}"
+                                hx-swap="none">
+                            <i class="bi bi-broadcast me-1"></i>Test my pager
+                        </button>
                     </div>
                 </div>
             </div>

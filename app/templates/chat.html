@@ -35,6 +35,19 @@
     <!-- channels -->
     <div class="sidebar channel-sidebar p-3">
         <h5 class="text-white">DevOcho</h5>
+        {% set my_oncall = oncall_status_for_user(g.user) %}
+        {% if my_oncall %}
+            <div class="oncall-badge mt-2"
+                 title="You get paged for DOWN alerts until the next handoff.">
+                <i class="bi bi-broadcast-pin me-1"></i>You're on call
+                <div class="oncall-badge-until">
+                    until
+                    <span class="incident-time"
+                          data-format="datetime"
+                          data-timestamp="{{ my_oncall.until_utc.isoformat() }}Z">{{ my_oncall.until_utc.strftime("%a %H:%M") }} UTC</span>
+                </div>
+            </div>
+        {% endif %}
         <hr class="text-secondary">
         <!-- Activity panel -->
         <ul id="activity-links" class="list-unstyled mb-4">
@@ -285,6 +298,24 @@
                 </div>
             </div>
         </div>
+        <!-- On-call pager (pager.js). Sits above everything, including modals. -->
+        <div id="pager-overlay"
+             class="pager-overlay"
+             role="alertdialog"
+             aria-modal="true"
+             aria-labelledby="pager-heading"
+             hidden>
+            <div class="pager-panel">
+                <div class="pager-heading" id="pager-heading">
+                    <i class="bi bi-broadcast me-2"></i>You are being paged
+                </div>
+                <div id="pager-sound-hint" class="pager-sound-hint" hidden>
+                    <i class="bi bi-volume-mute-fill me-1"></i>Your browser blocked the alarm sound. Click anywhere to start it.
+                </div>
+                <div id="pager-incidents"></div>
+                <div class="pager-footer">Acknowledging stops the alarm for everyone and tells the team you're on it.</div>
+            </div>
+        </div>
         <!-- Search Results Overlay -->
         <div id="search-results-overlay"
              style="display: none;
@@ -363,4 +394,5 @@
     <script type="module"
             src="{{ static_url('js/local/emoji-picker-element.bundle.min.js') }}"></script>
     <script src="{{ static_url('js/chat.js') }}" defer></script>
+    <script src="{{ static_url('js/pager.js') }}" defer></script>
 {% endblock %}

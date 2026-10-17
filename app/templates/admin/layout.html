@@ -30,6 +30,12 @@
                         <i class="bi bi-hash me-2"></i>Channel Management
                     </a>
                 </li>
+                <li class="nav-item mb-2">
+                    <a class="nav-link {% if request.endpoint and request.endpoint.startswith('admin.oncall') %}active text-white{% endif %}"
+                       href="{{ url_for('admin.oncall_overview') }}">
+                        <i class="bi bi-broadcast-pin me-2"></i>On-Call
+                    </a>
+                </li>
             </ul>
             <hr>
             <a href="{{ url_for('main.chat_interface') }}"

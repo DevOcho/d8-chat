@@ -28,6 +28,7 @@ from app.models import (
     ChannelMember,
     Conversation,
     DeviceToken,
+    Incident,
     Mention,
     Message,
     MessageAttachment,
@@ -181,6 +182,12 @@ def serialize_message(message, reactions_map, attachments_map):
             "user": user_to_dict(quoted_msg_obj.user) if quoted_msg_obj.user else None,
         }
 
+    # An Uptime Kuma DOWN message carries the incident it opened (the web's
+    # in-message card). Only uptime-bot messages can, so others cost no query.
+    from app.services import oncall_service
+
+    incident = oncall_service.incident_for_message(message)
+
     return {
         "id": message.id,
         "conversation_id_str": message.conversation.conversation_id_str,
@@ -201,6 +208,7 @@ def serialize_message(message, reactions_map, attachments_map):
         if message.last_reply_at
         else None,
         "poll": poll_data,
+        "incident": oncall_service.serialize_incident(incident) if incident else None,
     }
 
 
@@ -450,7 +458,8 @@ def get_me():
 @limiter.limit("20 per minute")
 def sso_exchange():
     """Exchanges an OIDC authorization code for our internal API token."""
-    from app.sso import _create_or_link_sso_user
+    from app.groups import sync_sso_groups
+    from app.sso import _create_or_link_sso_user, groups_claim
 
     data = request.get_json() or dict()
     code = data.get("code")
@@ -489,6 +498,7 @@ def sso_exchange():
     with db.atomic():
         # Leverage existing web SSO logic to link/create the user and auto-join channels
         user = _create_or_link_sso_user(sso_id, email, base_username, display_name)
+        sync_sso_groups(user, groups_claim(token_response, user_info))
 
     token = "d8_sec_" + generate_api_token(user.id)
     return jsonify({"api_token": token, "user": user_to_dict(user)}), 200
@@ -1648,6 +1658,234 @@ def internal_notify():
     chat_service.send_notifications_for_new_message(new_message, bot_user)
 
     return jsonify({"ok": True}), 200
+
+
+@api_v1_bp.route("/integrations/uptime-kuma", methods=["POST"])
+@limiter.limit("120 per minute", key_func=get_remote_address)
+def uptime_kuma_webhook():
+    """Uptime Kuma "Webhook" notification target.
+
+    Auth: ``Authorization: Bearer <UPTIME_KUMA_WEBHOOK_KEY>`` (set in Uptime
+    Kuma's "Additional Headers"), compared in constant time. Unset key → 401.
+
+    Body: Uptime Kuma's native payload, sent as ``application/json`` or as
+    ``multipart/form-data`` with the JSON in a ``data`` field::
+
+        {"heartbeat": {"status": 0, "msg": "...", ...},
+         "monitor": {"id": 12, "name": "Acme site", "url": "https://...", ...},
+         "msg": "[Acme site] [🔴 Down] ..."}
+
+    ``heartbeat.status``: 0 DOWN, 1 UP, 2 PENDING, 3 MAINTENANCE. The event
+    is posted into ``UPTIME_KUMA_CHANNEL`` as ``uptime-bot``; a DOWN opens an
+    incident and pages the on-call engineer when the channel has an
+    escalation policy, and the matching UP resolves it. See
+    ``oncall_service.handle_uptime_kuma_event``.
+    """
+    import json
+
+    from app.services import oncall_service
+
+    expected_key = current_app.config.get("UPTIME_KUMA_WEBHOOK_KEY")
+    auth_header = request.headers.get("Authorization", "")
+    provided_key = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+    if not expected_key or not hmac.compare_digest(expected_key, provided_key):
+        return jsonify({"error": "Unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if payload is None and request.form.get("data"):
+        try:
+            payload = json.loads(request.form["data"])
+        except ValueError:
+            payload = None
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Expected an Uptime Kuma JSON payload"}), 400
+
+    channel_name = current_app.config.get("UPTIME_KUMA_CHANNEL") or "devops-uptime"
+    channel = (
+        Channel.select()
+        .where(Channel.name == channel_name)
+        .order_by(Channel.id)
+        .first()
+    )
+    if channel is None:
+        return jsonify({"error": f"Channel #{channel_name} not found"}), 404
+    if oncall_service.uptime_bot() is None:
+        return jsonify({"error": "Uptime bot user not provisioned"}), 500
+
+    result = oncall_service.handle_uptime_kuma_event(payload, channel)
+    return jsonify({"ok": True, **result}), 200
+
+
+# --- On-call (mobile) ---
+
+
+def _api_incident_or_404(incident_id):
+    incident = Incident.get_or_none(Incident.id == incident_id)
+    if incident is None:
+        return None, (jsonify({"error": "Incident not found"}), 404)
+    return incident, None
+
+
+@api_v1_bp.route("/oncall/me", methods=["GET"])
+@api_token_required
+def oncall_me():
+    """The caller's on-call status, upcoming shifts and active pages."""
+    from app.models import OnCallSchedule
+    from app.services import oncall_service
+
+    now = utc_now()
+    status = oncall_service.oncall_status_for_user(g.api_user, now)
+    upcoming = []
+    for schedule in OnCallSchedule.select().order_by(OnCallSchedule.id):
+        for shift in oncall_service.upcoming_shifts(schedule, now):
+            rotation = shift["rotation_user"]
+            mine = [o for o in shift["overrides"] if o.user_id == g.api_user.id]
+            if (rotation and rotation.id == g.api_user.id) or mine:
+                upcoming.append(
+                    {
+                        "schedule_id": schedule.id,
+                        "schedule_name": schedule.name,
+                        "start": shift["start_utc"].isoformat(),
+                        "end": shift["end_utc"].isoformat(),
+                        "is_rotation_turn": bool(
+                            rotation and rotation.id == g.api_user.id
+                        ),
+                        "overrides": [
+                            {
+                                "id": o.id,
+                                "user_id": o.user_id,
+                                "start": o.start_at.isoformat(),
+                                "end": o.end_at.isoformat(),
+                                "reason": o.reason,
+                            }
+                            for o in shift["overrides"]
+                        ],
+                    }
+                )
+    return jsonify(
+        {
+            "on_call": (
+                {
+                    "schedule_id": status["schedule"].id,
+                    "schedule_name": status["schedule"].name,
+                    "until": status["until_utc"].isoformat(),
+                }
+                if status
+                else None
+            ),
+            "upcoming_shifts": upcoming,
+            "active_pages": [
+                oncall_service.serialize_incident(i)
+                for i in oncall_service.active_pages_for(g.api_user)
+            ],
+        }
+    ), 200
+
+
+@api_v1_bp.route("/oncall/incidents/active", methods=["GET"])
+@api_token_required
+def oncall_active_incidents():
+    """Incidents currently paging the caller (state ``triggered``)."""
+    from app.services import oncall_service
+
+    return jsonify(
+        {
+            "incidents": [
+                oncall_service.serialize_incident(i)
+                for i in oncall_service.active_pages_for(g.api_user)
+            ]
+        }
+    ), 200
+
+
+@api_v1_bp.route("/oncall/incidents/<int:incident_id>", methods=["GET"])
+@api_token_required
+def oncall_incident_detail(incident_id):
+    """One incident with its timeline. Visible to channel members and the chain."""
+    from app.services import oncall_service
+
+    incident, error = _api_incident_or_404(incident_id)
+    if error:
+        return error
+    if not (
+        user_has_conversation_access(
+            g.api_user, parse_conversation_id(f"channel_{incident.channel_id}")
+        )
+        or oncall_service.user_in_chain(incident, g.api_user)
+    ):
+        return jsonify({"error": "Forbidden"}), 403
+    data = oncall_service.serialize_incident(incident)
+    data["events"] = [
+        {
+            "kind": row["event"].kind,
+            "at": row["event"].created_at.isoformat(),
+            "user_id": row["event"].user_id,
+            "details": row["details"],
+        }
+        for row in oncall_service.incident_events(incident)
+    ]
+    return jsonify({"incident": data}), 200
+
+
+@api_v1_bp.route("/oncall/incidents/<int:incident_id>/ack", methods=["POST"])
+@api_token_required
+@limiter.limit("30 per minute", key_func=_api_user_key)
+def oncall_acknowledge(incident_id):
+    """Acknowledge: stops paging and escalation for everyone."""
+    from app.services import oncall_service
+
+    incident, error = _api_incident_or_404(incident_id)
+    if error:
+        return error
+    if not oncall_service.user_in_chain(incident, g.api_user):
+        return jsonify(
+            {"error": "You are not in this incident's escalation chain"}
+        ), 403
+    if not oncall_service.acknowledge_incident(incident, g.api_user):
+        return jsonify(
+            {
+                "error": f"Incident is already {incident.state}",
+                "incident": oncall_service.serialize_incident(incident),
+            }
+        ), 409
+    incident = Incident.get_by_id(incident.id)
+    return jsonify({"incident": oncall_service.serialize_incident(incident)}), 200
+
+
+@api_v1_bp.route("/oncall/incidents/<int:incident_id>/resolve", methods=["POST"])
+@api_token_required
+@limiter.limit("30 per minute", key_func=_api_user_key)
+def oncall_resolve(incident_id):
+    """Resolve by hand (normally the monitor's UP event resolves it)."""
+    from app.services import oncall_service
+
+    incident, error = _api_incident_or_404(incident_id)
+    if error:
+        return error
+    if not oncall_service.user_in_chain(incident, g.api_user):
+        return jsonify(
+            {"error": "You are not in this incident's escalation chain"}
+        ), 403
+    resolved = oncall_service.resolve_incident(incident, user=g.api_user)
+    if resolved is None:
+        return jsonify(
+            {
+                "error": "Incident is already resolved",
+                "incident": oncall_service.serialize_incident(incident),
+            }
+        ), 409
+    return jsonify({"incident": oncall_service.serialize_incident(resolved)}), 200
+
+
+@api_v1_bp.route("/oncall/test-page", methods=["POST"])
+@api_token_required
+@limiter.limit("6 per minute", key_func=_api_user_key)
+def oncall_test_page():
+    """Ring the caller's own pager (WS frame + push to every device)."""
+    from app.services import oncall_service
+
+    oncall_service.send_test_page(g.api_user)
+    return "", 204
 
 
 _VALID_DEVICE_PLATFORMS = frozenset({"ios", "android"})
