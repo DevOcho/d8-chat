@@ -57,6 +57,22 @@ class Config:
     OIDC_CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET")
     OIDC_ISSUER_URL = os.environ.get("OIDC_ISSUER_URL")
 
+    # Authentik account sync (app/services/authentik_sync.py). With a token
+    # set, d8-chat checks Authentik every AUTHENTIK_SYNC_INTERVAL_SECONDS and
+    # deactivates anyone deactivated or deleted there (and mirrors their
+    # groups). The API URL defaults to OIDC_ISSUER_URL's origin. The subject
+    # field is the Authentik user field equal to the OIDC "sub" d8-chat stores
+    # (uid for the provider's default "hashed user ID" subject mode).
+    AUTHENTIK_API_TOKEN = os.environ.get("AUTHENTIK_API_TOKEN")
+    AUTHENTIK_API_URL = os.environ.get("AUTHENTIK_API_URL")
+    AUTHENTIK_SUBJECT_FIELD = os.environ.get("AUTHENTIK_SUBJECT_FIELD", "uid")
+    AUTHENTIK_SYNC_INTERVAL_SECONDS = int(
+        os.environ.get("AUTHENTIK_SYNC_INTERVAL_SECONDS", "60")
+    )
+    AUTHENTIK_SYNC_GROUPS = (
+        os.environ.get("AUTHENTIK_SYNC_GROUPS", "true").lower() == "true"
+    )
+
     # Object storage (any S3 API: Garage in k8s, MinIO in older setups).
     # Env: S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME, S3_SECURE,
     # S3_PUBLIC_URL, used only once S3_ENDPOINT is set (see s3_setting);

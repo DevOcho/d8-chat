@@ -876,6 +876,16 @@ def create_app(config_class=Config, start_listener=True):
             target=oncall_service.run_ticker, args=(app,), daemon=True
         ).start()
 
+        # Authentik account sync: deactivates people deactivated or deleted
+        # in Authentik. One loop per worker; a Valkey lock runs one pass per
+        # interval cluster-wide.
+        if app.config.get("AUTHENTIK_API_TOKEN"):
+            from .services import authentik_sync
+
+            threading.Thread(
+                target=authentik_sync.run_sync_loop, args=(app,), daemon=True
+            ).start()
+
     register_template_filters(app)
     register_template_globals(app)
     register_blueprints(app)

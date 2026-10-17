@@ -235,6 +235,8 @@ at-most-once, so gaps are the client's job to fill).
 - `GET /healthz` — realtime-aware readiness check (Redis ping + listener heartbeat age + trivial DB query); wired to the k8s readiness probe, not liveness
 - `app/chat_service.py` — Business logic for message creation, mentions, notifications
 - `app/sso.py` — OIDC SSO integration (Authlib); syncs the IdP `groups` claim into `UserGroup` (`app/groups.py`) at each login
+- `app/services/authentik_sync.py` — when `AUTHENTIK_API_TOKEN` is set, checks Authentik every minute (one pass cluster-wide via a Valkey lock): SSO users deactivated or deleted there are deactivated here, and their groups are mirrored. Never reactivates; refuses to act on an incomplete or unmatched listing
+- `app/services/account_service.py` — `deactivate_user`: `is_active = False` (enforced by `User.get_active_by_id` at every session, API-token, SSO and WebSocket-frame entry point), push tokens deleted, sockets closed on every worker (`chat_manager.disconnect_user`)
 - `app/services/oncall_service.py` — On-call paging (see `ONCALL_PLAN.md`): weekly rotations + overrides, escalation policies, incidents opened by Uptime Kuma DOWN events. Each worker runs `run_ticker` (started beside the listener) to escalate unacknowledged incidents and re-send pages; DB compare-and-set claims keep that safe with many workers. The web pager is `static/js/pager.js`
 - `config.py` — `Config` (production) and `TestConfig` (SQLite, no Redis) classes
 
@@ -265,6 +267,8 @@ Copy `example.env` to `.env`. Required variables:
   are moving from MinIO to Garage, see `d8-chat-devops`.
 
 Optional SSO: `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`
+
+Optional Authentik account sync: `AUTHENTIK_API_TOKEN` (a service account that can view users); `AUTHENTIK_API_URL` (defaults to the issuer's origin), `AUTHENTIK_SUBJECT_FIELD` (default `uid`), `AUTHENTIK_SYNC_INTERVAL_SECONDS` (60), `AUTHENTIK_SYNC_GROUPS` (`true`)
 
 ## Testing Notes
 
