@@ -1697,6 +1697,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // drops surface only as a close frame (e.g. a server-initiated 1011).
     document.body.addEventListener('htmx:wsClose', function(evt) {
         const code = evt.detail && evt.detail.event && evt.detail.event.code;
+        // The server refused the socket because the session is gone (logged
+        // out elsewhere, deactivated, or a dev DB reset). Reload so the login
+        // redirect kicks in instead of leaving a chat page with no realtime.
+        // The page and the socket check the same session, so this can't loop.
+        if (code === 1008 && evt.detail.event.reason === 'Not authenticated') {
+            window.location.reload();
+            return;
+        }
         // Clean closes (normal / going-away) and auth rejects don't reconnect,
         // so don't nag the user with the reconnect bar for them.
         if (code === 1000 || code === 1001 || code === 1008) return;

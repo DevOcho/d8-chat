@@ -43,7 +43,7 @@ from .models import (
     utc_now,
 )
 from .services import chat_service
-from .ws_utils import harden_ws
+from .ws_utils import harden_ws, reject_ws
 
 # This blueprint now only handles the main chat interface and WebSocket.
 main_bp = Blueprint("main", __name__)
@@ -1102,7 +1102,7 @@ def chat(ws):
     """Handles all real-time WebSocket communication."""
     user = User.get_active_by_id(session.get("user_id"))
     if not user:
-        ws.close(reason=1008, message="Not authenticated")
+        reject_ws(ws, "Not authenticated")
         return
 
     # Origin check to prevent Cross-Site WebSocket Hijacking (CSWSH). The
@@ -1121,7 +1121,7 @@ def chat(ws):
         current_app.logger.warning(
             f"WebSocket connection rejected: origin {origin!r} not in {sorted(acceptable)!r}"
         )
-        ws.close(reason=1008, message="Invalid origin")
+        reject_ws(ws, "Invalid origin")
         return
 
     _setup_ws(ws, user)
@@ -1157,12 +1157,12 @@ def api_ws(ws):
 
     user_id = verify_api_token(token) if token else None
     if not user_id:
-        ws.close(reason=1008, message="Invalid or missing token")
+        reject_ws(ws, "Invalid or missing token")
         return
 
     user = User.get_active_by_id(user_id)
     if not user:
-        ws.close(reason=1008, message="User not found")
+        reject_ws(ws, "User not found")
         return
 
     _setup_ws(ws, user, is_api=True)

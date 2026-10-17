@@ -1,5 +1,6 @@
 """Helpers for hardening flask-sock / simple_websocket connections."""
 
+import socket
 import threading
 
 # Concrete lock types, used to tell a real installed lock apart from a test
@@ -55,3 +56,22 @@ def harden_ws(ws):
     except Exception:  # pragma: no cover - defensive; socket shape may vary
         pass
     return lock
+
+
+def reject_ws(ws, message):
+    """Close a just-upgraded socket with 1008 (policy violation).
+
+    Under the Werkzeug dev server, returning from the handler makes Werkzeug
+    write an HTTP ``200`` response onto the upgraded socket right after our
+    close frame. Browsers parse those bytes as a corrupt frame and report 1006
+    instead of 1008, so the client treats the reject as a network drop and
+    reconnects forever. Shutting down the write side makes that trailing write
+    fail as a dropped connection, which Werkzeug ignores. gunicorn (production)
+    never writes the response, so this is a no-op there.
+    """
+    ws.close(reason=1008, message=message)
+    if getattr(ws, "mode", None) == "werkzeug":
+        try:
+            ws.sock.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass

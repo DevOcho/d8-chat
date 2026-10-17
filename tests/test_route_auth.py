@@ -240,6 +240,29 @@ def test_chat_websocket_rejects_an_anonymous_connection(app):
     assert ws.close.call_args.kwargs["reason"] == 1008
 
 
+@pytest.mark.parametrize(
+    ("mode", "shut_down"), [("werkzeug", True), ("gunicorn", False)]
+)
+def test_websocket_reject_keeps_the_dev_server_from_corrupting_the_close(
+    app, mode, shut_down
+):
+    """Werkzeug writes an HTTP response after the handler returns; browsers read
+    it as a bad frame and report 1006, which the client retries forever."""
+    import socket
+
+    from app.routes import chat
+
+    ws = _mock_ws()
+    ws.mode = mode
+    with app.test_request_context("/ws/chat", headers={"Origin": "http://localhost"}):
+        chat(ws)
+    assert ws.close.call_args.kwargs["reason"] == 1008
+    if shut_down:
+        ws.sock.shutdown.assert_called_once_with(socket.SHUT_WR)
+    else:
+        ws.sock.shutdown.assert_not_called()
+
+
 def test_chat_websocket_rejects_a_foreign_origin(app):
     """A valid session is not enough — a cross-site origin must still be closed."""
     from app.routes import chat
