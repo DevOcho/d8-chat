@@ -1,5 +1,5 @@
 """
-Admin actions: create user, role change.
+Admin actions: create user, dashboard.
 
 These exercise the audit-log path too — every admin mutation should write an
 ``AuditLog`` row, but verifying that requires DB access we don't have from
@@ -13,21 +13,31 @@ from playwright.sync_api import Page, expect
 
 
 def test_admin_creates_user_via_dashboard(logged_in_page: Page):
+    page = logged_in_page
     # Random suffix so the test is repeatable on the same DB.
     suffix = secrets.token_hex(4)
     new_username = f"e2euser_{suffix}"
     new_email = f"e2euser_{suffix}@example.invalid"
 
-    logged_in_page.goto("/admin/users/create")
-    logged_in_page.fill('input[name="username"]', new_username)
-    logged_in_page.fill('input[name="email"]', new_email)
-    logged_in_page.fill('input[name="password"]', "TempPassword12345!")
-    logged_in_page.fill('input[name="display_name"]', f"E2E User {suffix}")
-    logged_in_page.click('button[type="submit"]')
+    # The admin UI swaps pages into #admin-content with HTMX rather than
+    # navigating, so drive it the way an admin does: Users → Create New User.
+    page.goto("/admin/users")
+    content = page.locator("#admin-content")
+    content.get_by_role("link", name="Create New User").click()
+    expect(content.get_by_role("heading", name="Create a New User")).to_be_visible()
 
-    # The admin user list should now contain the new user.
-    logged_in_page.wait_for_url("**/admin/users", timeout=10_000)
-    expect(logged_in_page.locator(f"text={new_username}")).to_be_visible(timeout=10_000)
+    content.locator('input[name="username"]').fill(new_username)
+    content.locator('input[name="email"]').fill(new_email)
+    content.locator('input[name="password"]').fill("TempPassword12345!")
+    content.locator('input[name="display_name"]').fill(f"E2E User {suffix}")
+    content.get_by_role("button", name="Create User").click()
+
+    # The response swaps the user list back in, with a success flash and the
+    # new user in the table.
+    expect(content.locator(".alert-success")).to_contain_text(
+        f"User '{new_username}' created successfully", timeout=10_000
+    )
+    expect(content.get_by_role("cell", name=new_username, exact=True)).to_be_visible()
 
 
 def test_admin_dashboard_loads(logged_in_page: Page):

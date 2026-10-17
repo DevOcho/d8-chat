@@ -4,7 +4,7 @@ Playwright fixtures and configuration.
 Tests in this directory are marked ``e2e`` and excluded from the default
 ``pytest`` run. Opt in with::
 
-    pytest -m e2e tests/e2e/
+    pytest -o addopts= -m e2e tests/e2e/
 
 Required environment variables:
 
@@ -17,18 +17,35 @@ Required environment variables:
 The Playwright browser binaries must be installed once::
 
     bin/python -m playwright install chromium
+
+Logins are rationed: ``POST /login`` is rate limited to 5/min and 50/hour per
+client IP, so every account logs in through the form **once per session** and
+later contexts reuse its cookies (``storage_state``). Only ``test_auth.py``
+drives the login form itself.
 """
 
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
-from typing import Iterator
+from typing import Callable
 
 import pytest
-from playwright.sync_api import BrowserContext, Page
+from playwright.sync_api import Browser, BrowserContext, Page
+
+from .helpers import (
+    WS_FRAME_RECORDER,
+    E2EUser,
+    current_user_id,
+    login,
+    wait_for_chat_ready,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Satisfies the password policy (12+ chars, a letter and a number).
+E2E_USER_PASSWORD = "E2e-password-12345"
 
 
 def pytest_collection_modifyitems(config, items):
@@ -71,6 +88,13 @@ def admin_credentials() -> tuple[str, str]:
 
 
 @pytest.fixture(scope="session")
+def browser_type_launch_args(browser_type_launch_args):
+    """Mute the browser: the on-call pager plays a siren, even headed."""
+    args = list(browser_type_launch_args.get("args", []))
+    return {**browser_type_launch_args, "args": [*args, "--mute-audio"]}
+
+
+@pytest.fixture(scope="session")
 def browser_context_args(browser_context_args, base_url):  # noqa: PLR0913
     """
     Extend pytest-playwright's default browser context args.
@@ -88,10 +112,10 @@ def browser_context_args(browser_context_args, base_url):  # noqa: PLR0913
 
 
 @pytest.fixture
-def fresh_context(context: BrowserContext) -> Iterator[BrowserContext]:
+def fresh_context(context: BrowserContext) -> BrowserContext:
     """A browser context with no leaked state from previous tests."""
     context.clear_cookies()
-    yield context
+    return context
 
 
 @pytest.fixture
@@ -100,21 +124,138 @@ def fixture_path():
     return lambda name: str(FIXTURES_DIR / name)
 
 
-# --- Login helpers ----------------------------------------------------------
+# --- Accounts (one form login per account per session) ----------------------
 
 
-def _login(page: Page, username: str, password: str) -> None:
-    """Submit the login form on ``/`` and wait for the redirect to ``/chat``."""
-    page.goto("/")
-    page.fill('input[name="username"]', username)
-    page.fill('input[name="password"]', password)
-    page.click('button[type="submit"]:has-text("Login")')
-    page.wait_for_url("**/chat", timeout=10_000)
+def _login_once(browser: Browser, context_args: dict, username: str, password: str):
+    """Log in through the form in a throwaway context; return its cookies and
+    the user's id."""
+    context = browser.new_context(**context_args)
+    try:
+        page = context.new_page()
+        login(page, username, password)
+        user_id = current_user_id(page)
+        return context.storage_state(), user_id
+    finally:
+        context.close()
+
+
+@pytest.fixture(scope="session")
+def admin_storage_state(browser, browser_context_args, admin_credentials) -> dict:
+    """Cookies for a logged-in admin session, shared by the whole run."""
+    state, _ = _login_once(browser, browser_context_args, *admin_credentials)
+    return state
+
+
+@pytest.fixture(scope="session")
+def admin_api(browser, browser_context_args, admin_storage_state):
+    """An admin-authenticated ``APIRequestContext`` plus its CSRF token."""
+    context = browser.new_context(
+        **browser_context_args, storage_state=admin_storage_state
+    )
+    page = context.new_page()
+    page.goto("/admin/")
+    token = page.locator('meta[name="csrf-token"]').get_attribute("content")
+    page.close()
+    yield context.request, token
+    context.close()
+
+
+@pytest.fixture(scope="session")
+def create_user(
+    admin_api, browser, browser_context_args, base_url
+) -> Callable[[str], E2EUser]:
+    """Factory: create a brand-new member through the admin UI's endpoint and
+    log it in once. Fresh accounts have no unread history, no DMs, no paging
+    rotation and default preferences, so tests start from a known state."""
+    request, token = admin_api
+
+    def _create(label: str) -> E2EUser:
+        suffix = secrets.token_hex(4)
+        user = E2EUser(
+            username=f"e2e_{label}_{suffix}",
+            password=E2E_USER_PASSWORD,
+            display_name=f"E2E {label.title()} {suffix}",
+        )
+        response = request.post(
+            "/admin/users/create",
+            form={
+                "username": user.username,
+                "email": f"{user.username}@example.invalid",
+                "password": user.password,
+                "display_name": user.display_name,
+                "role": "member",
+            },
+            # Flask-WTF's strict-HTTPS CSRF check also wants a same-origin Referer.
+            headers={
+                "X-CSRFToken": token,
+                "HX-Request": "true",
+                "Referer": f"{base_url}/admin/users",
+            },
+        )
+        assert response.ok and "created successfully" in response.text(), (
+            f"creating {user.username} failed: HTTP {response.status}"
+        )
+        user.storage_state, user.user_id = _login_once(
+            browser, browser_context_args, user.username, user.password
+        )
+        return user
+
+    return _create
+
+
+@pytest.fixture(scope="session")
+def user_a(create_user) -> E2EUser:
+    """First fresh account for multi-user realtime tests."""
+    return create_user("alice")
+
+
+@pytest.fixture(scope="session")
+def user_b(create_user) -> E2EUser:
+    """Second fresh account for multi-user realtime tests."""
+    return create_user("bob")
+
+
+# --- Pages ------------------------------------------------------------------
 
 
 @pytest.fixture
-def logged_in_page(page: Page, admin_credentials) -> Page:
-    """Returns a Page that's already authenticated as the admin user."""
-    username, password = admin_credentials
-    _login(page, username, password)
+def chat_as(new_context):
+    """Factory: open ``/chat`` as ``user`` in its own browser context, ready
+    to use (conversation loaded, composer initialized, socket registered).
+
+    Pass ``tab_of=<page>`` to open another tab in that page's context (same
+    login, separate socket) instead, or ``on_context`` to set up a new context
+    (e.g. ``route_web_socket``) before its first page loads.
+    """
+
+    def _open(
+        user: E2EUser,
+        *,
+        tab_of: Page | None = None,
+        on_context: Callable[[BrowserContext], None] | None = None,
+    ) -> Page:
+        if tab_of is not None:
+            context = tab_of.context
+        else:
+            context = new_context(storage_state=user.storage_state)
+            context.add_init_script(WS_FRAME_RECORDER)
+            if on_context is not None:
+                on_context(context)
+        page = context.new_page()
+        page.goto("/chat")
+        wait_for_chat_ready(page, user.user_id)
+        return page
+
+    return _open
+
+
+@pytest.fixture
+def logged_in_page(new_context, admin_storage_state) -> Page:
+    """Returns a Page on ``/chat`` that's already authenticated as the admin."""
+    context = new_context(storage_state=admin_storage_state)
+    context.add_init_script(WS_FRAME_RECORDER)
+    page = context.new_page()
+    page.goto("/chat")
+    wait_for_chat_ready(page)
     return page
