@@ -406,7 +406,12 @@ const createMentionManager = function(editorState) {
         markdownView.addEventListener('keydown', handleKeyDown);
         state.popoverContainer.addEventListener('click', (e) => {
             const item = e.target.closest('.mention-suggestion-item');
-            if (item) selectItem(item);
+            if (!item) return;
+            // selectItem empties the popover, detaching the clicked item while
+            // the click is still bubbling. htmx's submitter tracking on the
+            // enclosing form would then throw on the detached button.
+            e.stopPropagation();
+            selectItem(item);
         });
     };
     const handleInput = function() {
@@ -445,7 +450,9 @@ const createMentionManager = function(editorState) {
         let activeItem = state.popoverContainer.querySelector('.mention-suggestion-item.active');
         if (['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
             e.preventDefault();
-            e.stopPropagation();
+            // Immediate: the editor's own keydown handler (same element) would
+            // otherwise see Enter with the popover closed and send the message.
+            e.stopImmediatePropagation();
             if (e.key === 'ArrowDown') {
                 const next = activeItem.nextElementSibling || items[0];
                 activeItem.classList.remove('active');
@@ -2021,11 +2028,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- Re-initialize components for edited messages received via WebSocket ---
         if (target && target.classList && target.classList.contains('message-container')) {
-            initializeTooltips(target);
+            // An edit is an outerHTML swap, and htmx reports the replaced node,
+            // already detached. Work on its live replacement, or the edited
+            // message keeps its UTC time and loses its tooltips/highlights.
+            const live = target.isConnected ? target : document.getElementById(target.id);
+            if (live) {
+                initializeTooltips(live);
+                updateReactionHighlights(live);
+                initializeReactionPopovers(live);
+                processCodeBlocks(live);
+                formatLocalTimes(live);
+            }
+        }
+
+        // --- Reaction updates ---
+        // The server renders a reaction change once, for the person who
+        // reacted, so its `user-reacted` highlights are theirs. Recompute them
+        // for this viewer.
+        if (target && target.id && target.id.startsWith('reactions-container-')) {
             updateReactionHighlights(target);
-            initializeReactionPopovers(target);
-            processCodeBlocks(target);
-            formatLocalTimes(target);
         }
 
         // --- Scrolling logic for new messages in a thread ---
@@ -2067,14 +2088,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 else seenIds.add(el.id);
             });
             // Same for date dividers: the server sends one with the first
-            // message of a new day, so a deduped message can leave its divider
-            // stranded next to an identical one.
+            // message of a new day, so a message delivered twice brings its
+            // divider twice. The duplicate can land after the first copy of the
+            // message, not next to the original divider, so drop any divider
+            // that repeats the label of the divider before it. Dividers are in
+            // date order, so a repeated label is always the same day.
+            let lastDividerLabel = null;
             target.querySelectorAll('.date-separator').forEach((el) => {
-                const prev = el.previousElementSibling;
-                if (prev && prev.classList.contains('date-separator') &&
-                    prev.textContent.trim() === el.textContent.trim()) {
-                    el.remove();
-                }
+                const label = el.textContent.trim();
+                if (label === lastDividerLabel) el.remove();
+                else lastDividerLabel = label;
             });
 
             // Localize timestamps on every freshly appended message. The server
@@ -2338,9 +2361,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const send = (state) => {
             // keepalive lets a final ping survive a tab closing/navigating away.
+            // This fetch bypasses htmx's configRequest hook, so the CSRF token
+            // has to be added by hand; without it every ping was a 400.
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
             fetch(activityUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
+                },
                 body: new URLSearchParams({ state }),
                 keepalive: true,
             }).catch(() => {});
