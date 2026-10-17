@@ -281,6 +281,27 @@ export function profileHeader(user = ME) {
  * partials/chat_input_default.html, including the trailing inline script that
  * dispatches `initializeEditor` once htmx swaps the partial in.
  */
+// The two preference selects from partials/profile_details.html. Changing one
+// PUTs to its route, which answers with an HX-Trigger event (preferenceReply).
+export function preferenceSelects({ sendOnEnter = true, sound = 'd8-notification.mp3' } = {}) {
+    return `<select class="form-select" id="send-key-select" name="send_on_enter"
+                    hx-put="/profile/send_on_enter" hx-trigger="change" hx-swap="none">
+                <option value="true" ${sendOnEnter ? 'selected' : ''}>Enter sends (Shift+Enter for a new line)</option>
+                <option value="false" ${sendOnEnter ? '' : 'selected'}>Ctrl+Enter sends (Enter for a new line)</option>
+            </select>
+            <select class="form-select" id="notification-sound-select" name="sound"
+                    hx-put="/profile/notification_sound" hx-trigger="change" hx-swap="none">
+                <option value="d8-notification.mp3" ${sound === 'd8-notification.mp3' ? 'selected' : ''}>Default (D8)</option>
+                <option value="slack-notification.mp3" ${sound === 'slack-notification.mp3' ? 'selected' : ''}>Slack</option>
+            </select>`;
+}
+
+// What the preference routes in blueprints/profile.py answer: an empty body
+// and an HX-Trigger header carrying the new value.
+export function preferenceReply(event, value) {
+    return { status: 200, body: '', headers: { 'HX-Trigger': JSON.stringify({ [event]: value }) } };
+}
+
 export function chatInputDefault({ wysiwyg = true } = {}) {
     return `<div id="chat-input-container" class="chat-input-form">
     <div id="typing-indicator" class="text-muted small"></div>

@@ -4,7 +4,9 @@
 // and markdown modes) and sending over HTTP POST.
 import { describe, expect, it } from 'vitest';
 import { createPage } from './helpers/env.js';
-import { ME, chatInputDefault, chatPage, conversationPane, mentionResults } from './helpers/fixtures.js';
+import {
+    ME, chatInputDefault, chatPage, conversationPane, mentionResults, preferenceReply, preferenceSelects,
+} from './helpers/fixtures.js';
 
 const JOSUE = { id: 7, username: 'josue_sahad', displayName: 'Josue' };
 const JOSE = { id: 8, username: 'jose', displayName: 'Jose' };
@@ -288,5 +290,216 @@ describe('sending', () => {
         await env.flush();
         expect(messagePosts(env)).toEqual([]);
         expect(env.toasts.map((t) => t.title)).toEqual(['Not connected']);
+    });
+});
+
+// A page with the Preferences selects (partials/profile_details.html) next to
+// the composer, the routes answering as blueprints/profile.py does.
+async function prefsEnv({ sendOnEnter = true, wysiwyg = true } = {}) {
+    const env = await createPage({
+        html: chatPage({
+            pane: conversationPane({ convIdStr: 'channel_1' }),
+            inputLoader: true,
+            user: { ...ME, sendOnEnter },
+            extraMain: preferenceSelects({ sendOnEnter }),
+        }),
+        xhrRoutes: [
+            { match: '/chat/input/default', reply: { body: chatInputDefault({ wysiwyg }) } },
+            {
+                match: '/profile/send_on_enter',
+                reply: (x) => preferenceReply(
+                    'update-send-on-enter', new URLSearchParams(x.body).get('send_on_enter') === 'true',
+                ),
+            },
+        ],
+    });
+    await env.openSocket();
+    await env.tick(50);
+    env.editor = env.$('#wysiwyg-editor');
+    env.markdown = env.$('#markdown-toggle-view');
+    return env;
+}
+
+// Pick an option the way a person does; htmx PUTs it on change.
+async function choose(env, selector, value) {
+    const select = env.$(selector);
+    select.value = value;
+    select.dispatchEvent(new env.window.Event('change', { bubbles: true }));
+    await env.tick(20);
+}
+
+describe('send-key preference', () => {
+    // Regression (fixed): the listener read evt.detail['update-send-on-enter'],
+    // but htmx delivers a plain HX-Trigger value as evt.detail.value, so every
+    // live change resolved to "Enter sends" and Ctrl+Enter needed a reload.
+    it('switching to Ctrl+Enter applies without a reload', async () => {
+        const env = await prefsEnv({ sendOnEnter: true });
+        await typeRich(env, 'draft');
+        await choose(env, '#send-key-select', 'false');
+        expect(env.xhrs(/send_on_enter/).map((x) => x.method)).toEqual(['PUT']);
+        expect(env.$('main.main-content').dataset.sendOnEnter).toBe('false');
+        expect(env.$('#send-button').title).toBe('Send (Ctrl+Enter)');
+
+        key(env, env.editor, 'Enter');
+        await env.flush();
+        expect(messagePosts(env)).toEqual([]);
+        key(env, env.editor, 'Enter', { ctrlKey: true });
+        await env.flush();
+        expect(messagePosts(env)).toHaveLength(1);
+    });
+
+    it('switching back to Enter-sends applies without a reload', async () => {
+        const env = await prefsEnv({ sendOnEnter: false });
+        await typeRich(env, 'draft');
+        await choose(env, '#send-key-select', 'true');
+        expect(env.$('main.main-content').dataset.sendOnEnter).toBe('true');
+        expect(env.$('#send-button').title).toBe('Send (Enter)');
+
+        key(env, env.editor, 'Enter');
+        await env.flush();
+        expect(messagePosts(env)).toHaveLength(1);
+    });
+});
+
+describe('lists (rich editor)', () => {
+    // jsdom has no editing commands; record the one the editor asks for. The
+    // real result (a new <li>, or leaving the list) is in tests/e2e.
+    function recordCommands(env) {
+        const commands = [];
+        env.document.execCommand = (cmd) => {
+            commands.push(cmd);
+            return true;
+        };
+        return commands;
+    }
+
+    it('Shift+Enter in a bullet starts the next bullet instead of a line break (Enter sends)', async () => {
+        const env = await composerEnv();
+        await typeRich(env, '<ul><li>one</li></ul>');
+        const commands = recordCommands(env);
+        const evt = key(env, env.editor, 'Enter', { shiftKey: true });
+        await env.flush();
+        expect(evt.defaultPrevented).toBe(true);
+        expect(commands).toEqual(['insertParagraph']);
+        expect(messagePosts(env)).toEqual([]);
+    });
+
+    it('works in a numbered list too', async () => {
+        const env = await composerEnv();
+        await typeRich(env, '<ol><li>first</li></ol>');
+        const commands = recordCommands(env);
+        key(env, env.editor, 'Enter', { shiftKey: true });
+        expect(commands).toEqual(['insertParagraph']);
+    });
+
+    it('Shift+Enter outside a list is still a plain line break', async () => {
+        const env = await composerEnv();
+        await typeRich(env, '<div>hello</div>');
+        const commands = recordCommands(env);
+        const evt = key(env, env.editor, 'Enter', { shiftKey: true });
+        await env.flush();
+        expect(evt.defaultPrevented).toBe(false);
+        expect(commands).toEqual([]);
+        expect(messagePosts(env)).toEqual([]);
+    });
+
+    it('plain Enter in a bullet still sends (Enter sends)', async () => {
+        const env = await composerEnv();
+        await typeRich(env, '<ul><li>one</li></ul>');
+        key(env, env.editor, 'Enter');
+        await env.flush();
+        expect(messagePosts(env)).toHaveLength(1);
+    });
+
+    it('with Ctrl+Enter sending, plain Enter in a bullet is left to the browser (it adds the bullet)', async () => {
+        const env = await prefsEnv({ sendOnEnter: false });
+        await typeRich(env, '<ul><li>one</li></ul>');
+        const commands = recordCommands(env);
+        const evt = key(env, env.editor, 'Enter');
+        await env.flush();
+        expect(evt.defaultPrevented).toBe(false);
+        expect(commands).toEqual([]);
+        expect(messagePosts(env)).toEqual([]);
+    });
+});
+
+describe('lists (markdown view)', () => {
+    async function shiftEnter(env) {
+        const evt = key(env, env.markdown, 'Enter', { shiftKey: true });
+        await env.flush();
+        return evt;
+    }
+
+    it('Shift+Enter on a bullet line starts the next bullet (Enter sends)', async () => {
+        const env = await composerEnv({ wysiwyg: false });
+        await typeMarkdown(env, '- one');
+        const evt = await shiftEnter(env);
+        expect(evt.defaultPrevented).toBe(true);
+        expect(env.markdown.value).toBe('- one\n- ');
+        expect(env.markdown.selectionStart).toBe('- one\n- '.length);
+        expect(messagePosts(env)).toEqual([]);
+    });
+
+    it('keeps the marker and indentation of the item', async () => {
+        const env = await composerEnv({ wysiwyg: false });
+        await typeMarkdown(env, '* one\n  + two');
+        await shiftEnter(env);
+        expect(env.markdown.value).toBe('* one\n  + two\n  + ');
+    });
+
+    it('numbers the next item of a numbered list', async () => {
+        const env = await composerEnv({ wysiwyg: false });
+        await typeMarkdown(env, '1. one\n2. two');
+        await shiftEnter(env);
+        expect(env.markdown.value).toBe('1. one\n2. two\n3. ');
+    });
+
+    it('an empty item ends the list', async () => {
+        const env = await composerEnv({ wysiwyg: false });
+        await typeMarkdown(env, '- one\n- ');
+        const evt = await shiftEnter(env);
+        expect(evt.defaultPrevented).toBe(true);
+        expect(env.markdown.value).toBe('- one\n');
+        expect(env.markdown.selectionStart).toBe('- one\n'.length);
+    });
+
+    it('splits an item at the caret', async () => {
+        const env = await composerEnv({ wysiwyg: false });
+        await typeMarkdown(env, '- onetwo');
+        env.markdown.setSelectionRange(5, 5);
+        await shiftEnter(env);
+        expect(env.markdown.value).toBe('- one\n- two');
+        expect(env.markdown.selectionStart).toBe('- one\n- '.length);
+    });
+
+    it('leaves Shift+Enter alone outside a list, and for markdown that only looks like one', async () => {
+        for (const text of ['hello', '**bold**', '---', '-dash']) {
+            const env = await composerEnv({ wysiwyg: false });
+            await typeMarkdown(env, text);
+            const evt = await shiftEnter(env);
+            expect(evt.defaultPrevented, text).toBe(false);
+            expect(env.markdown.value).toBe(text);
+        }
+    });
+
+    it('plain Enter on a bullet line still sends (Enter sends)', async () => {
+        const env = await composerEnv({ wysiwyg: false });
+        await typeMarkdown(env, '- one');
+        key(env, env.markdown, 'Enter');
+        await env.flush();
+        expect(messagePosts(env)).toHaveLength(1);
+    });
+
+    it('with Ctrl+Enter sending, plain Enter continues the list and Ctrl+Enter sends', async () => {
+        const env = await prefsEnv({ sendOnEnter: false, wysiwyg: false });
+        await typeMarkdown(env, '- one');
+        const evt = key(env, env.markdown, 'Enter');
+        await env.flush();
+        expect(evt.defaultPrevented).toBe(true);
+        expect(env.markdown.value).toBe('- one\n- ');
+        expect(messagePosts(env)).toEqual([]);
+        key(env, env.markdown, 'Enter', { ctrlKey: true });
+        await env.flush();
+        expect(messagePosts(env)).toHaveLength(1);
     });
 });

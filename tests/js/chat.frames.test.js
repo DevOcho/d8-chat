@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PAGE_SCRIPTS, createPage } from './helpers/env.js';
 import {
     ENGINEER, ME, ROBERT, chatInputDefault, chatPage, conversationPane, incident, pageClearedFrame,
-    pageFrame, profileHeader,
+    pageFrame, preferenceReply, preferenceSelects, profileHeader,
 } from './helpers/fixtures.js';
 
 async function chatEnv({ page = {}, ...opts } = {}) {
@@ -208,11 +208,28 @@ describe('sound frames', () => {
     });
 
     it('uses the sound chosen in preferences, including after a live change', async () => {
-        const env = await chatEnv({ page: { user: { ...ME, notificationSound: 'slack-notification.mp3' } } });
+        const env = await chatEnv({
+            page: {
+                user: { ...ME, notificationSound: 'slack-notification.mp3' },
+                extraMain: preferenceSelects({ sound: 'slack-notification.mp3' }),
+            },
+            xhrRoutes: [{
+                match: '/profile/notification_sound',
+                reply: (x) => preferenceReply('update-sound-preference', new URLSearchParams(x.body).get('sound')),
+            }],
+        });
         await env.frame({ type: 'sound' });
         expect(env.audios.at(-1).src).toBe('/audio/slack-notification.mp3');
 
-        env.trigger(env.document.body, 'update-sound-preference', { 'update-sound-preference': 'd8-notification.mp3' });
+        // Through htmx, as the Preferences select does: the route's
+        // HX-Trigger reaches the listener as detail.value. (A hand-built event
+        // in another shape once kept this test green while the page ignored
+        // every live change.)
+        const select = env.$('#notification-sound-select');
+        select.value = 'd8-notification.mp3';
+        select.dispatchEvent(new env.window.Event('change', { bubbles: true }));
+        await env.tick(20);
+        expect(env.xhrs(/notification_sound/).map((x) => x.method)).toEqual(['PUT']);
         await env.frame({ type: 'sound' });
         expect(env.audios.at(-1).src).toBe('/audio/d8-notification.mp3');
     });

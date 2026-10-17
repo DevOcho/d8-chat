@@ -140,7 +140,22 @@ const HOOKS = {
         '"/oncall/pages/active"',
         '"/oncall/incidents/<int:incident_id>/ack", methods=["POST"]',
     ],
-    'app/blueprints/profile.py': ['"/profile/activity", methods=["POST"]'],
+    'app/blueprints/profile.py': [
+        '"/profile/activity", methods=["POST"]',
+        // preferenceSelects(): the routes and the HX-Trigger events they emit.
+        '"/profile/send_on_enter", methods=["PUT"]',
+        'json.dumps({"update-send-on-enter": enabled})',
+        '"/profile/notification_sound", methods=["PUT"]',
+        '{"update-sound-preference": new_sound}',
+    ],
+    'app/templates/partials/profile_details.html': [
+        'id="send-key-select"',
+        'name="send_on_enter"',
+        "hx-put=\"{{ url_for('profile.update_send_on_enter') }}\"",
+        'id="notification-sound-select"',
+        'name="sound"',
+        "hx-put=\"{{ url_for('profile.update_notification_sound') }}\"",
+    ],
 };
 
 describe('fixture hooks still exist in the templates and routes', () => {

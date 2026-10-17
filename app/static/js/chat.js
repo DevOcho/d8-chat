@@ -1100,6 +1100,43 @@ const createEditor = function(idSuffix = '') {
             }
         });
     };
+    // If the caret is in a list item, start the next item (or, from an empty
+    // item, end the list) and return true; otherwise return false.
+    const continueList = function() {
+        if (!state.isMarkdownMode) {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return false;
+            let node = selection.getRangeAt(0).startContainer;
+            if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+            const item = node && node.closest('li');
+            if (!item || !state.editor.contains(item)) return false;
+            // The same command plain Enter runs in a contenteditable list.
+            document.execCommand('insertParagraph');
+            return true;
+        }
+        const view = state.markdownView;
+        const pos = view.selectionStart;
+        if (pos !== view.selectionEnd) return false;
+        const text = view.value;
+        const lineStart = text.lastIndexOf('\n', pos - 1) + 1;
+        const marker = /^(\s*)(?:([-*+])|(\d+)\.)\s+/.exec(text.slice(lineStart, pos));
+        if (!marker) return false;
+        const newline = text.indexOf('\n', pos);
+        const restOfLine = text.slice(pos, newline === -1 ? text.length : newline);
+        let from = pos;
+        let insert;
+        if (marker[0].length === pos - lineStart && restOfLine.trim() === '') {
+            // An empty item ends the list: drop its marker.
+            from = lineStart;
+            insert = '';
+        } else {
+            insert = `\n${marker[1]}${marker[2] || `${Number(marker[3]) + 1}.`} `;
+        }
+        view.value = text.slice(0, from) + insert + text.slice(pos);
+        view.selectionStart = view.selectionEnd = from + insert.length;
+        view.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+    };
     const setupKeydownListeners = function() {
         const currentUserId = document.querySelector('main.main-content').dataset.currentUserId;
         const keydownHandler = (e) => {
@@ -1138,6 +1175,17 @@ const createEditor = function(idSuffix = '') {
                 //   enterSends true  -> Enter sends, Shift+Enter = newline
                 //   enterSends false -> Ctrl/Cmd+Enter sends, Enter = newline
                 const enterSends = document.querySelector('main.main-content').dataset.sendOnEnter !== 'false';
+                // In a list, the new-line key starts the next item, as in
+                // Slack: Shift+Enter when Enter sends, plain Enter otherwise
+                // (which the rich editor already does on its own).
+                const plain = !e.ctrlKey && !e.metaKey;
+                const nextItemKey = enterSends
+                    ? e.shiftKey && plain
+                    : !e.shiftKey && plain && state.isMarkdownMode;
+                if (nextItemKey && continueList()) {
+                    e.preventDefault();
+                    return;
+                }
                 const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
                 const content = state.isMarkdownMode ? state.markdownView.value : state.editor.innerText;
                 const hasContent = content.trim() !== '' || hasAttachment;
@@ -1910,8 +1958,10 @@ document.addEventListener('DOMContentLoaded', () => {
             window.mainEditor.focusActiveInput();
         }
     });
+    // Preference changes arrive as HX-Trigger events. htmx passes a plain
+    // (non-object) trigger value to listeners as evt.detail.value.
     document.body.addEventListener('update-sound-preference', (evt) => {
-        const newSound = evt.detail['update-sound-preference'];
+        const newSound = evt.detail.value;
         if (newSound && NotificationManager) {
             console.log(`Updating notification sound to: ${newSound}`);
             NotificationManager.soundFile = newSound;
@@ -1921,8 +1971,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // handler reads (so it applies immediately, no reload) and refresh the
     // visible send-button hints to match.
     document.body.addEventListener('update-send-on-enter', (evt) => {
-        const enabled = evt.detail['update-send-on-enter'] !== false
-            && evt.detail['update-send-on-enter'] !== 'false';
+        const enabled = evt.detail.value !== false && evt.detail.value !== 'false';
         const main = document.querySelector('main.main-content');
         if (main) main.dataset.sendOnEnter = enabled ? 'true' : 'false';
         document.querySelectorAll('[id^="send-button"]').forEach((btn) => {
