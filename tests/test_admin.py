@@ -106,11 +106,15 @@ def test_admin_edit_user(admin_client):
     assert updated_user.email == "edited@test.com"
 
 
-def test_admin_deactivate_user(admin_client):
-    """Deactivating a user flips is_active, blocks auth, and clears push tokens."""
+def test_admin_deactivate_user(admin_client, mocker):
+    """Deactivating a user flips is_active, blocks auth, clears push tokens and
+    closes their sockets on every worker."""
     user = User.get_by_id(1)  # testuser (a member, seeded by conftest)
     assert user.is_active is True
     DeviceToken.create(user=user, token="fcm-token-abc", platform="android")
+    disconnect = mocker.patch(
+        "app.services.account_service.chat_manager.disconnect_user"
+    )
 
     res = admin_client.post(f"/admin/users/{user.id}/deactivate")
     assert res.status_code == 200
@@ -122,6 +126,7 @@ def test_admin_deactivate_user(admin_client):
     assert User.get_active_by_id(1) is None
     # Push device tokens were purged so a departed device stops getting pushes.
     assert DeviceToken.select().where(DeviceToken.user == user).count() == 0
+    disconnect.assert_called_once_with(1, "Account deactivated")
 
 
 def test_admin_reactivate_user(admin_client):

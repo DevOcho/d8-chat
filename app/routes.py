@@ -1019,6 +1019,15 @@ def _safe_handle_frame(ws, raw):
 
 def _process_ws_event(ws, data):
     """Processes a single WebSocket event."""
+    # The account is checked when the socket opens, but a socket can outlive a
+    # deactivation (disconnect_user's broadcast can be missed if Valkey blips),
+    # so re-check it on every frame: no sending, subscribing or typing after.
+    if User.get_active_by_id(getattr(getattr(ws, "user", None), "id", None)) is None:
+        try:
+            ws.close(reason=1008, message="Account deactivated")
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        return
     event_type = data.get("type")
     conv_id_str = data.get("conversation_id") or getattr(ws, "channel_id", None)
 

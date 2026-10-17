@@ -86,6 +86,56 @@ def test_dispatch_user_message_hits_all_sockets(app, chat_manager):
         ws2.send.assert_called_once()
 
 
+def test_disconnect_user_closes_here_and_tells_every_other_worker(app, chat_manager):
+    """Deactivation closes the user's sockets on this worker and publishes a
+    control frame so the others close theirs."""
+    with app.app_context():
+        ws1, ws2, other = Mock(), Mock(), Mock()
+        chat_manager.set_online(7, ws1)
+        chat_manager.set_online(7, ws2)
+        chat_manager.set_online(8, other)
+        chat_manager.redis_client.publish.reset_mock()
+
+        chat_manager.disconnect_user(7, "Account deactivated")
+
+    for ws in (ws1, ws2):
+        ws.close.assert_called_once_with(reason=1008, message="Account deactivated")
+    other.close.assert_not_called()
+    chat_manager.redis_client.publish.assert_called_once_with(
+        "user:7", json.dumps({"_disconnect": "Account deactivated"})
+    )
+
+
+def test_disconnect_frame_closes_sockets_and_is_never_delivered(app, chat_manager):
+    """Another worker's disconnect_user arrives as a user:* frame: close this
+    worker's sockets for that user instead of sending them anything."""
+    with app.app_context():
+        ws = Mock()
+        ws.is_api_client = False
+        ws.channel_id = None
+        chat_manager.set_online(7, ws)
+        chat_manager._dispatch(
+            {
+                "type": "pmessage",
+                "channel": b"user:7",
+                "data": json.dumps({"_disconnect": "Account deactivated"}),
+            }
+        )
+    ws.close.assert_called_once_with(reason=1008, message="Account deactivated")
+    ws.send.assert_not_called()
+
+
+def test_disconnect_user_survives_a_valkey_outage(app, chat_manager):
+    """The local close still happens; frames elsewhere are refused anyway
+    (routes._process_ws_event re-checks the account)."""
+    with app.app_context():
+        ws = Mock()
+        chat_manager.set_online(7, ws)
+        chat_manager.redis_client.publish.side_effect = ConnectionError("valkey down")
+        chat_manager.disconnect_user(7, "Account deactivated")
+    ws.close.assert_called_once()
+
+
 def test_subscribe_and_unsubscribe(chat_manager):
     """Tests that subscribing and unsubscribing sets the channel_id on the websocket object."""
     mock_ws = Mock()

@@ -354,3 +354,57 @@ class TestSafeHandleFrame:
             proc.assert_called_once()
             passed = proc.call_args[0][1]
             assert passed["chat_message"] == "hi"
+
+
+# --- Deactivated accounts ---
+
+
+@pytest.fixture
+def leaver(app):
+    """A channel member with an open socket, who then gets deactivated."""
+    with app.app_context():
+        workspace = Workspace.get(Workspace.name == "DevOcho")
+        user = User.create(
+            username="ws-leaver", email="ws-leaver@example.com", display_name="Leaver"
+        )
+        WorkspaceMember.create(user=user, workspace=workspace)
+        channel = Channel.create(workspace=workspace, name="ws-auth-leaver")
+        Conversation.get_or_create(
+            conversation_id_str=f"channel_{channel.id}", defaults={"type": "channel"}
+        )
+        ChannelMember.create(user=user, channel=channel)
+        ws = _ws_for(user.id)
+        User.update(is_active=False).where(User.id == user.id).execute()
+        return ws, f"channel_{channel.id}"
+
+
+class TestDeactivatedAccount:
+    """A socket opened before the deactivation can't be used after it, even if
+    it never got the disconnect broadcast."""
+
+    def test_cannot_send(self, app, leaver, mocker):
+        ws, conv_id = leaver
+        with app.app_context():
+            handle_new_message = mocker.patch(
+                "app.routes.chat_service.handle_new_message"
+            )
+            _process_ws_event(
+                ws,
+                {
+                    "type": "send_message",
+                    "conversation_id": conv_id,
+                    "chat_message": "bye",
+                },
+            )
+        handle_new_message.assert_not_called()
+        ws.close.assert_called_once_with(reason=1008, message="Account deactivated")
+
+    def test_cannot_subscribe_or_type(self, app, leaver, mocker):
+        ws, conv_id = leaver
+        with app.app_context():
+            subscribe = mocker.patch("app.routes.chat_manager.subscribe")
+            typing = mocker.patch("app.routes.chat_manager.handle_typing_event")
+            _process_ws_event(ws, {"type": "subscribe", "conversation_id": conv_id})
+            _process_ws_event(ws, {"type": "typing_start", "conversation_id": conv_id})
+        subscribe.assert_not_called()
+        typing.assert_not_called()

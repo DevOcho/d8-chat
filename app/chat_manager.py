@@ -235,6 +235,10 @@ class ChatManager:
 
         if channel_name.startswith("user:"):
             target_user_id = int(channel_name.split(":", 1)[1])
+            # Control frame from disconnect_user(): close, don't deliver.
+            if "_disconnect" in payload_data:
+                self._close_local(target_user_id, payload_data["_disconnect"])
+                return
             # Deliver to every socket this user holds on this worker (multi-tab
             # / web + mobile), applying the active-channel exclusion per socket.
             exclude_channel = payload_data.get("_exclude_channel")
@@ -386,6 +390,33 @@ class ChatManager:
     def local_sockets(self, user_id):
         """Snapshot list of this worker's sockets for a user (may be empty)."""
         return list(self.all_clients.get(user_id, ()))
+
+    def disconnect_user(self, user_id, reason):
+        """Close every socket ``user_id`` has open, on every worker and pod.
+
+        This worker's sockets close right away. A ``_disconnect`` frame on
+        ``user:<id>`` makes every other worker's listener close theirs
+        (``_dispatch`` acts on it and never forwards it to a client). Code
+        1008 tells the web client to reload, which lands on the login page.
+        """
+        self._close_local(user_id, reason)
+        try:
+            self.redis_client.publish(
+                f"user:{user_id}", json.dumps({"_disconnect": reason})
+            )
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Sockets elsewhere still can't do anything: every inbound frame
+            # re-checks the account (routes._process_ws_event).
+            current_app.logger.exception(
+                "Couldn't broadcast the disconnect for user %s", user_id
+            )
+
+    def _close_local(self, user_id, reason):
+        for ws in self.local_sockets(user_id):
+            try:
+                ws.close(reason=1008, message=reason)
+            except Exception:  # pylint: disable=broad-exception-caught
+                pass
 
     def send_local(self, user_id, message):
         """Send to all of a user's sockets on THIS worker (no pub/sub).

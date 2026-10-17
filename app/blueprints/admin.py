@@ -15,13 +15,11 @@ from flask import (
 from peewee import JOIN, IntegrityError, fn
 
 from ..audit import audit
-from ..chat_manager import chat_manager
 from ..groups import group_names_for, set_local_groups
 from ..models import (
     Channel,
     ChannelMember,
     Conversation,
-    DeviceToken,
     Hashtag,
     Message,
     MessageHashtag,
@@ -34,6 +32,7 @@ from ..models import (
     utc_now,
 )
 from ..password_policy import validate_password
+from ..services import account_service
 
 admin_bp = Blueprint("admin", __name__, template_folder="../templates/admin")
 
@@ -333,17 +332,9 @@ def _active_admin_count():
 @admin_bp.route("/users/<int:user_id>/deactivate", methods=["POST"])
 @admin_required
 def deactivate_user(user_id):
-    """Soft-delete a user: revoke all access while preserving their history.
-
-    Sets ``is_active = False`` — which ``User.get_active_by_id`` enforces at
-    every login, session, API-token and SSO entry point — deletes their push
-    device tokens, and best-effort closes any live socket this worker holds for
-    them. Reversible via :func:`reactivate_user`.
-
-    We deliberately never hard-delete the row: messages, reactions, mentions,
-    votes and uploaded files all foreign-key back to it, so a row delete would
-    either fail on those constraints or destroy the user's chat history.
-    """
+    """Soft-delete a user: revoke all access while preserving their history
+    (see ``account_service.deactivate_user``). Reversible via
+    :func:`reactivate_user`."""
     user = User.get_or_none(id=user_id)
     if not user:
         flash("User not found.", "danger")
@@ -362,21 +353,7 @@ def deactivate_user(user_id):
         flash(f"User '{user.username}' is already deactivated.", "info")
         return _render_user_list()
 
-    with db.atomic():
-        user.is_active = False
-        user.save()
-        DeviceToken.delete().where(DeviceToken.user == user).execute()
-
-    # Best-effort: close any socket this worker holds for the user so an open
-    # tab stops receiving right away. Sockets on other workers drop on their
-    # next idle-reconnect, which re-auths through get_active_by_id and is
-    # refused; new connections are blocked at the WS handshake regardless.
-    for ws in chat_manager.local_sockets(user.id):
-        try:
-            ws.close(reason=1008, message="Account deactivated")
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
-
+    account_service.deactivate_user(user)
     audit("user.deactivated", target=user)
     flash(f"User '{user.username}' has been deactivated.", "success")
     return _render_user_list()
