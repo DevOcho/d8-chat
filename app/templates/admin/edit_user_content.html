@@ -71,7 +71,8 @@
                placeholder="e.g. devops-lead, director">
         <div class="form-text">
             Comma-separated. Used by on-call escalation levels that target a group. Groups set here are kept
-            even if SSO doesn't send them.
+            even if SSO doesn't send them. <code>{{ config.ONCALL_ADMIN_GROUP }}</code> makes the user an
+            on-call admin: they can manage rotations, policies and incidents, but nothing else in Admin.
         </div>
     </div>
     <button type="submit" class="btn btn-primary">Save Changes</button>

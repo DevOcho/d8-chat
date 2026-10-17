@@ -16,11 +16,12 @@ from app.models import (
 from app.services import oncall_service
 
 # Dev on-call cast: (username, display name, password, local groups, in rotation).
-# kp is the CEO (last escalation level). In production these groups come from
-# Authentik via the SSO ``groups`` claim instead.
+# kp is the CEO (last escalation level). robert is also an on-call admin
+# (oncall-admin: the on-call admin pages without being a workspace admin). In
+# production these groups come from Authentik via the SSO ``groups`` claim.
 ONCALL_DEV_USERS = (
     ("engineer", "DevOps Engineer", "engineer555", [], True),
-    ("robert", "Robert", "robert555", ["devops-lead"], True),
+    ("robert", "Robert", "robert555", ["devops-lead", "oncall-admin"], True),
     ("emilio", "Emilio", "emilio555", ["director"], False),
 )
 

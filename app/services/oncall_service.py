@@ -365,8 +365,8 @@ def user_in_chain(incident, user):
     The chain is everyone the policy could page: rotation members and
     override users of any targeted schedule, members of any targeted group,
     any targeted user — plus anyone already paged for this incident (covers
-    the admin fallback). Workspace admins are always allowed so an incident
-    can never get stuck open.
+    the admin fallback). Workspace and on-call admins are always allowed so an
+    incident can never get stuck open.
     """
     if user is None:
         return False
@@ -376,7 +376,7 @@ def user_in_chain(incident, user):
         .exists()
     ):
         return True
-    if _is_workspace_admin(user):
+    if can_manage_oncall(user):
         return True
     for level in sorted_levels(incident.policy):
         if level.target_type == "user" and level.target_user_id == user.id:
@@ -410,10 +410,30 @@ def user_in_chain(incident, user):
     return False
 
 
-def _is_workspace_admin(user):
+def is_workspace_admin(user):
     return (
         WorkspaceMember.select()
         .where((WorkspaceMember.user == user) & (WorkspaceMember.role == "admin"))
+        .exists()
+    )
+
+
+def can_manage_oncall(user):
+    """True if ``user`` may use the on-call admin pages.
+
+    Workspace admins can, and so can members of the ONCALL_ADMIN_GROUP group
+    (``oncall-admin`` by default, from SSO or set in the user editor). That
+    group grants nothing else: no users, channels or dashboard.
+    """
+    if user is None:
+        return False
+    if is_workspace_admin(user):
+        return True
+    group = normalize_group_name(current_app.config.get("ONCALL_ADMIN_GROUP"))
+    return (
+        bool(group)
+        and UserGroup.select()
+        .where((UserGroup.user == user) & (UserGroup.name == group))
         .exists()
     )
 

@@ -27,6 +27,10 @@ documented in `MOBILE_WEBSOCKET_API_DOCS.md` §6. Not yet deployed to prod.
    (Emilio), and **`ceo`** (Kenny). The default `profile` scope mapping already
    sends `groups` in the ID token. Group membership syncs **at each SSO login**,
    so each person must log out and back in once after being added.
+   To let someone manage on-call without making them a workspace admin, add
+   them to **`oncall-admin`** (Authentik, or the Groups field in the admin
+   user editor; rename with `ONCALL_ADMIN_GROUP`). They get Admin → On-Call
+   and can acknowledge/resolve any incident, and nothing else in Admin.
 4. Admin → On-Call → DevOps Primary: add the rotation members in order.
 5. Everyone in the chain: profile → Notifications → **Test my pager**.
 6. In Uptime Kuma, add a Webhook notification (URL, `application/json`,

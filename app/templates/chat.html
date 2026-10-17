@@ -17,13 +17,22 @@
         <div class="workspace-logo mb-3">D8</div>
         <!-- Bottom actions container -->
         <div class="mt-auto">
-            <!-- Admin Link (only shown to admins) -->
+            <!-- Admin Link (admins; on-call admins get just the On-Call pages) -->
             {% if workspace_member and workspace_member.role == 'admin' %}
                 <div class="mb-2">
                     <a href="{{ url_for('admin.dashboard') }}"
                        class="admin-link"
                        target="_blank"
                        title="Admin Settings">
+                        <i class="bi bi-gear-fill"></i>
+                    </a>
+                </div>
+            {% elif can_manage_oncall(g.user) %}
+                <div class="mb-2">
+                    <a href="{{ url_for('admin.oncall_overview') }}"
+                       class="admin-link"
+                       target="_blank"
+                       title="On-Call Admin">
                         <i class="bi bi-gear-fill"></i>
                     </a>
                 </div>

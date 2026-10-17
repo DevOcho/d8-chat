@@ -818,6 +818,96 @@ def test_admin_non_admin_is_refused(client, oncall):
     assert client.get("/admin/oncall").status_code == 302
 
 
+# --- On-call admins (ONCALL_ADMIN_GROUP): the on-call pages, nothing else ---
+
+
+@pytest.fixture
+def oncall_admin(oncall):
+    return _user("ops", ["oncall-admin"])
+
+
+def test_oncall_admin_gets_the_oncall_pages(client, oncall, oncall_admin):
+    incident = _trigger(oncall)
+    _login(client, oncall_admin)
+    for url in (
+        "/admin/oncall",
+        f"/admin/oncall/schedules/{oncall.schedule.id}",
+        f"/admin/oncall/policies/{oncall.policy.id}",
+        f"/admin/oncall/incidents/{incident.id}",
+    ):
+        assert client.get(url).status_code == 200, url
+
+    newbie = _user("newbie")
+    client.post(
+        f"/admin/oncall/schedules/{oncall.schedule.id}/members",
+        data={"user_id": newbie.id},
+    )
+    assert (
+        OnCallScheduleMember.select()
+        .where(OnCallScheduleMember.user == newbie)
+        .exists()
+    )
+
+    # The admin sidebar offers them On-Call only.
+    html = client.get("/admin/oncall").get_data(as_text=True)
+    assert 'href="/admin/oncall"' in html
+    assert "User Management" not in html and "Channel Management" not in html
+
+
+def test_oncall_admin_gets_nothing_else_in_admin(client, oncall, oncall_admin):
+    _login(client, oncall_admin)
+    for url in ("/admin/", "/admin/users", "/admin/channels", "/admin/users/create"):
+        assert client.get(url).status_code == 302, url
+    # Can't grant groups (or admin) to anyone, themselves included.
+    res = client.post(
+        f"/admin/users/edit/{oncall.eng.id}",
+        data={"local_groups": "oncall-admin", "role": "admin"},
+    )
+    assert res.status_code == 302
+    assert not oncall_service.can_manage_oncall(oncall.eng)
+    res = client.post(f"/admin/users/{oncall.eng.id}/deactivate")
+    assert res.status_code == 302
+    assert User.get_by_id(oncall.eng.id).is_active
+
+
+def test_chat_sidebar_links_oncall_admins_to_oncall(client, oncall, oncall_admin):
+    _login(client, oncall_admin)
+    html = client.get("/chat").get_data(as_text=True)
+    assert 'href="/admin/oncall"' in html and 'title="On-Call Admin"' in html
+    assert 'title="Admin Settings"' not in html
+
+    _login(client, oncall.eng)
+    html = client.get("/chat").get_data(as_text=True)
+    assert "admin-link" not in html
+
+
+def test_oncall_admin_may_ack_any_incident(client, oncall, oncall_admin):
+    incident = _trigger(oncall)
+    assert oncall_service.user_in_chain(incident, oncall_admin)
+    _login(client, oncall_admin)
+    res = client.post(f"/oncall/incidents/{incident.id}/ack")
+    assert res.get_json()["ok"] is True
+    assert Incident.get_by_id(incident.id).state == "acknowledged"
+
+
+def test_oncall_admin_group_can_come_from_sso(test_db, app):
+    user = _user("sso-ops")
+    assert not oncall_service.can_manage_oncall(user)
+    sync_sso_groups(user, ["oncall-admin"])
+    assert oncall_service.can_manage_oncall(user)
+    sync_sso_groups(user, [])
+    assert not oncall_service.can_manage_oncall(user)
+
+
+def test_oncall_admin_group_name_is_configurable(test_db, app, monkeypatch):
+    monkeypatch.setitem(app.config, "ONCALL_ADMIN_GROUP", "Pager-Admins")
+    default_named = _user("old-name", ["oncall-admin"])
+    renamed = _user("new-name", ["pager-admins"])
+    assert oncall_service.can_manage_oncall(renamed)
+    assert not oncall_service.can_manage_oncall(default_named)
+    assert oncall_service.can_manage_oncall(_user("boss", admin=True))
+
+
 def test_admin_override_and_member_management(admin_client, oncall):
     sid = oncall.schedule.id
     res = admin_client.post(

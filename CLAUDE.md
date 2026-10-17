@@ -51,7 +51,7 @@ auto tag d8-chat && auto restart d8-chat && sleep 10 && auto seed d8-chat
 the default workspace/channels + admin user, then `seed.py` sets the admin
 password to `d8_admin` and creates the `kp` user (password `kp555`). It also
 seeds the on-call cast: `engineer` (`engineer555`) and `robert` (`robert555`,
-group `devops-lead`) in the "DevOps Primary" rotation, `emilio` (`emilio555`,
+groups `devops-lead` and `oncall-admin`) in the "DevOps Primary" rotation, `emilio` (`emilio555`,
 group `director`), and `kp` in group `ceo`. The
 `sleep 10` lets the freshly restarted pod settle before the seed pod runs.
 
@@ -224,7 +224,7 @@ at-most-once, so gaps are the client's job to fill).
 | `admin_bp` | `/admin` | User and workspace management |
 | `polls_bp` | `/polls` | Poll creation and voting |
 | `api_v1_bp` | `/api/v1` | REST + WebSocket API for mobile clients; Uptime Kuma webhook (`/integrations/uptime-kuma`) |
-| `oncall_bp` | `/oncall` | Pager endpoints: acknowledge/resolve incidents, active pages, test page (admin on-call UI lives in `admin_oncall.py` on `admin_bp`) |
+| `oncall_bp` | `/oncall` | Pager endpoints: acknowledge/resolve incidents, active pages, test page (admin on-call UI lives in `admin_oncall.py` on `admin_bp`, open to workspace admins and the `oncall-admin` group) |
 
 ### Key Modules
 

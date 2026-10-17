@@ -62,6 +62,7 @@ PUBLIC_ENDPOINTS = {
 GUARDS = {
     ("app/routes.py", "wrapped_view"): "login_required",
     ("app/blueprints/admin.py", "wrapped_view"): "admin_required",
+    ("app/blueprints/admin_oncall.py", "wrapped_view"): "oncall_admin_required",
     ("app/blueprints/api_v1.py", "decorated"): "api_token_required",
 }
 
@@ -116,7 +117,8 @@ def test_no_route_is_missing_an_auth_guard(app):
         and not _guards_on(app.view_functions.get(rule.endpoint))
     )
     assert not unguarded, (
-        "These routes have no login_required / admin_required / api_token_required "
+        "These routes have no login_required / admin_required / oncall_admin_required / "
+        "api_token_required "
         "layer on the function registered in app.view_functions. Either add a guard "
         "(below @route, not above it) or add the endpoint to PUBLIC_ENDPOINTS with a "
         f"reason: {unguarded}"

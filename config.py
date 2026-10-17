@@ -84,6 +84,9 @@ class Config:
     # on-call engineer when that channel has an escalation policy.
     UPTIME_KUMA_WEBHOOK_KEY = os.environ.get("UPTIME_KUMA_WEBHOOK_KEY")
     UPTIME_KUMA_CHANNEL = os.environ.get("UPTIME_KUMA_CHANNEL", "devops-uptime")
+    # Members of this group (SSO or local) get the on-call admin pages and may
+    # acknowledge/resolve any incident, without being workspace admins.
+    ONCALL_ADMIN_GROUP = os.environ.get("ONCALL_ADMIN_GROUP", "oncall-admin")
 
     # flask-sock passes these to simple_websocket.Server. Listing "d8_sec" as a
     # known subprotocol lets the API WebSocket route negotiate it back to the

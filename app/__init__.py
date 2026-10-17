@@ -564,6 +564,8 @@ def register_template_filters(app):
             "incident_for_message": oncall_service.incident_for_message,
             "oncall_status_for_user": oncall_service.oncall_status_for_user,
             "oncall_display_name": oncall_service.display_name,
+            "can_manage_oncall": oncall_service.can_manage_oncall,
+            "is_workspace_admin": oncall_service.is_workspace_admin,
         }
 
     @app.template_filter("emojize")

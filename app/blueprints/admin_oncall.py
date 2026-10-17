@@ -11,6 +11,7 @@ as naive UTC.
 """
 
 import datetime
+import functools
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import flash, g, redirect, render_template, request, url_for
@@ -32,7 +33,23 @@ from ..models import (
     utc_now,
 )
 from ..services import oncall_service
-from .admin import admin_bp, admin_required
+from .admin import admin_bp
+
+
+def oncall_admin_required(view):
+    """Like ``admin_required``, but also lets in on-call admins (members of the
+    ONCALL_ADMIN_GROUP group), who get these pages and nothing else."""
+
+    @functools.wraps(view)
+    def wrapped_view(**kwargs):
+        if g.user is None:
+            return redirect(url_for("auth.index"))
+        if not oncall_service.can_manage_oncall(g.user):
+            flash("You do not have permission to access this page.", "danger")
+            return redirect(url_for("main.chat_interface"))
+        return view(**kwargs)
+
+    return wrapped_view
 
 
 def _active_users():
@@ -83,7 +100,7 @@ def _int_or_none(value):
 
 
 @admin_bp.route("/oncall")
-@admin_required
+@oncall_admin_required
 def oncall_overview():
     """Who's on call, the policies, recent incidents, and the test pager."""
     now = utc_now()
@@ -123,7 +140,7 @@ def oncall_overview():
 
 
 @admin_bp.route("/oncall/test-page", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_test_page():
     """Ring a user's pager with a test page."""
     user = User.get_or_none(User.id == _int_or_none(request.form.get("user_id")))
@@ -144,7 +161,7 @@ def oncall_test_page():
 
 
 @admin_bp.route("/oncall/schedules", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_create_schedule():
     """Create an empty weekly rotation with the default handoff."""
     name = (request.form.get("name") or "").strip()
@@ -176,7 +193,7 @@ def _schedule_or_redirect(schedule_id):
 
 
 @admin_bp.route("/oncall/schedules/<int:schedule_id>")
-@admin_required
+@oncall_admin_required
 def oncall_schedule(schedule_id):
     """Rotation, overrides, swaps and an 8-week preview for one schedule."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -211,7 +228,7 @@ def oncall_schedule(schedule_id):
 
 
 @admin_bp.route("/oncall/schedules/<int:schedule_id>/settings", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_schedule_settings(schedule_id):
     """Rename, or change the timezone / handoff day / handoff time."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -266,7 +283,7 @@ def oncall_schedule_settings(schedule_id):
 
 
 @admin_bp.route("/oncall/schedules/<int:schedule_id>/delete", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_delete_schedule(schedule_id):
     """Delete a schedule (levels that targeted it are left without a target)."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -280,7 +297,7 @@ def oncall_delete_schedule(schedule_id):
 
 
 @admin_bp.route("/oncall/schedules/<int:schedule_id>/members", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_add_member(schedule_id):
     """Add an engineer to the end of the rotation."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -316,7 +333,7 @@ def oncall_add_member(schedule_id):
 @admin_bp.route(
     "/oncall/schedules/<int:schedule_id>/members/<int:member_id>/move", methods=["POST"]
 )
-@admin_required
+@oncall_admin_required
 def oncall_move_member(schedule_id, member_id):
     """Move a member one place up or down the rotation order."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -350,7 +367,7 @@ def oncall_move_member(schedule_id, member_id):
     "/oncall/schedules/<int:schedule_id>/members/<int:member_id>/remove",
     methods=["POST"],
 )
-@admin_required
+@oncall_admin_required
 def oncall_remove_member(schedule_id, member_id):
     """Take an engineer out of the rotation."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -372,7 +389,7 @@ def oncall_remove_member(schedule_id, member_id):
 
 
 @admin_bp.route("/oncall/schedules/<int:schedule_id>/overrides", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_add_override(schedule_id):
     """Cover or time off: someone (or nobody) replaces the rotation for a window."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -420,7 +437,7 @@ def oncall_add_override(schedule_id):
     "/oncall/schedules/<int:schedule_id>/overrides/<int:override_id>/delete",
     methods=["POST"],
 )
-@admin_required
+@oncall_admin_required
 def oncall_delete_override(schedule_id, override_id):
     """Remove an override; the rotation applies again for that window."""
     override = OnCallOverride.get_or_none(
@@ -438,7 +455,7 @@ def oncall_delete_override(schedule_id, override_id):
 
 
 @admin_bp.route("/oncall/schedules/<int:schedule_id>/swap", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_swap(schedule_id):
     """Swap two upcoming shifts (two full-week overrides)."""
     schedule = _schedule_or_redirect(schedule_id)
@@ -474,7 +491,7 @@ def oncall_swap(schedule_id):
 
 
 @admin_bp.route("/oncall/policies", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_create_policy():
     """Create an (empty) escalation policy for a channel."""
     name = (request.form.get("name") or "").strip()
@@ -501,7 +518,7 @@ def _policy_or_redirect(policy_id):
 
 
 @admin_bp.route("/oncall/policies/<int:policy_id>")
-@admin_required
+@oncall_admin_required
 def oncall_policy(policy_id):
     """Edit a policy's levels and settings."""
     policy = _policy_or_redirect(policy_id)
@@ -528,7 +545,7 @@ def oncall_policy(policy_id):
 
 
 @admin_bp.route("/oncall/policies/<int:policy_id>/settings", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_policy_settings(policy_id):
     """Rename, toggle paging, or change the no-on-call start level."""
     policy = _policy_or_redirect(policy_id)
@@ -596,7 +613,7 @@ def _apply_level_form(level):
 
 
 @admin_bp.route("/oncall/policies/<int:policy_id>/levels", methods=["POST"])
-@admin_required
+@oncall_admin_required
 def oncall_add_level(policy_id):
     """Append an escalation level."""
     policy = _policy_or_redirect(policy_id)
@@ -619,7 +636,7 @@ def oncall_add_level(policy_id):
 @admin_bp.route(
     "/oncall/policies/<int:policy_id>/levels/<int:level_id>", methods=["POST"]
 )
-@admin_required
+@oncall_admin_required
 def oncall_update_level(policy_id, level_id):
     """Change a level's number, delay or target."""
     level = EscalationLevel.get_or_none(
@@ -648,7 +665,7 @@ def oncall_update_level(policy_id, level_id):
 @admin_bp.route(
     "/oncall/policies/<int:policy_id>/levels/<int:level_id>/delete", methods=["POST"]
 )
-@admin_required
+@oncall_admin_required
 def oncall_delete_level(policy_id, level_id):
     """Remove a level."""
     level = EscalationLevel.get_or_none(
@@ -669,7 +686,7 @@ def oncall_delete_level(policy_id, level_id):
 
 
 @admin_bp.route("/oncall/incidents/<int:incident_id>")
-@admin_required
+@oncall_admin_required
 def oncall_incident(incident_id):
     """Incident timeline."""
     incident = Incident.get_or_none(Incident.id == incident_id)
