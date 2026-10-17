@@ -37,6 +37,7 @@ from app.routes import (
     get_reactions_for_messages,
     handle_inbound_message,
     login_required,
+    message_update_oob,
 )
 from app.services import chat_service, minio_service
 
@@ -123,21 +124,10 @@ def update_message(message_id):
         conv_id_str = message.conversation.conversation_id_str
         reactions_map = get_reactions_for_messages([message])
         attachments_map = get_attachments_for_messages([message])
-        updated_message_html = render_template(
-            "partials/message.html",
-            message=message,
-            reactions_map=reactions_map,
-            attachments_map=attachments_map,
-            Message=Message,
-            is_in_thread_view=is_in_thread_view,
-        )
-
-        # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
-        broadcast_html = updated_message_html.replace(
-            f'id="message-{message.id}"',
-            f'id="message-{message.id}" hx-swap-oob="true"',
-            1,
-        )
+        # Each on-page copy gets the rendering for where it sits (an edit
+        # made in the thread panel must not strip the channel copy's reply
+        # indicator, and vice versa).
+        broadcast_html = message_update_oob(message, reactions_map, attachments_map)
         from app.blueprints.api_v1 import serialize_message
 
         api_data = {

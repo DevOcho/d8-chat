@@ -963,7 +963,8 @@ const createEditor = function(idSuffix = '') {
         } = state;
         const replyTypeInput = messageForm.querySelector('input[name="reply_type"]');
         const isQuoteReply = replyTypeInput && replyTypeInput.value === 'quote';
-        const sendText = isQuoteReply ? "Reply" : "Send";
+        // The edit composers name their action (data-send-label="Save").
+        const sendText = sendButton.dataset.sendLabel || (isQuoteReply ? "Reply" : "Send");
         // Reflect the user's send-key preference, not the editor mode.
         const enterSends = document.querySelector('main.main-content').dataset.sendOnEnter !== 'false';
         if (enterSends) {
@@ -1927,7 +1928,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[id^="send-button"]').forEach((btn) => {
             const form = btn.closest('form');
             const replyInput = form && form.querySelector('input[name="reply_type"]');
-            const label = replyInput && replyInput.value === 'quote' ? 'Reply' : 'Send';
+            const label = btn.dataset.sendLabel
+                || (replyInput && replyInput.value === 'quote' ? 'Reply' : 'Send');
             if (enabled) {
                 btn.innerHTML = `<span>${label}</span><span class="send-shortcut"><i class="bi bi-arrow-return-left"></i></span>`;
                 btn.title = `${label} (Enter)`;

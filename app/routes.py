@@ -791,6 +791,68 @@ def _notify_all_thread_participants(sender, parent_message, conv_id_str):
             )
 
 
+THREAD_PANEL_SELECTOR = "#right-panel-offcanvas"
+
+
+def message_oob_html(
+    message, reactions_map, attachments_map, *, is_in_thread_view, selector
+):
+    """``message.html`` as an OOB outerHTML swap of the copies matching ``selector``.
+
+    The swap attribute goes on the message element itself, so it replaces the
+    target with no wrapper div. Prefer this to a bare id swap
+    (``hx-swap-oob="true"``): htmx replaces *every* element with the id, so a
+    thread parent shown both in the channel and in the thread panel got one
+    rendering in both places, and the two differ (reply indicator, toolbar).
+    """
+    html = render_template(
+        "partials/message.html",
+        message=message,
+        reactions_map=reactions_map,
+        attachments_map=attachments_map,
+        Message=Message,
+        is_in_thread_view=is_in_thread_view,
+    )
+    return html.replace(
+        f'id="message-{message.id}"',
+        f'id="message-{message.id}" hx-swap-oob="outerHTML:{selector}"',
+        1,
+    )
+
+
+def message_update_oob(message, reactions_map, attachments_map):
+    """OOB HTML refreshing every on-page copy of an updated ``message``.
+
+    The channel copy gets the channel rendering. The thread panel's copy
+    (thread replies, and a thread parent shown at the top of its panel) gets
+    the thread rendering, sent only when the message is part of a thread, so
+    ordinary edits don't make htmx log a missing target.
+    """
+    in_thread = message.reply_type == "thread"
+    parts = []
+    if not in_thread:
+        parts.append(
+            message_oob_html(
+                message,
+                reactions_map,
+                attachments_map,
+                is_in_thread_view=False,
+                selector=f"#message-list #message-{message.id}",
+            )
+        )
+    if in_thread or message.replies.where(Message.reply_type == "thread").exists():
+        parts.append(
+            message_oob_html(
+                message,
+                reactions_map,
+                attachments_map,
+                is_in_thread_view=True,
+                selector=f"{THREAD_PANEL_SELECTOR} #message-{message.id}",
+            )
+        )
+    return "".join(parts)
+
+
 def _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str):
     """Broadcasts a thread reply to relevant users."""
     from app.blueprints.api_v1 import serialize_message
@@ -812,20 +874,15 @@ def _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str):
     parent_message = Message.get_by_id(parent_id)
     reactions_map_for_parent = get_reactions_for_messages(list((parent_message,)))
     attachments_map_for_parent = get_attachments_for_messages(list((parent_message,)))
-    parent_in_channel_html = render_template(
-        "partials/message.html",
-        message=parent_message,
-        reactions_map=reactions_map_for_parent,
-        attachments_map=attachments_map_for_parent,
-        Message=Message,
+    # Only the channel copy shows the reply count; leave the thread panel's
+    # copy of the parent alone (a bare id swap replaced it with this one).
+    broadcast_html += message_oob_html(
+        parent_message,
+        reactions_map_for_parent,
+        attachments_map_for_parent,
         is_in_thread_view=False,
+        selector=f"#message-list #message-{parent_message.id}",
     )
-
-    # Inject hx-swap-oob directly to avoid nested divs with duplicate IDs
-    parent_in_channel_oob = parent_in_channel_html.replace(
-        f'id="message-{parent_id}"', f'id="message-{parent_id}" hx-swap-oob="true"', 1
-    )
-    broadcast_html += parent_in_channel_oob
 
     # Delegate the notification loop to our new helper function
     _notify_all_thread_participants(sender, parent_message, conv_id_str)

@@ -6,7 +6,7 @@
         <small class="text-muted">
             {# Only show total votes if the user has already voted #}
             {% if poll_context.user_vote_option_id %}
-                <span id="poll-{{ poll_context.poll.id }}-total-votes">{{ poll_context.total_votes }} votes</span>
+                <span id="poll-{{ poll_context.poll.id }}-total-votes">{{ poll_context.total_votes }} vote{{ '' if poll_context.total_votes == 1 else 's' }}</span>
             {% else %}
                 Select an option to see the results.
             {% endif %}

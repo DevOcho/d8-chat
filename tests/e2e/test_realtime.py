@@ -339,7 +339,7 @@ def test_poll_appears_and_tallies_update_live(alice, bob, user_b):
 
     # Voting reveals the tallies to the voter; later votes update them live.
     alice_poll.get_by_role("button", name="Tacos").click()
-    expect(alice_poll).to_contain_text(re.compile(r"\b1 votes?\b"))
+    expect(alice_poll).to_contain_text(re.compile(r"\b1 vote\b"))
     bob_poll.get_by_role("button", name="Pizza").click()
     expect(bob_poll).to_contain_text(re.compile(r"\b2 votes\b"))
     expect(alice_poll).to_contain_text(

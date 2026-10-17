@@ -605,7 +605,7 @@ export function testPageFrame(id = 'test-1792245600') {
         incident: {
             id,
             title: 'Test page',
-            details: 'This is a test of your D8-Chat pager. Click Acknowledge to stop it.',
+            details: 'This is a test of your D8-Chat pager. Nothing is down.',
             source: 'test',
             source_url: null,
             state: 'triggered',

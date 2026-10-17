@@ -694,7 +694,7 @@ def send_test_page(user):
         "incident": {
             "id": f"test-{int(time.time())}",
             "title": "Test page",
-            "details": "This is a test of your D8-Chat pager. Click Acknowledge to stop it.",
+            "details": "This is a test of your D8-Chat pager. Nothing is down.",
             "source": "test",
             "source_url": None,
             "state": "triggered",

@@ -84,6 +84,7 @@ def test_vote_on_poll(logged_in_client, setup_poll):
     res1 = logged_in_client.post(f"/chat/poll/option/{opt1.id}/vote")
     assert res1.status_code == 200
     assert Vote.select().where(Vote.option == opt1).count() == 1
+    assert b"1 vote<" in res1.data and b"1 votes" not in res1.data
 
     # 2. Switch vote to option 2
     res2 = logged_in_client.post(f"/chat/poll/option/{opt2.id}/vote")

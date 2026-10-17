@@ -90,6 +90,20 @@ describe('composer initialization', () => {
         await env.tick(50);
         expect(env.$('#send-button').title).toBe('Send (Ctrl+Enter)');
     });
+
+    it('keeps an edit composer\'s own label (data-send-label) instead of "Send"', async () => {
+        const editInput = chatInputDefault().replace(
+            'class="btn btn-primary send-btn-dynamic"></button>',
+            'class="btn btn-primary send-btn-dynamic" data-send-label="Save"></button>',
+        );
+        const env = await createPage({
+            html: chatPage({ pane: conversationPane(), inputLoader: true, user: { ...ME } }),
+            xhrRoutes: [{ match: '/chat/input/default', reply: { body: editInput } }],
+        });
+        await env.tick(50);
+        expect(env.$('#send-button').title).toBe('Save (Enter)');
+        expect(env.$('#send-button').textContent).toContain('Save');
+    });
 });
 
 describe('mention autocomplete (rich editor)', () => {

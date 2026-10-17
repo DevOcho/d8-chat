@@ -919,3 +919,98 @@ class TestMessageGrouping:
         first = _grp_msg(1, self.BASE + timedelta(seconds=30))
         annotate_message_grouping([first], prev_message=prev)
         assert first.same_sender is True
+
+
+# --- Which on-page copies a message update replaces ---
+#
+# htmx replaces every element matching an OOB id, and a thread parent appears
+# twice (channel + thread panel) with different renderings, so updates must
+# target each copy with its own rendering.
+
+
+def _broadcast_html(mock_broadcast):
+    return "".join(c.args[1]["_raw_html"] for c in mock_broadcast.call_args_list)
+
+
+def _thread_reply(parent, user, content="a reply"):
+    return Message.create(
+        user=user,
+        conversation=parent.conversation,
+        content=content,
+        reply_type="thread",
+        parent_message=parent,
+    )
+
+
+CHANNEL_COPY = 'hx-swap-oob="outerHTML:#message-list #message-{}"'
+PANEL_COPY = 'hx-swap-oob="outerHTML:#right-panel-offcanvas #message-{}"'
+
+
+def test_edit_of_a_plain_message_targets_only_the_channel_copy(
+    logged_in_client, setup_conversation, mocker
+):
+    broadcast = mocker.patch("app.chat_manager.chat_manager.broadcast")
+    message = setup_conversation["message"]
+    logged_in_client.put(f"/chat/message/{message.id}", data={"content": "edited"})
+    html = _broadcast_html(broadcast)
+    assert CHANNEL_COPY.format(message.id) in html
+    assert PANEL_COPY.format(message.id) not in html
+    assert 'hx-swap-oob="true"' not in html
+
+
+def test_edit_of_a_thread_parent_in_the_panel_keeps_the_channel_indicator(
+    logged_in_client, setup_conversation, mocker
+):
+    """An edit made in the thread panel used to broadcast the panel rendering
+    to both copies, wiping the channel copy's "N replies" indicator."""
+    broadcast = mocker.patch("app.chat_manager.chat_manager.broadcast")
+    parent = setup_conversation["message"]
+    _thread_reply(parent, setup_conversation["user2"])
+    logged_in_client.put(
+        f"/chat/message/{parent.id}",
+        data={"content": "edited", "is_in_thread_view": "true"},
+    )
+    html = _broadcast_html(broadcast)
+    channel_at = html.index(CHANNEL_COPY.format(parent.id))
+    panel_at = html.index(PANEL_COPY.format(parent.id))
+    indicator = f'id="thread-indicator-{parent.id}"'
+    # Exactly one indicator, and it's in the channel rendering (sent first).
+    assert html.count(indicator) == 1
+    assert channel_at < html.index(indicator) < panel_at
+
+
+def test_edit_of_a_thread_reply_targets_only_the_panel_copy(
+    logged_in_client, setup_conversation, mocker
+):
+    reply = _thread_reply(setup_conversation["message"], setup_conversation["user1"])
+    broadcast = mocker.patch("app.chat_manager.chat_manager.broadcast")
+    logged_in_client.put(
+        f"/chat/message/{reply.id}",
+        data={"content": "edited", "is_in_thread_view": "true"},
+    )
+    html = _broadcast_html(broadcast)
+    assert PANEL_COPY.format(reply.id) in html
+    assert CHANNEL_COPY.format(reply.id) not in html
+
+
+def test_thread_reply_updates_only_the_channel_copy_of_its_parent(
+    app, setup_conversation, mocker
+):
+    """The reply count lives on the channel copy; a bare id swap also replaced
+    the thread panel's copy of the parent with the channel rendering."""
+    from app.routes import _broadcast_thread_reply
+
+    parent = setup_conversation["message"]
+    reply = _thread_reply(parent, setup_conversation["user2"])
+    broadcast = mocker.patch("app.chat_manager.chat_manager.broadcast")
+    with app.test_request_context("/"):
+        _broadcast_thread_reply(
+            setup_conversation["user2"],
+            reply,
+            parent.id,
+            parent.conversation.conversation_id_str,
+        )
+    html = _broadcast_html(broadcast)
+    assert CHANNEL_COPY.format(parent.id) in html
+    assert PANEL_COPY.format(parent.id) not in html
+    assert f'id="message-{parent.id}" hx-swap-oob="true"' not in html

@@ -1,7 +1,7 @@
 {# This partial contains ONLY the OOB swaps to update an existing poll view #}
 <!-- Update the total vote count -->
 <span id="poll-{{ poll_context.poll.id }}-total-votes"
-      hx-swap-oob="innerHTML">{{ poll_context.total_votes }} votes</span>
+      hx-swap-oob="innerHTML">{{ poll_context.total_votes }} vote{{ '' if poll_context.total_votes == 1 else 's' }}</span>
 <!-- Loop through options to update each progress bar and count -->
 {% for option in poll_context.options %}
     {% set vote_percentage = (option.count / poll_context.total_votes * 100) if poll_context.total_votes > 0 else 0 %}

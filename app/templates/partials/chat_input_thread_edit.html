@@ -2,7 +2,7 @@
 <div id="thread-input-container-{{ message.parent_message.id }}"
      class="chat-input-form">
     <form hx-put="/chat/message/{{ message.id }}"
-          hx-target="#message-{{ message.id }}"
+          hx-target="#right-panel-offcanvas #message-{{ message.id }}"
           hx-swap="outerHTML"
           hx-vals='{"is_in_thread_view": "true"}'
           hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/thread/{{ message.parent_message.id }}', {target: '#thread-input-container-{{ message.parent_message.id }}', swap: 'outerHTML'})"
@@ -100,7 +100,8 @@
                 <div class="ms-auto d-flex align-items-center">
                     <button id="send-button-thread-{{ message.parent_message.id }}"
                             type="submit"
-                            class="btn btn-primary send-btn-dynamic">Save Changes</button>
+                            class="btn btn-primary send-btn-dynamic"
+                            data-send-label="Save">Save</button>
                 </div>
             </div>
         </div>
