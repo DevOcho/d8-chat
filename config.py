@@ -154,6 +154,10 @@ class TestConfig(Config):
     MINIO_ENDPOINT = "testhost:9000"
     MINIO_PUBLIC_URL = "http://testhost:9000"
 
+    # Redis is mocked in tests, but the client is still built from this URL.
+    # Set it here so the suite doesn't depend on a developer's .env (CI has none).
+    VALKEY_URL = "redis://localhost:6379/0"
+
     # Disable rate limiting in tests so requests are never blocked
     RATELIMIT_ENABLED = False
     RATELIMIT_STORAGE_URI = "memory://"

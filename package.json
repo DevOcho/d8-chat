@@ -1,0 +1,17 @@
+{
+  "name": "d8-chat-js-tests",
+  "private": true,
+  "description": "Unit tests for the browser JavaScript in app/static/js (Vitest + jsdom).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sinonjs/fake-timers": "^15.4.0",
+    "jsdom": "^29.1.1",
+    "vitest": "^4.1.12"
+  }
+}

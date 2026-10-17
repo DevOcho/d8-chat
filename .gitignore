@@ -239,3 +239,6 @@ __pycache__/
 *-firebase-adminsdk-*.json
 *service-account*.json
 secrets/
+
+# JavaScript unit tests (npm / Vitest)
+node_modules/
