@@ -263,9 +263,12 @@ def _validate_config(app):
         return
 
     if not cfg.get("MINIO_ACCESS_KEY") or not cfg.get("MINIO_SECRET_KEY"):
-        raise RuntimeError("MINIO_ROOT_USER and MINIO_ROOT_PASSWORD must both be set.")
+        raise RuntimeError(
+            "S3_ACCESS_KEY and S3_SECRET_KEY (or MINIO_ROOT_USER and MINIO_ROOT_PASSWORD) "
+            "must both be set."
+        )
     if not cfg.get("MINIO_PUBLIC_URL"):
-        raise RuntimeError("MINIO_PUBLIC_URL must be set.")
+        raise RuntimeError("S3_PUBLIC_URL (or MINIO_PUBLIC_URL) must be set.")
 
     # OIDC is optional, but if any of the three fields is set, all three must
     # be set — partial config silently falls back to broken auth.

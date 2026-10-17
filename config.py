@@ -6,6 +6,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def s3_setting(name, legacy, default=None):
+    """An object-storage setting, from its S3_* name or its older MINIO_* one.
+
+    S3_ENDPOINT is the switch: once it is set, each S3_* name wins (falling back
+    to its MINIO_* name); until then only the MINIO_* names count. That lets
+    Garage's credentials sit in the Secret, ready for the setup and copy Jobs,
+    while the app keeps using MinIO (which reads MINIO_ROOT_USER/PASSWORD
+    itself) until the cutover adds S3_ENDPOINT to the configmap.
+    """
+    if os.environ.get("S3_ENDPOINT"):
+        value = os.environ.get(name) or os.environ.get(legacy)
+    else:
+        value = os.environ.get(legacy)
+    return value or default
+
+
 class Config:
     """Base configuration."""
 
@@ -41,13 +57,16 @@ class Config:
     OIDC_CLIENT_SECRET = os.environ.get("OIDC_CLIENT_SECRET")
     OIDC_ISSUER_URL = os.environ.get("OIDC_ISSUER_URL")
 
-    # Minio/S3 Settings
-    MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
-    MINIO_ACCESS_KEY = os.environ.get("MINIO_ROOT_USER")
-    MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
-    MINIO_BUCKET_NAME = os.environ.get("MINIO_BUCKET_NAME", "d8chat")
-    MINIO_SECURE = os.environ.get("MINIO_SECURE", "False").lower() == "true"
-    MINIO_PUBLIC_URL = os.environ.get("MINIO_PUBLIC_URL")
+    # Object storage (any S3 API: Garage in k8s, MinIO in older setups).
+    # Env: S3_ENDPOINT, S3_ACCESS_KEY, S3_SECRET_KEY, S3_BUCKET_NAME, S3_SECURE,
+    # S3_PUBLIC_URL, used only once S3_ENDPOINT is set (see s3_setting);
+    # otherwise the MINIO_* names.
+    MINIO_ENDPOINT = s3_setting("S3_ENDPOINT", "MINIO_ENDPOINT", "localhost:9000")
+    MINIO_ACCESS_KEY = s3_setting("S3_ACCESS_KEY", "MINIO_ROOT_USER")
+    MINIO_SECRET_KEY = s3_setting("S3_SECRET_KEY", "MINIO_ROOT_PASSWORD")
+    MINIO_BUCKET_NAME = s3_setting("S3_BUCKET_NAME", "MINIO_BUCKET_NAME", "d8chat")
+    MINIO_SECURE = s3_setting("S3_SECURE", "MINIO_SECURE", "False").lower() == "true"
+    MINIO_PUBLIC_URL = s3_setting("S3_PUBLIC_URL", "MINIO_PUBLIC_URL")
 
     # Valkey Config for message broker
     VALKEY_URL = os.environ.get("VALKEY_URL")

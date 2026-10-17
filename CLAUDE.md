@@ -259,6 +259,10 @@ Copy `example.env` to `.env`. Required variables:
 - `DATABASE_URI` or `POSTGRES_*` components
 - `VALKEY_URL` — Redis/Valkey connection string
 - `MINIO_ENDPOINT`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `MINIO_BUCKET_NAME`, `MINIO_PUBLIC_URL`
+  (or the `S3_*` equivalents: `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`,
+  `S3_BUCKET_NAME`, `S3_SECURE`, `S3_PUBLIC_URL`). Setting `S3_ENDPOINT` switches
+  the app to the `S3_*` names; without it they're ignored. The k8s deployments
+  are moving from MinIO to Garage, see `d8-chat-devops`.
 
 Optional SSO: `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`
 
