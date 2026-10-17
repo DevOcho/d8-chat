@@ -106,55 +106,71 @@
     </div>
 </div>
 <!-- Chart.js (vendored locally — see static/js/local/chart.umd.min.js) -->
-<script src="{{ static_url('js/local/chart.umd.min.js') }}"></script>
 <script>
-    // No DOMContentLoaded wrapper needed, this will run when the partial is loaded.
     (function() {
-        const ctx = document.getElementById('messagesChart');
-        if (!ctx) return; // Defensive check
+        // Draw only once chart.js is there. When this partial is swapped in by
+        // htmx, a <script src> next to it loads asynchronously, after this
+        // inline script has already run, which left the chart blank.
+        function draw() {
+            const ctx = document.getElementById('messagesChart');
+            if (!ctx) return; // Defensive check
 
-        // --- Dark Mode Logic for Chart ---
-        const htmlElement = document.documentElement;
-        const isDarkMode = htmlElement.getAttribute('data-bs-theme') === 'dark';
-        const gridColor = isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-        const textColor = isDarkMode ? '#dee2e6' : '#6c757d';
+            // --- Dark Mode Logic for Chart ---
+            const htmlElement = document.documentElement;
+            const isDarkMode = htmlElement.getAttribute('data-bs-theme') === 'dark';
+            const gridColor = isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+            const textColor = isDarkMode ? '#dee2e6' : '#6c757d';
 
-        // Use the data passed from the Flask template
-        const labels = {{ chart_labels | tojson }};
-        const dataPoints = {{ chart_values | tojson }};
+            // Hour starts come as UTC ISO strings; label them in the viewer's
+            // own time zone, the current hour as "Now".
+            const hours = {{ chart_hours | tojson }};
+            const labels = hours.map((iso, i) => (i === hours.length - 1
+                ? 'Now'
+                : new Date(iso).toLocaleTimeString([], { hour: 'numeric' })));
+            const dataPoints = {{ chart_values | tojson }};
 
-        new Chart(ctx, {
-            type: 'bar', // <-- CHANGE: Chart type is now 'bar'
-            data: {
-                labels: labels,
-                datasets: [{
-                    label: 'Messages',
-                    data: dataPoints,
-                    backgroundColor: 'rgba(54, 185, 204, 0.5)', // Fill color
-                    borderColor: 'rgb(54, 185, 204)',     // Border color
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            precision: 0,
-                            color: textColor
-                        },
-                        grid: { color: gridColor }
-                    },
-                    x: {
-                        ticks: { color: textColor },
-                        grid: { color: gridColor }
-                    }
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Messages',
+                        data: dataPoints,
+                        backgroundColor: 'rgba(54, 185, 204, 0.5)', // Fill color
+                        borderColor: 'rgb(54, 185, 204)',     // Border color
+                        borderWidth: 1
+                    }]
                 },
-                plugins: {
-                    legend: { display: false }
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                precision: 0,
+                                color: textColor
+                            },
+                            grid: { color: gridColor }
+                        },
+                        x: {
+                            ticks: { color: textColor },
+                            grid: { color: gridColor }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false }
+                    }
                 }
-            }
-        });
+            });
+        }
+
+        if (window.Chart) {
+            draw();
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = "{{ static_url('js/local/chart.umd.min.js') }}";
+        script.onload = draw;
+        document.head.appendChild(script);
     })();
 </script>
 <style>

@@ -117,15 +117,9 @@ def dashboard():
     # 5. Sort the data by hour and prepare labels and values for Chart.js.
     sorted_chart_data = sorted(chart_data.items())
 
-    # Format the hour labels for readability (e.g., "11 PM", "12 AM", "Now")
-    chart_labels = []
-    for hour, count in sorted_chart_data:
-        if hour.hour == now.hour and hour.day == now.day:
-            chart_labels.append("Now")
-        else:
-            chart_labels.append(
-                hour.strftime("%-I %p").strip()
-            )  # Use '%#I' on Windows if this fails
+    # Hour starts as UTC ISO strings; the page labels them in the viewer's time
+    # zone (server-side labels showed UTC hours).
+    chart_hours = [f"{hour.isoformat()}Z" for hour, _ in sorted_chart_data]
 
     chart_values = [count for hour, count in sorted_chart_data]
     # --- [END OF NEW CHART LOGIC] ---
@@ -145,7 +139,7 @@ def dashboard():
         total_channels=total_channels,
         total_storage_bytes=total_storage_bytes,
         avg_mps=avg_mps,
-        chart_labels=chart_labels,
+        chart_hours=chart_hours,
         chart_values=chart_values,
     )
 

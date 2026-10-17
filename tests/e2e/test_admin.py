@@ -7,6 +7,7 @@ the Playwright client. Stick to UI-observable outcomes here; the audit-log
 write is covered by ``tests/test_audit.py`` against the in-memory DB.
 """
 
+import re
 import secrets
 
 from playwright.sync_api import Page, expect
@@ -40,9 +41,31 @@ def test_admin_creates_user_via_dashboard(logged_in_page: Page):
     expect(content.get_by_role("cell", name=new_username, exact=True)).to_be_visible()
 
 
-def test_admin_dashboard_loads(logged_in_page: Page):
-    """Sanity: chart.js is vendored locally — confirm the dashboard loads
-    without going to the network for chart.js."""
+def _chart_drawn(page: Page) -> None:
+    """The canvas shows up whether or not Chart.js ran; ask Chart.js itself."""
+    expect(page.locator("#messagesChart")).to_be_visible(timeout=10_000)
+    page.wait_for_function(
+        "() => window.Chart && Chart.getChart('messagesChart')"
+        " && Chart.getChart('messagesChart').data.labels.length === 24",
+        timeout=10_000,
+    )
+
+
+def test_admin_dashboard_draws_the_messages_chart(logged_in_page: Page):
+    """chart.js is vendored locally; the 24-hour chart must actually draw."""
     logged_in_page.goto("/admin/")
-    # The dashboard partial includes a `<canvas id="messagesChart">`.
-    expect(logged_in_page.locator("#messagesChart")).to_be_visible(timeout=10_000)
+    _chart_drawn(logged_in_page)
+
+
+def test_dashboard_chart_draws_when_reached_from_the_sidebar(logged_in_page: Page):
+    """Regression: reaching the Dashboard from another admin page left the
+    chart blank (the inline script ran before chart.js had loaded)."""
+    page = logged_in_page
+    page.goto("/admin/users")
+    page.locator(".admin-sidebar").get_by_role("link", name="Dashboard").click()
+    _chart_drawn(page)
+    # The address bar and the sidebar follow the page shown.
+    expect(page).to_have_url(re.compile(r"/admin/$"))
+    expect(page.locator(".admin-sidebar .nav-link.active")).to_have_text(
+        re.compile("Dashboard")
+    )
