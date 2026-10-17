@@ -48,7 +48,6 @@ from app.routes import (
     broadcast_conversation_read,
     get_attachments_for_messages,
     get_reactions_for_messages,
-    had_unread_messages,
 )
 from app.services import minio_service
 from app.services.image_processing import reencode_avatar
@@ -132,6 +131,17 @@ def api_token_required(f):
         return f(*args, **kwargs)
 
     return decorated
+
+
+def _keys_match(expected, provided):
+    """Constant-time shared-secret check; False when no key is configured.
+
+    Compares bytes: ``hmac.compare_digest`` on ``str`` raises ``TypeError``
+    for non-ASCII input, which turned a junk header into a 500 instead of 401.
+    """
+    if not expected:
+        return False
+    return hmac.compare_digest(expected.encode(), (provided or "").encode())
 
 
 def user_to_dict(user):
@@ -1205,13 +1215,12 @@ def mark_conversation_read(conv_id_str):
         return jsonify({"error": "Access denied"}), 403
 
     status, _ = UserConversationStatus.get_or_create(user=g.api_user, conversation=conv)
-    had_unread = had_unread_messages(g.api_user, conv, status.last_read_timestamp)
     status.last_read_timestamp = utc_now()
     status.save()
 
-    # Idempotent: an already-read conversation has no badge anywhere to clear.
-    if had_unread:
-        broadcast_conversation_read(g.api_user, conv)
+    # Always re-send the clear, even when nothing was unread: pub/sub is
+    # at-most-once, so this heals a badge another client missed earlier.
+    broadcast_conversation_read(g.api_user, conv)
 
     return "", 204
 
@@ -1590,7 +1599,7 @@ def internal_notify():
 
     expected_key = current_app.config.get("INTERNAL_NOTIFY_KEY")
     provided_key = request.headers.get("X-Internal-Key", "")
-    if not expected_key or not hmac.compare_digest(expected_key, provided_key):
+    if not _keys_match(expected_key, provided_key):
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
@@ -1682,7 +1691,7 @@ def uptime_kuma_webhook():
     expected_key = current_app.config.get("UPTIME_KUMA_WEBHOOK_KEY")
     auth_header = request.headers.get("Authorization", "")
     provided_key = auth_header[7:] if auth_header.startswith("Bearer ") else ""
-    if not expected_key or not hmac.compare_digest(expected_key, provided_key):
+    if not _keys_match(expected_key, provided_key):
         return jsonify({"error": "Unauthorized"}), 401
 
     payload = request.get_json(silent=True)
@@ -1836,6 +1845,8 @@ def oncall_acknowledge(incident_id):
             {"error": "You are not in this incident's escalation chain"}
         ), 403
     if not oncall_service.acknowledge_incident(incident, g.api_user):
+        # Re-read: someone else just won, so the copy we loaded is stale.
+        incident = Incident.get_by_id(incident.id)
         return jsonify(
             {
                 "error": f"Incident is already {incident.state}",
@@ -1862,6 +1873,7 @@ def oncall_resolve(incident_id):
         ), 403
     resolved = oncall_service.resolve_incident(incident, user=g.api_user)
     if resolved is None:
+        incident = Incident.get_by_id(incident.id)
         return jsonify(
             {
                 "error": "Incident is already resolved",

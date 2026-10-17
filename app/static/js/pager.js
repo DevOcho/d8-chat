@@ -8,7 +8,8 @@
  *
  * Delivery is belt-and-braces because pub/sub is at-most-once: the server
  * re-sends every page each minute, and this file re-syncs from
- * GET /oncall/pages/active on load and on every WebSocket (re)connect.
+ * GET /oncall/pages/active on load, on every WebSocket (re)connect, and every
+ * RESYNC_MS while ringing, so a lost `page_cleared` can't leave the siren on.
  *
  * The siren is synthesized with Web Audio (no asset). Its two-tone wail comes
  * from a square-wave LFO modulating the oscillator's frequency on the audio
@@ -23,6 +24,7 @@
     const SIREN_CENTER_HZ = 865;    // swings ±175 Hz → ~690 / ~1040 Hz
     const SIREN_SWING_HZ = 175;
     const SIREN_RATE_HZ = 1.6;      // tone changes per second / 2
+    const RESYNC_MS = 30000;        // while ringing, re-check what's still active
 
     const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
 
@@ -35,11 +37,13 @@
     }
 
     const PagerManager = {
-        entries: new Map(),         // incident id (string) → { incident, test }
+        entries: new Map(),         // incident id (string) → { incident, test, since }
         notifications: new Map(),   // incident id → Notification
+        clearedAt: new Map(),       // incident id → when it was cleared here (ms)
         audioCtx: null,
         siren: null,
         titleTimer: null,
+        resyncTimer: null,
         originalTitle: document.title,
 
         init() {
@@ -62,6 +66,12 @@
             });
 
             document.body.addEventListener('htmx:wsOpen', () => this.syncActive());
+            // Background tabs throttle timers, so also check on coming back.
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && this.entries.size) {
+                    this.syncActive();
+                }
+            });
             ['htmx:afterSwap', 'htmx:oobAfterSwap'].forEach((name) => {
                 document.body.addEventListener(name, () => {
                     setTimeout(() => this.formatTimes(document), 0);
@@ -79,17 +89,20 @@
         page(incident, frame = {}) {
             const id = String(incident.id);
             const isNew = !this.entries.has(id);
-            this.entries.set(id, { incident, test: !!frame.test });
+            const since = isNew ? Date.now() : this.entries.get(id).since;
+            this.entries.set(id, { incident, test: !!frame.test, since });
             this.render();
             this.overlay.hidden = false;
             document.body.classList.add('pager-active');
             this.startSiren();
             this.startTitleFlash();
+            this.startResync();
             this.notify(incident, !isNew);
         },
 
         clear(id) {
             if (!this.entries.delete(id)) return;
+            this.clearedAt.set(id, Date.now());
             const notification = this.notifications.get(id);
             if (notification) notification.close();
             this.notifications.delete(id);
@@ -101,6 +114,20 @@
             document.body.classList.remove('pager-active');
             this.stopSiren();
             this.stopTitleFlash();
+            this.stopResync();
+        },
+
+        // A `page_cleared` frame lost while the socket was reconnecting would
+        // leave the siren on for an incident someone already acknowledged, so
+        // poll the server's view while anything is ringing.
+        startResync() {
+            if (this.resyncTimer) return;
+            this.resyncTimer = setInterval(() => this.syncActive(), RESYNC_MS);
+        },
+
+        stopResync() {
+            clearInterval(this.resyncTimer);
+            this.resyncTimer = null;
         },
 
         async acknowledge(id, button) {
@@ -145,6 +172,7 @@
         },
 
         async syncActive() {
+            const startedAt = Date.now();
             try {
                 const response = await fetch('/oncall/pages/active', {
                     credentials: 'same-origin',
@@ -154,9 +182,21 @@
                 const data = await response.json();
                 const live = new Set(data.incidents.map((i) => String(i.id)));
                 for (const [id, entry] of this.entries) {
-                    if (!entry.test && !live.has(id)) this.clear(id);
+                    // A page that arrived after this request left isn't in its
+                    // (older) answer yet; clearing it would silence a new page.
+                    if (!entry.test && !live.has(id) && entry.since < startedAt) this.clear(id);
                 }
-                data.incidents.forEach((incident) => this.page(incident, { repeat: true }));
+                data.incidents.forEach((incident) => {
+                    const id = String(incident.id);
+                    // Already ringing: leave it (no re-notify every poll).
+                    // Cleared while this request was in flight: the answer is
+                    // stale, so don't bring it back.
+                    if (this.entries.has(id) || this.clearedAt.get(id) >= startedAt) return;
+                    this.page(incident, { repeat: true });
+                });
+                for (const [id, at] of this.clearedAt) {
+                    if (startedAt - at > RESYNC_MS * 4) this.clearedAt.delete(id);
+                }
             } catch (err) {
                 console.warn('Pager sync failed:', err);
             }
@@ -325,7 +365,8 @@
                     tag: `incident-${id}`,
                     requireInteraction: true,
                     renotify,
-                    icon: '/favicon-32x32.png',
+                    icon: document.querySelector('link[rel="icon"][sizes="32x32"]')?.href
+                        || '/favicon-32x32.png',
                 });
                 notification.onclick = () => {
                     window.focus();

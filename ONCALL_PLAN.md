@@ -9,7 +9,7 @@ documented in `MOBILE_WEBSOCKET_API_DOCS.md` §6. Not yet deployed to prod.
 | Piece | Location |
 |---|---|
 | Models | `app/models.py`: `UserGroup`, `OnCallSchedule`, `OnCallScheduleMember`, `OnCallOverride`, `EscalationPolicy`, `EscalationLevel`, `Incident`, `IncidentPage`, `IncidentEvent` |
-| Migrations | `0006_uptime_bot.py` (bot + channel), `0007_oncall.py` (tables + default rotation/policy) |
+| Migrations | `0006_uptime_bot.py` (bot + channel), `0007_oncall.py` (tables + default rotation/policy), `0008_incident_open_unique.py` (one open incident per monitor) |
 | Core logic | `app/services/oncall_service.py` (rotation math, escalation, ticker, Uptime Kuma handling) |
 | Groups / SSO sync | `app/groups.py`, `app/sso.py` (`groups_claim`) |
 | Webhook + mobile API | `app/blueprints/api_v1.py` (`/integrations/uptime-kuma`, `/oncall/*`) |
@@ -22,7 +22,7 @@ documented in `MOBILE_WEBSOCKET_API_DOCS.md` §6. Not yet deployed to prod.
 ### Production setup checklist
 1. Set `UPTIME_KUMA_WEBHOOK_KEY` (a random 32+ char secret) in the prod env, and
    `UPTIME_KUMA_CHANNEL` if it shouldn't be `devops-uptime`.
-2. Run `auto migrate d8-chat` / `./smalls.py migrate` (0006 + 0007).
+2. Run `auto migrate d8-chat` / `./smalls.py migrate` (0006, 0007 and 0008). The deploy pipeline's migrate Job does this.
 3. In Authentik, create groups **`devops-lead`** (Robert), **`director`**
    (Emilio), and **`ceo`** (Kenny). The default `profile` scope mapping already
    sends `groups` in the ID token. Group membership syncs **at each SSO login**,

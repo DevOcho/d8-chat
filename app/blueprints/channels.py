@@ -81,10 +81,7 @@ def get_channel_chat(channel_id):
     last_seen_mention = status.last_seen_mention_id or 0
     status.last_read_timestamp = utc_now()
     status.save()
-
-    # Clear this conversation's badge on the user's other tabs and devices.
-    if had_unread_messages(g.user, conversation, last_read_timestamp):
-        broadcast_conversation_read(g.user, conversation)
+    had_unread = had_unread_messages(g.user, conversation, last_read_timestamp)
 
     # Get the latest messages
     messages = list(
@@ -154,6 +151,14 @@ def get_channel_chat(channel_id):
 
     # Check for other unreads and add the result to the response
     read_state_oob_html = check_and_get_read_state_oob(g.user, conversation)
+
+    # Clear the badge on the user's other tabs and devices too, with the same
+    # HTML this tab gets. Only when something was unread: switching channels
+    # is frequent, and an already-read one has no badge anywhere.
+    if had_unread:
+        broadcast_conversation_read(
+            g.user, conversation, clear_badge_html + read_state_oob_html
+        )
 
     full_response = (
         messages_html

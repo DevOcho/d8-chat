@@ -247,6 +247,27 @@ def test_uptime_kuma_webhook_fails_closed_when_no_key_is_configured(app, client)
     assert res.status_code == 401
 
 
+@pytest.mark.parametrize(
+    ("url", "config_key", "header"),
+    [
+        (
+            "/api/v1/integrations/uptime-kuma",
+            "UPTIME_KUMA_WEBHOOK_KEY",
+            "Authorization",
+        ),
+        ("/api/v1/internal/notify", "INTERNAL_NOTIFY_KEY", "X-Internal-Key"),
+    ],
+)
+def test_shared_secret_endpoints_reject_non_ascii_keys(
+    app, client, url, config_key, header
+):
+    """compare_digest on str raises for non-ASCII; that must be a 401, not 500."""
+    app.config[config_key] = "the-real-key"
+    value = "Bearer é" if header == "Authorization" else "é"
+    res = client.post(url, json={"msg": "hi"}, headers={header: value})
+    assert res.status_code == 401
+
+
 def _mock_ws():
     ws = Mock()
     ws.receive.return_value = None

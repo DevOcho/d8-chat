@@ -350,6 +350,81 @@ def test_resend_pages_every_minute_once(oncall):
     assert len(repeats) == 1
 
 
+def test_only_one_open_incident_per_monitor(oncall):
+    """The DB refuses a second open incident for the same dedupe key, so a
+    racing duplicate can't page everyone twice."""
+    first = _trigger(oncall)
+    assert _trigger(oncall) is None
+    assert Incident.select().count() == 1
+    assert len([f for f in _frames(oncall.eng.id, "page") if not f["repeat"]]) == 1
+    # Once resolved, the monitor can open a new incident.
+    oncall_service.resolve_incident(first)
+    assert _trigger(oncall) is not None
+
+
+def test_racing_down_webhook_becomes_a_repeat(client, oncall, mocker):
+    """Both workers saw no open incident; the loser reports the winner's."""
+    down = client.post(
+        "/api/v1/integrations/uptime-kuma", json=_kuma(0), headers=KUMA_HEADERS
+    )
+    winner = Incident.get_by_id(down.get_json()["incident_id"])
+    mocker.patch.object(oncall_service, "open_incident_for", side_effect=[None, winner])
+    res = client.post(
+        "/api/v1/integrations/uptime-kuma", json=_kuma(0), headers=KUMA_HEADERS
+    )
+    assert res.get_json()["incident_id"] == winner.id
+    assert res.get_json()["repeat"] is True
+    assert Incident.select().count() == 1
+
+
+def test_escalation_failure_skips_only_that_incident(oncall, mocker):
+    """A failure after the claim (say Redis down for the bot message) must
+    not stop the other due incidents."""
+    a = _trigger(oncall)
+    b = oncall_service.trigger_incident(
+        oncall.policy, oncall.channel, "uptime-kuma:99", "Other site", now=NOW
+    )
+    mocker.patch.object(
+        oncall_service, "post_bot_message", side_effect=RuntimeError("redis down")
+    )
+    assert oncall_service.run_escalations(NOW + 10 * MINUTE) == []
+    for incident in (a, b):
+        assert Incident.get_by_id(incident.id).current_level == 2
+
+
+def test_tick_resends_pages_even_when_escalation_fails(oncall, mocker):
+    mocker.patch.object(
+        oncall_service, "run_escalations", side_effect=RuntimeError("boom")
+    )
+    resend = mocker.patch.object(oncall_service, "resend_pages")
+    oncall_service.tick(NOW)
+    resend.assert_called_once_with(NOW)
+
+
+def test_paging_off_stops_open_incidents_and_back_on_resumes(
+    admin_client, oncall, mocker
+):
+    cleared = mocker.patch.object(oncall_service.push_service, "send_page_cleared")
+    incident = _trigger(oncall)
+    settings_url = f"/admin/oncall/policies/{oncall.policy.id}/settings"
+
+    admin_client.post(settings_url, data={"name": oncall.policy.name})
+
+    # The ringing pager is silenced, and nothing re-pages or escalates.
+    assert _frames(oncall.eng.id, "page_cleared")[-1]["state"] == "paused"
+    assert cleared.call_args.kwargs["alert"] == "🔕 Acme site: paging switched off"
+    assert oncall_service.active_pages_for(oncall.eng) == []
+    assert oncall_service.resend_pages(NOW + MINUTE) == []
+    assert oncall_service.run_escalations(NOW + 10 * MINUTE) == []
+    assert Incident.get_by_id(incident.id).state == "triggered"
+
+    admin_client.post(
+        settings_url, data={"name": oncall.policy.name, "is_active": "on"}
+    )
+    assert oncall_service.active_pages_for(oncall.eng) == [incident]
+    assert oncall_service.resend_pages(NOW + 2 * MINUTE) == [incident]
+
+
 def test_user_in_chain(oncall):
     incident = _trigger(oncall)
     outsider = _user("outsider")
@@ -577,6 +652,27 @@ def test_api_active_ack_and_detail(client, oncall):
     ).get_json()
     kinds = [e["kind"] for e in detail["incident"]["events"]]
     assert kinds[:3] == ["triggered", "paged", "acknowledged"]
+
+
+def test_api_ack_conflict_reports_the_current_state(client, oncall, mocker):
+    """Losing an acknowledge race returns the incident as it is now."""
+    incident = _trigger(oncall)
+    real_ack = oncall_service.acknowledge_incident
+
+    def lead_wins_first(inc, _user):
+        real_ack(inc, oncall.lead)
+        return False
+
+    mocker.patch.object(
+        oncall_service, "acknowledge_incident", side_effect=lead_wins_first
+    )
+    res = client.post(
+        f"/api/v1/oncall/incidents/{incident.id}/ack",
+        headers=_api_headers(oncall.eng),
+    )
+    assert res.status_code == 409
+    assert res.get_json()["error"] == "Incident is already acknowledged"
+    assert res.get_json()["incident"]["state"] == "acknowledged"
 
 
 def test_api_refuses_outsiders(client, oncall):

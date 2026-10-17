@@ -31,6 +31,7 @@ import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import current_app, render_template
+from peewee import IntegrityError
 
 from app.background import spawn_background
 from app.chat_manager import chat_manager
@@ -621,12 +622,17 @@ def _push_pages(incident_id, user_ids):
         )
 
 
-def _deliver_page_cleared(incident, user_ids):
-    """Silence ``user_ids``' pagers for ``incident`` (web + mobile)."""
+def _deliver_page_cleared(incident, user_ids, state=None):
+    """Silence ``user_ids``' pagers for ``incident`` (web + mobile).
+
+    ``state`` overrides the incident's own state in the frame and push, for
+    ``"paused"`` (paging switched off while the incident stays triggered).
+    """
+    state = state or incident.state
     frame = {
         "type": "page_cleared",
         "incident_id": incident.id,
-        "state": incident.state,
+        "state": state,
         "incident": serialize_incident(incident),
     }
     for user_id in user_ids:
@@ -637,7 +643,7 @@ def _deliver_page_cleared(incident, user_ids):
     spawn_background(
         _push_page_cleared,
         incident.id,
-        incident.state,
+        state,
         list(user_ids),
         title=incident.title,
         acknowledged_by=(
@@ -651,6 +657,8 @@ def _deliver_page_cleared(incident, user_ids):
 def _push_page_cleared(incident_id, state, user_ids, *, title, acknowledged_by=None):
     if state == "acknowledged" and acknowledged_by:
         alert = f"✅ {title} acknowledged by {acknowledged_by}"
+    elif state == "paused":
+        alert = f"🔕 {title}: paging switched off"
     else:
         alert = f"✅ {title} {state}"
     for user_id in user_ids:
@@ -658,6 +666,21 @@ def _push_page_cleared(incident_id, state, user_ids, *, title, acknowledged_by=N
             user_id,
             alert=alert,
             data={"type": "page_cleared", "incident_id": incident_id, "state": state},
+        )
+
+
+def silence_policy(policy):
+    """Stop the pagers ringing for ``policy``'s triggered incidents.
+
+    Called when an admin switches paging off. The incidents stay triggered
+    (the outage is still real), but nobody is paged until it's switched back
+    on, when the next tick re-pages and escalation resumes.
+    """
+    for incident in Incident.select().where(
+        (Incident.policy == policy) & (Incident.state == "triggered")
+    ):
+        _deliver_page_cleared(
+            incident, [u.id for u, _ in paged_users(incident)], state="paused"
         )
 
 
@@ -693,12 +716,29 @@ def send_test_page(user):
     )
 
 
+def _paging_enabled():
+    """WHERE clause: the incident's policy hasn't had paging switched off.
+
+    "Paging enabled = off" means nobody is paged, so it has to stop incidents
+    that are already ringing too, not only new DOWN events. An incident whose
+    policy was deleted keeps ringing until someone acknowledges it.
+    """
+    paused = EscalationPolicy.select(EscalationPolicy.id).where(
+        ~EscalationPolicy.is_active
+    )
+    return Incident.policy.is_null() | Incident.policy.not_in(paused)
+
+
 def active_pages_for(user):
     """Incidents currently paging ``user`` (state ``triggered``)."""
     return list(
         Incident.select()
         .join(IncidentPage)
-        .where((IncidentPage.user == user) & (Incident.state == "triggered"))
+        .where(
+            (IncidentPage.user == user)
+            & (Incident.state == "triggered")
+            & _paging_enabled()
+        )
         .order_by(Incident.id)
     )
 
@@ -713,6 +753,19 @@ def open_incident_for(dedupe_key):
         .where((Incident.dedupe_key == dedupe_key) & (Incident.state.in_(OPEN_STATES)))
         .order_by(Incident.id.desc())
         .first()
+    )
+
+
+def open_incidents_for(dedupe_key):
+    """Every open incident for ``dedupe_key``, oldest first.
+
+    The unique index allows only one, but an UP resolves them all anyway so a
+    stray duplicate can never keep paging after the monitor recovers.
+    """
+    return list(
+        Incident.select()
+        .where((Incident.dedupe_key == dedupe_key) & (Incident.state.in_(OPEN_STATES)))
+        .order_by(Incident.id)
     )
 
 
@@ -791,22 +844,29 @@ def trigger_incident(
     message=None,
     now=None,
 ):
-    """Open an incident and page level 1. Returns the incident."""
+    """Open an incident and page level 1. Returns the incident.
+
+    Returns ``None`` when another worker opened one for ``dedupe_key`` first
+    (the unique index on open incidents rejects the second).
+    """
     now = now or utc_now()
-    with db.atomic():
-        incident = Incident.create(
-            policy=policy,
-            channel=channel,
-            dedupe_key=dedupe_key,
-            title=title[:255],
-            details=details,
-            source_url=source_url,
-            message=message,
-            last_page_sent_at=now,
-        )
-        _record(incident, "triggered")
-        levels = sorted_levels(policy)
-        newly_paged = fire_level(incident, levels[0].level if levels else 1, now)
+    try:
+        with db.atomic():
+            incident = Incident.create(
+                policy=policy,
+                channel=channel,
+                dedupe_key=dedupe_key,
+                title=title[:255],
+                details=details,
+                source_url=source_url,
+                message=message,
+                last_page_sent_at=now,
+            )
+            _record(incident, "triggered")
+            levels = sorted_levels(policy)
+            newly_paged = fire_level(incident, levels[0].level if levels else 1, now)
+    except IntegrityError:
+        return None
     _deliver_page(incident, [u.id for u in newly_paged])
     return incident
 
@@ -826,43 +886,57 @@ def run_escalations(now=None):
             (Incident.state == "triggered")
             & (Incident.next_escalation_at.is_null(False))
             & (Incident.next_escalation_at <= now)
+            & _paging_enabled()
         )
     )
     for candidate in due:
-        with db.atomic():
-            won = (
-                Incident.update(next_escalation_at=None)
-                .where(
-                    (Incident.id == candidate.id)
-                    & (Incident.state == "triggered")
-                    & (Incident.current_level == candidate.current_level)
-                    & (Incident.next_escalation_at <= now)
-                )
-                .execute()
-            )
-            if not won:
-                continue
-            incident = Incident.get_by_id(candidate.id)
-            later = [
-                lvl
-                for lvl in sorted_levels(incident.policy)
-                if lvl.level > incident.current_level
-            ]
-            if not later:
-                continue
-            _record(incident, "escalated", level=later[0].level)
-            newly_paged = fire_level(incident, later[0].level, now)
-        _deliver_page(incident, [u.id for u in newly_paged])
-        if newly_paged:
-            names = ", ".join(f"**{display_name(u)}**" for u in newly_paged)
-            post_bot_message(
-                incident.channel,
-                f"⏫ **Escalated** · {incident.title} · not acknowledged, "
-                f"now paging {names} (level {incident.current_level})",
-            )
-        broadcast_incident_update(incident)
-        results.append((incident, newly_paged))
+        try:
+            escalated = _escalate(candidate, now)
+        except Exception:  # pylint: disable=broad-exception-caught
+            # A failure here (say a Redis blip in the bot message) must not
+            # stop the other due incidents or this tick's page re-sends.
+            current_app.logger.exception("escalating incident %s failed", candidate.id)
+            continue
+        if escalated is not None:
+            results.append(escalated)
     return results
+
+
+def _escalate(candidate, now):
+    """One claimed escalation step; ``(incident, newly_paged)`` or ``None``."""
+    with db.atomic():
+        won = (
+            Incident.update(next_escalation_at=None)
+            .where(
+                (Incident.id == candidate.id)
+                & (Incident.state == "triggered")
+                & (Incident.current_level == candidate.current_level)
+                & (Incident.next_escalation_at <= now)
+            )
+            .execute()
+        )
+        if not won:
+            return None
+        incident = Incident.get_by_id(candidate.id)
+        later = [
+            lvl
+            for lvl in sorted_levels(incident.policy)
+            if lvl.level > incident.current_level
+        ]
+        if not later:
+            return None
+        _record(incident, "escalated", level=later[0].level)
+        newly_paged = fire_level(incident, later[0].level, now)
+    _deliver_page(incident, [u.id for u in newly_paged])
+    if newly_paged:
+        names = ", ".join(f"**{display_name(u)}**" for u in newly_paged)
+        post_bot_message(
+            incident.channel,
+            f"⏫ **Escalated** · {incident.title} · not acknowledged, "
+            f"now paging {names} (level {incident.current_level})",
+        )
+    broadcast_incident_update(incident)
+    return incident, newly_paged
 
 
 def resend_pages(now=None):
@@ -878,7 +952,9 @@ def resend_pages(now=None):
     )
     resent = []
     for incident in list(
-        Incident.select().where((Incident.state == "triggered") & stale)
+        Incident.select().where(
+            (Incident.state == "triggered") & stale & _paging_enabled()
+        )
     ):
         won = (
             Incident.update(last_page_sent_at=now)
@@ -1046,21 +1122,36 @@ def handle_uptime_kuma_event(payload, channel, now=None):
 
         post_bot_message(channel, text, on_created=_open)
         incident = opened.get("incident")
+        if incident is None:
+            # Lost the race to a concurrent DOWN for the same monitor: that
+            # one is paging, so this is just a repeat.
+            existing = open_incident_for(dedupe_key)
+            if existing is not None:
+                _record(existing, "repeat_down", detail=detail)
+                return {"event": "down", "incident_id": existing.id, "repeat": True}
         return {"event": "down", "incident_id": incident.id if incident else None}
 
     if status == KUMA_UP:
-        existing = open_incident_for(dedupe_key)
+        open_incidents = open_incidents_for(dedupe_key)
+        resolved = [
+            r
+            for r in (
+                resolve_incident(i, user=None, now=now, announce=False)
+                for i in open_incidents
+            )
+            if r is not None
+        ]
         suffix = ""
-        if existing is not None:
-            resolved = resolve_incident(existing, user=None, now=now, announce=False)
-            if resolved is not None:
-                suffix = f" · down {format_duration(now - resolved.created_at)}"
-                if resolved.acknowledged_by_id:
-                    suffix += (
-                        f" · acknowledged by {display_name(resolved.acknowledged_by)}"
-                    )
+        if resolved:
+            suffix = f" · down {format_duration(now - resolved[0].created_at)}"
+            acked = next((r for r in resolved if r.acknowledged_by_id), None)
+            if acked is not None:
+                suffix += f" · acknowledged by {display_name(acked.acknowledged_by)}"
         post_bot_message(channel, f"🟢 **UP** · **{name}**{target_part}{suffix}")
-        return {"event": "up", "incident_id": existing.id if existing else None}
+        return {
+            "event": "up",
+            "incident_id": open_incidents[0].id if open_incidents else None,
+        }
 
     labels = {
         KUMA_PENDING: ("🟡", "PENDING", "pending"),
@@ -1081,8 +1172,13 @@ def handle_uptime_kuma_event(payload, channel, now=None):
 def tick(now=None):
     """One escalation + re-send pass (what each worker runs every TICK_SECONDS)."""
     now = now or utc_now()
-    run_escalations(now)
-    resend_pages(now)
+    for label, step in (("escalation", run_escalations), ("re-send", resend_pages)):
+        try:
+            step(now)
+        except Exception:  # pylint: disable=broad-exception-caught
+            # Re-sends are the FCM backup when Redis is down, so an escalation
+            # failure must not skip them.
+            current_app.logger.exception("on-call %s pass failed", label)
 
 
 def run_ticker(app):

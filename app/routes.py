@@ -270,51 +270,66 @@ def had_unread_messages(user, conversation, last_read_timestamp):
     )
 
 
-def broadcast_conversation_read(user, conversation):
-    """Clear a just-read conversation's unread state on all of ``user``'s clients.
-
-    Web tabs get the same badge-clearing OOB swap the reading tab got (plus the
-    "Unreads" link going quiet when nothing else is unread); mobile sockets get
-    an ``unread_updated`` frame with a zero count. Without this, reading on one
-    device left the badge up on every other one.
-    """
+def _clear_badge_html(user, conversation):
+    """The web OOB swap that clears ``conversation``'s badge for ``user``."""
     conv_id_str = conversation.conversation_id_str
     parsed = parse_conversation_id(conv_id_str)
     if parsed.type == "channel":
         channel = Channel.get_or_none(Channel.id == parsed.channel_id)
         if channel is None:
-            return
+            return ""
         hx_get_url = url_for("channels.get_channel_chat", channel_id=channel.id)
         link_text = f"# {channel.name}"
     else:
         other_ids = [uid for uid in parsed.user_ids if uid != user.id] or [user.id]
         other = User.get_or_none(User.id == other_ids[0])
         if other is None:
-            return
+            return ""
         hx_get_url = url_for("dms.get_dm_chat", other_user_id=other.id)
         link_text = other.display_name or other.username
-
-    clear_html = render_template(
+    return render_template(
         "partials/clear_badge.html",
         conv_id_str=conv_id_str,
         hx_get_url=hx_get_url,
         link_text=link_text,
-    ) + check_and_get_read_state_oob(user, conversation)
+    )
 
-    chat_manager.send_to_user(
-        user.id,
-        {
-            "_raw_html": clear_html,
-            "api_data": {
-                "type": "unread_updated",
-                "data": {
-                    "conversation_id_str": conv_id_str,
-                    "unread_count": 0,
-                    "is_mention": False,
+
+def broadcast_conversation_read(user, conversation, web_html=None):
+    """Clear a just-read conversation's unread state on all of ``user``'s clients.
+
+    Web tabs get the badge-clearing OOB swap (plus the "Unreads" link going
+    quiet when nothing else is unread); mobile sockets get an
+    ``unread_updated`` frame with a zero count. Without this, reading on one
+    device left the badge up on every other one. Callers that already
+    rendered that HTML for their own response pass it as ``web_html``.
+
+    Best effort: the read itself is already saved, so a Redis outage must not
+    turn it into an error.
+    """
+    if web_html is None:
+        web_html = _clear_badge_html(user, conversation) + (
+            check_and_get_read_state_oob(user, conversation)
+        )
+    try:
+        chat_manager.send_to_user(
+            user.id,
+            {
+                "_raw_html": web_html,
+                "api_data": {
+                    "type": "unread_updated",
+                    "data": {
+                        "conversation_id_str": conversation.conversation_id_str,
+                        "unread_count": 0,
+                        "is_mention": False,
+                    },
                 },
             },
-        },
-    )
+        )
+    except Exception:  # pylint: disable=broad-exception-caught
+        current_app.logger.exception(
+            "read-state broadcast for %s failed", conversation.conversation_id_str
+        )
 
 
 # --- CORE CHAT INTERFACE AND WEBSOCKET ---

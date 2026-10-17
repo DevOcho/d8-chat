@@ -614,6 +614,20 @@ class Incident(BaseModel):
     )
 
 
+# At most one open incident per monitor. Two DOWN webhooks racing on different
+# workers would otherwise both open one: everyone paged twice, and the UP that
+# resolves only one leaves the other escalating forever. A literal WHERE, not a
+# bound parameter: SQLite rejects parameters in a partial index.
+Incident.add_index(
+    Incident.index(
+        Incident.dedupe_key,
+        unique=True,
+        where=SQL("state IN ('triggered', 'acknowledged')"),
+        name="incident_open_dedupe_key",
+    )
+)
+
+
 class IncidentPage(BaseModel):
     """A user being paged for an incident. Pages are cumulative: everyone with
     a row keeps ringing until the incident leaves ``triggered``."""

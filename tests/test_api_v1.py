@@ -1080,8 +1080,9 @@ def test_api_mark_conversation_read(client, mocker):
     assert f'id="link-{conv.conversation_id_str}"' in raw_html
 
 
-def test_api_mark_conversation_read_is_a_noop_when_already_read(client, mocker):
-    """Nothing unread means no badge anywhere to clear, so nothing is broadcast."""
+def test_api_mark_conversation_read_resends_the_clear_when_already_read(client, mocker):
+    """Re-sent even with nothing unread: it heals a badge another client missed
+    (pub/sub is at-most-once). A Redis failure doesn't fail the read."""
     from app.models import Channel, ChannelMember
 
     user = User.get_by_id(1)
@@ -1095,14 +1096,15 @@ def test_api_mark_conversation_read_is_a_noop_when_already_read(client, mocker):
     token = client.post(
         "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
     ).get_json()["api_token"]
+    url = f"/api/v1/conversations/{conv.conversation_id_str}/read"
+    headers = {"Authorization": f"Bearer {token}"}
 
-    res = client.post(
-        f"/api/v1/conversations/{conv.conversation_id_str}/read",
-        headers={"Authorization": f"Bearer {token}"},
-    )
+    assert client.post(url, headers=headers).status_code == 204
+    mock_send.assert_called_once()
+    assert mock_send.call_args[0][1]["api_data"]["data"]["unread_count"] == 0
 
-    assert res.status_code == 204
-    mock_send.assert_not_called()
+    mock_send.side_effect = ConnectionError("redis down")
+    assert client.post(url, headers=headers).status_code == 204
 
 
 def test_api_mark_conversation_read_non_member(client):

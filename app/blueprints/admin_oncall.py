@@ -538,12 +538,15 @@ def oncall_policy_settings(policy_id):
     if not name:
         flash("Name is required.", "danger")
     else:
+        was_active = policy.is_active
         policy.name = name
         policy.is_active = request.form.get("is_active") == "on"
         policy.no_oncall_start_level = _int_or_none(
             request.form.get("no_oncall_start_level")
         )
         policy.save()
+        if was_active and not policy.is_active:
+            oncall_service.silence_policy(policy)
         audit(
             "oncall.policy_updated",
             target=policy,

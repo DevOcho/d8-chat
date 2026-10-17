@@ -140,6 +140,24 @@ def test_opening_an_unread_channel_clears_it_on_other_clients(logged_in_client, 
     assert f'id="unread-badge-{conv.conversation_id_str}"' in payload["_raw_html"]
 
 
+def test_opening_an_unread_channel_survives_a_redis_outage(logged_in_client, mocker):
+    """The read is saved before the broadcast, so a Redis error mustn't 500."""
+    user = User.get_by_id(1)
+    channel = Channel.get(Channel.name == "general")
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+    status, _ = UserConversationStatus.get_or_create(user=user, conversation=conv)
+    status.last_read_timestamp = utc_now() - datetime.timedelta(minutes=5)
+    status.save()
+    sender = User.create(username="outage-sender", email="outage-sender@example.com")
+    Message.create(user=sender, conversation=conv, content="unread")
+    mocker.patch(
+        "app.chat_manager.chat_manager.send_to_user",
+        side_effect=ConnectionError("redis down"),
+    )
+
+    assert logged_in_client.get(f"/chat/channel/{channel.id}").status_code == 200
+
+
 def test_opening_a_read_channel_broadcasts_nothing(logged_in_client, mocker):
     channel = Channel.get(Channel.name == "general")
     logged_in_client.get(f"/chat/channel/{channel.id}")  # read it once
