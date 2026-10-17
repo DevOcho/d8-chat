@@ -10,9 +10,11 @@ from app.models import Conversation, Message, User, UserConversationStatus, utc_
 from app.routes import (
     PAGE_SIZE,
     annotate_message_grouping,
+    broadcast_conversation_read,
     check_and_get_read_state_oob,
     get_attachments_for_messages,
     get_reactions_for_messages,
+    had_unread_messages,
     login_required,
 )
 
@@ -162,6 +164,10 @@ def get_dm_chat(other_user_id):
     # Now, update the timestamp for ONLY the current user to mark messages as read.
     status.last_read_timestamp = utc_now()
     status.save()
+
+    # Clear this conversation's badge on the user's other tabs and devices.
+    if had_unread_messages(g.user, conversation, last_read_timestamp):
+        broadcast_conversation_read(g.user, conversation)
 
     messages = list(
         Message.select()

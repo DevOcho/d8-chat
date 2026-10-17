@@ -257,6 +257,66 @@ def check_and_get_read_state_oob(current_user, just_read_conversation):
     return ""
 
 
+def had_unread_messages(user, conversation, last_read_timestamp):
+    """Whether ``conversation`` had messages from others after ``last_read_timestamp``."""
+    return (
+        Message.select()
+        .where(
+            (Message.conversation == conversation)
+            & (Message.created_at > last_read_timestamp)
+            & (Message.user != user)
+        )
+        .exists()
+    )
+
+
+def broadcast_conversation_read(user, conversation):
+    """Clear a just-read conversation's unread state on all of ``user``'s clients.
+
+    Web tabs get the same badge-clearing OOB swap the reading tab got (plus the
+    "Unreads" link going quiet when nothing else is unread); mobile sockets get
+    an ``unread_updated`` frame with a zero count. Without this, reading on one
+    device left the badge up on every other one.
+    """
+    conv_id_str = conversation.conversation_id_str
+    parsed = parse_conversation_id(conv_id_str)
+    if parsed.type == "channel":
+        channel = Channel.get_or_none(Channel.id == parsed.channel_id)
+        if channel is None:
+            return
+        hx_get_url = url_for("channels.get_channel_chat", channel_id=channel.id)
+        link_text = f"# {channel.name}"
+    else:
+        other_ids = [uid for uid in parsed.user_ids if uid != user.id] or [user.id]
+        other = User.get_or_none(User.id == other_ids[0])
+        if other is None:
+            return
+        hx_get_url = url_for("dms.get_dm_chat", other_user_id=other.id)
+        link_text = other.display_name or other.username
+
+    clear_html = render_template(
+        "partials/clear_badge.html",
+        conv_id_str=conv_id_str,
+        hx_get_url=hx_get_url,
+        link_text=link_text,
+    ) + check_and_get_read_state_oob(user, conversation)
+
+    chat_manager.send_to_user(
+        user.id,
+        {
+            "_raw_html": clear_html,
+            "api_data": {
+                "type": "unread_updated",
+                "data": {
+                    "conversation_id_str": conv_id_str,
+                    "unread_count": 0,
+                    "is_mention": False,
+                },
+            },
+        },
+    )
+
+
 # --- CORE CHAT INTERFACE AND WEBSOCKET ---
 
 

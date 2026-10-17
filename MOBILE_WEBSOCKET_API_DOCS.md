@@ -282,14 +282,14 @@ Returns a list of `User` objects that are participants in a specific conversatio
 
 ### Mark Conversation as Read
 
-Marks all messages in a conversation as read for the calling user. Call this when the user opens a conversation or scrolls to the bottom of the message list. Broadcasts an `unread_updated` event to all of the user's other connected sessions (web, other mobile devices) so badges clear everywhere simultaneously.
+Marks all messages in a conversation as read for the calling user. Call this when the user opens a conversation or scrolls to the bottom of the message list. If the conversation had unread messages, the server clears its badge on all of the user's connected clients: web tabs update their sidebar, and mobile sockets get an `unread_updated` event with a zero count. Opening a conversation on the web does the same, so reading on any client clears the badge everywhere.
 
 **POST** `/api/v1/conversations/<conversation_id_str>/read`
 **Headers:** `Authorization: Bearer <api_token>`
 
 **No request body.**
 
-**Response (204 No Content):** No body. On success, the server sends the following event to the user's other sessions via WebSocket:
+**Response (204 No Content):** No body. If anything was unread, the server sends the following event to the user's mobile sockets:
 
 ```json
 {
@@ -310,8 +310,8 @@ Marks all messages in a conversation as read for the calling user. Call this whe
 | `404` | Conversation ID not found |
 
 **Notes:**
-- Idempotent — calling on an already-read conversation is a no-op.
-- The calling session does not receive the `unread_updated` echo; only other sessions do.
+- Idempotent — calling on an already-read conversation is a no-op (nothing is broadcast).
+- The caller's own socket receives the event too. Its count is zero, so applying it is harmless.
 
 ---
 
@@ -647,7 +647,7 @@ Received when another user starts a new direct message conversation with the cur
 ```
 
 ### Unread Counts / Badges Update
-Received when a message is posted in a conversation the user is *not* actively subscribed to. Use this to update the unread counters/badges in the sidebar UI.
+Received when a message is posted in a conversation the user is *not* actively subscribed to. Use this to update the unread counters/badges in the sidebar UI. Also received with `unread_count: 0` when the user reads the conversation on any client (web or mobile): clear both the unread and mention badges.
 ```json
 {
   "type": "unread_updated",

@@ -44,7 +44,12 @@ from app.models import (
     db,
     utc_now,
 )
-from app.routes import get_attachments_for_messages, get_reactions_for_messages
+from app.routes import (
+    broadcast_conversation_read,
+    get_attachments_for_messages,
+    get_reactions_for_messages,
+    had_unread_messages,
+)
 from app.services import minio_service
 from app.services.image_processing import reencode_avatar
 from app.services.upload_validation import (
@@ -1186,9 +1191,7 @@ def get_conversation_members(conv_id_str):
 @api_v1_bp.route("/conversations/<conv_id_str>/read", methods=["POST"])
 @api_token_required
 def mark_conversation_read(conv_id_str):
-    """Marks a conversation as read and broadcasts the cleared state to the user's other sessions."""
-    from app.chat_manager import chat_manager
-
+    """Marks a conversation as read and clears its badges on the user's other clients."""
     conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
     if not conv:
         return jsonify({"error": "Conversation not found"}), 404
@@ -1202,22 +1205,13 @@ def mark_conversation_read(conv_id_str):
         return jsonify({"error": "Access denied"}), 403
 
     status, _ = UserConversationStatus.get_or_create(user=g.api_user, conversation=conv)
+    had_unread = had_unread_messages(g.api_user, conv, status.last_read_timestamp)
     status.last_read_timestamp = utc_now()
     status.save()
 
-    chat_manager.send_to_user(
-        g.api_user.id,
-        {
-            "api_data": {
-                "type": "unread_updated",
-                "data": {
-                    "conversation_id_str": conv_id_str,
-                    "unread_count": 0,
-                    "is_mention": False,
-                },
-            }
-        },
-    )
+    # Idempotent: an already-read conversation has no badge anywhere to clear.
+    if had_unread:
+        broadcast_conversation_read(g.api_user, conv)
 
     return "", 204
 

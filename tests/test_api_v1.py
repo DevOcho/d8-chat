@@ -1042,7 +1042,11 @@ def test_api_mark_conversation_read(client, mocker):
     channel = Channel.get(Channel.name == "general")
     ChannelMember.get_or_create(user=user, channel=channel)
     conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
-    Message.create(user=user, conversation=conv, content="Unread message")
+    status, _ = UserConversationStatus.get_or_create(user=user, conversation=conv)
+    status.last_read_timestamp = utc_now() - datetime.timedelta(minutes=5)
+    status.save()
+    sender = User.create(username="read-sender", email="read-sender@example.com")
+    Message.create(user=sender, conversation=conv, content="Unread message")
 
     mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
 
@@ -1070,6 +1074,35 @@ def test_api_mark_conversation_read(client, mocker):
     assert api_data["data"]["conversation_id_str"] == conv.conversation_id_str
     assert api_data["data"]["unread_count"] == 0
     assert api_data["data"]["is_mention"] is False
+    # Web tabs get the same badge clear the web's own channel open renders.
+    raw_html = call_args[0][1]["_raw_html"]
+    assert f'id="unread-badge-{conv.conversation_id_str}"' in raw_html
+    assert f'id="link-{conv.conversation_id_str}"' in raw_html
+
+
+def test_api_mark_conversation_read_is_a_noop_when_already_read(client, mocker):
+    """Nothing unread means no badge anywhere to clear, so nothing is broadcast."""
+    from app.models import Channel, ChannelMember
+
+    user = User.get_by_id(1)
+    user.set_password("password123")
+    user.save()
+    channel = Channel.get(Channel.name == "general")
+    ChannelMember.get_or_create(user=user, channel=channel)
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+
+    mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
+    token = client.post(
+        "/api/v1/auth/login", json={"username": "testuser", "password": "password123"}
+    ).get_json()["api_token"]
+
+    res = client.post(
+        f"/api/v1/conversations/{conv.conversation_id_str}/read",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 204
+    mock_send.assert_not_called()
 
 
 def test_api_mark_conversation_read_non_member(client):

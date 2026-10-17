@@ -33,10 +33,12 @@ from app.models import (
 from app.routes import (
     PAGE_SIZE,
     annotate_message_grouping,
+    broadcast_conversation_read,
     check_and_get_read_state_oob,
     date_separator_oob,
     get_attachments_for_messages,
     get_reactions_for_messages,
+    had_unread_messages,
     login_required,
     previous_visible_message,
 )
@@ -79,6 +81,10 @@ def get_channel_chat(channel_id):
     last_seen_mention = status.last_seen_mention_id or 0
     status.last_read_timestamp = utc_now()
     status.save()
+
+    # Clear this conversation's badge on the user's other tabs and devices.
+    if had_unread_messages(g.user, conversation, last_read_timestamp):
+        broadcast_conversation_read(g.user, conversation)
 
     # Get the latest messages
     messages = list(

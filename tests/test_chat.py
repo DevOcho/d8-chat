@@ -13,6 +13,7 @@ from app.models import (
     UserConversationStatus,
     WorkspaceMember,
     db,
+    utc_now,
 )
 
 
@@ -98,6 +99,78 @@ def test_access_channel_as_member(logged_in_client):
     response = logged_in_client.get(f"/chat/channel/{channel.id}")
     assert response.status_code == 200
     assert "Welcome to #member-channel".encode() in response.data
+
+
+def _read_broadcasts(mock_send):
+    """The unread_updated payloads sent by send_to_user, as (user_id, payload)."""
+    return [
+        (c.args[0], c.args[1])
+        for c in mock_send.call_args_list
+        if isinstance(c.args[1], dict)
+        and c.args[1].get("api_data", {}).get("type") == "unread_updated"
+    ]
+
+
+def test_opening_an_unread_channel_clears_it_on_other_clients(logged_in_client, mocker):
+    """
+    GIVEN a channel with a message the user hasn't read
+    WHEN the user opens it on the web
+    THEN their other tabs get the badge clear and their phones get unread_updated
+    """
+    user = User.get_by_id(1)
+    channel = Channel.get(Channel.name == "general")
+    conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
+    status, _ = UserConversationStatus.get_or_create(user=user, conversation=conv)
+    status.last_read_timestamp = utc_now() - datetime.timedelta(minutes=5)
+    status.save()
+    sender = User.create(username="unread-sender", email="unread-sender@example.com")
+    Message.create(user=sender, conversation=conv, content="You haven't seen me")
+    mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
+
+    response = logged_in_client.get(f"/chat/channel/{channel.id}")
+
+    assert response.status_code == 200
+    [(user_id, payload)] = _read_broadcasts(mock_send)
+    assert user_id == user.id
+    assert payload["api_data"]["data"] == {
+        "conversation_id_str": conv.conversation_id_str,
+        "unread_count": 0,
+        "is_mention": False,
+    }
+    assert f'id="unread-badge-{conv.conversation_id_str}"' in payload["_raw_html"]
+
+
+def test_opening_a_read_channel_broadcasts_nothing(logged_in_client, mocker):
+    channel = Channel.get(Channel.name == "general")
+    logged_in_client.get(f"/chat/channel/{channel.id}")  # read it once
+    mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
+
+    logged_in_client.get(f"/chat/channel/{channel.id}")
+
+    assert _read_broadcasts(mock_send) == []
+
+
+def test_opening_an_unread_dm_clears_it_on_other_clients(logged_in_client, mocker):
+    user = User.get_by_id(1)
+    other = User.create(username="dm-sender", email="dm-sender@example.com")
+    logged_in_client.get(f"/chat/dm/{other.id}")  # creates the DM
+    conv = Conversation.get(
+        conversation_id_str=f"dm_{min(user.id, other.id)}_{max(user.id, other.id)}"
+    )
+    status = UserConversationStatus.get(user=user, conversation=conv)
+    status.last_read_timestamp = utc_now() - datetime.timedelta(minutes=5)
+    status.save()
+    Message.create(user=other, conversation=conv, content="hey")
+    mock_send = mocker.patch("app.chat_manager.chat_manager.send_to_user")
+
+    logged_in_client.get(f"/chat/dm/{other.id}")
+
+    [(user_id, payload)] = _read_broadcasts(mock_send)
+    assert user_id == user.id
+    assert (
+        payload["api_data"]["data"]["conversation_id_str"] == conv.conversation_id_str
+    )
+    assert f"/chat/dm/{other.id}" in payload["_raw_html"]
 
 
 def test_access_channel_as_non_member(logged_in_client):
