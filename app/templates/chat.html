@@ -1,16 +1,6 @@
 {% extends "base.html" %}
 {% block html_theme %}data-bs-theme="{{ theme }}"{% endblock %}
 {% block layout %}
-    <style>
-        /* Hide all author actions globally by default */
-        .message-toolbar .author-only-action {
-            display: none !important;
-        }
-        /* Reveal them ONLY if the message's data-user-id matches the current logged-in user's ID */
-        .message-container[data-user-id="{{ g.user.id }}"] .message-toolbar .author-only-action {
-            display: inline-block !important;
-        }
-    </style>
     <!-- workspaces -->
     <div class="sidebar workspace-sidebar p-2 text-center text-white">
         <!-- Workspace Logo -->
@@ -250,9 +240,9 @@
         <!-- Global Search Bar -->
         <div id="global-search-container" class="p-2 border-bottom">
             <div class="global-search-wrapper">
-                <form hx-target="#search-results-overlay"
-                      hx-swap="innerHTML"
-                      onsubmit="return false;">
+                <form id="global-search-form"
+                      hx-target="#search-results-overlay"
+                      hx-swap="innerHTML">
                     <div class="input-group">
                         <span class="input-group-text"><i class="bi bi-search"></i></span>
                         <input type="search"

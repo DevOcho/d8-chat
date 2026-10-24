@@ -25,6 +25,8 @@
               sizes="180x180"
               href="{{ static_url('apple-touch-icon.png') }}">
         <link rel="manifest" href="{{ static_url('site.webmanifest') }}">
+        {# Before the body renders, so a "system" theme never flashes. #}
+        <script src="{{ static_url('js/theme.js') }}"></script>
     </head>
     <body class="{% block body_class %}{% endblock %}">
         <div class="main-layout">
@@ -39,37 +41,7 @@
         <script src="{{ static_url('js/local/htmx.min.js') }}"></script>
         <script src="{{ static_url('js/local/htmx-ws.js') }}"></script>
         <script src="{{ static_url('js/local/turndown.js') }}"></script>
-        <script>
-      // Attach the CSRF token to every state-changing HTMX request.
-      (function () {
-        const token = document.querySelector('meta[name="csrf-token"]')?.content;
-        if (!token) return;
-        document.body.addEventListener('htmx:configRequest', function (evt) {
-          const method = (evt.detail.verb || '').toLowerCase();
-          if (method && method !== 'get' && method !== 'head') {
-            evt.detail.headers['X-CSRFToken'] = token;
-          }
-        });
-      })();
-        </script>
-        {# Dark or Light Theme #}
-        <script>
-      // IIFE to handle system theme preference
-      (function () {
-        const htmlElement = document.documentElement;
-        const theme = htmlElement.getAttribute('data-bs-theme');
-
-        if (theme === 'system') {
-          const getSystemTheme = () => window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          htmlElement.setAttribute('data-bs-theme', getSystemTheme());
-
-          // Listen for changes in OS theme
-          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
-            htmlElement.setAttribute('data-bs-theme', e.matches ? 'dark' : 'light');
-          });
-        }
-      })();
-        </script>
+        <script src="{{ static_url('js/csrf.js') }}"></script>
         {# custom scripts in different templates #}
         {% block scripts %}{% endblock %}
         <!-- Toast container for displaying errors -->

@@ -1905,6 +1905,27 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     document.body.addEventListener('click', primeAudio, { once: true });
 
+    // Show author-only toolbar actions (edit, delete) on the viewer's own
+    // messages. Added through the CSSOM because the rule needs this viewer's
+    // id; an inline <style> in the page would need 'unsafe-inline'.
+    (function showOwnMessageActions() {
+        const main = document.querySelector('main.main-content');
+        const userId = main && main.dataset.currentUserId;
+        const sheet = [...document.styleSheets].find((s) => s.href && /\/css\/style\.css/.test(s.href));
+        if (!userId || !sheet) return;
+        const id = (window.CSS && CSS.escape) ? CSS.escape(userId) : userId;
+        try {
+            sheet.insertRule(
+                `.message-container[data-user-id="${id}"] .message-toolbar .author-only-action { display: inline-block !important; }`,
+                sheet.cssRules.length,
+            );
+        } catch (e) { /* a cross-origin or unparsable sheet: leave the actions hidden */ }
+    })();
+
+    // The search box searches as you type (hx-get); Enter must not submit the form.
+    const searchForm = document.getElementById('global-search-form');
+    if (searchForm) searchForm.addEventListener('submit', (e) => e.preventDefault());
+
     const searchInput = document.getElementById('global-search-input');
     const searchOverlay = document.getElementById('search-results-overlay');
     const searchWrapper = document.querySelector('.global-search-wrapper');

@@ -18,9 +18,10 @@ const HOOKS = {
         'id="toast-header"',
         'id="toast-title"',
         'id="toast-body-content"',
-        "evt.detail.headers['X-CSRFToken'] = token",
     ],
+    'app/static/js/csrf.js': ["evt.detail.headers['X-CSRFToken'] = token"],
     'app/templates/chat.html': [
+        'id="global-search-form"',
         'ws-connect="/ws/chat"',
         'hx-ext="ws"',
         'data-notification-sound=',
@@ -193,7 +194,7 @@ describe('fixture hooks still exist in the templates and routes', () => {
 
     it('loads the scripts in the order the fixtures assume', () => {
         const base = readSource('app/templates/base.html');
-        const order = ['js/local/htmx.min.js', 'js/local/htmx-ws.js', 'js/local/turndown.js'].map((s) => base.indexOf(s));
+        const order = ['js/local/htmx.min.js', 'js/local/htmx-ws.js', 'js/local/turndown.js', 'js/csrf.js'].map((s) => base.indexOf(s));
         expect(order.every((i) => i > 0)).toBe(true);
         expect([...order].sort((a, b) => a - b)).toEqual(order);
 

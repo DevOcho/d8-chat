@@ -522,7 +522,7 @@ ${dmItems}
           data-activity-url="/profile/activity">
         <div id="global-search-container" class="p-2 border-bottom">
             <div class="global-search-wrapper">
-                <form hx-target="#search-results-overlay" hx-swap="innerHTML" onsubmit="return false;">
+                <form id="global-search-form" hx-target="#search-results-overlay" hx-swap="innerHTML">
                     <input type="search" id="global-search-input" name="q" class="form-control" autocomplete="off"
                            hx-get="/chat/search" hx-trigger="keyup changed delay:300ms, search"
                            hx-target="#search-results-overlay" hx-swap="innerHTML">
@@ -587,18 +587,6 @@ ${dmItems}
         ${extraMain}
     </main>
         </div>
-        <script>
-      (function () {
-        const token = document.querySelector('meta[name="csrf-token"]')?.content;
-        if (!token) return;
-        document.body.addEventListener('htmx:configRequest', function (evt) {
-          const method = (evt.detail.verb || '').toLowerCase();
-          if (method && method !== 'get' && method !== 'head') {
-            evt.detail.headers['X-CSRFToken'] = token;
-          }
-        });
-      })();
-        </script>
         <div class="toast-container position-fixed bottom-0 end-0 p-3">
             <div id="app-toast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
                 <div id="toast-header" class="toast-header bg-danger text-white">

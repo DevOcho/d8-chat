@@ -177,3 +177,13 @@ describe('reaction pills', () => {
         expect(pill.querySelector('.reaction-count').textContent).toBe('2');
     });
 });
+
+describe('global search form', () => {
+    it('never submits (it searches as you type)', async () => {
+        const env = await chatEnv();
+        const form = env.$('#global-search-form');
+        const submit = new env.window.Event('submit', { bubbles: true, cancelable: true });
+        form.dispatchEvent(submit);
+        expect(submit.defaultPrevented).toBe(true);
+    });
+});

@@ -97,29 +97,4 @@
         </div>
     </div>
 {% endblock %}
-{% block scripts %}
-    <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    const togglePasswordButton = document.getElementById('toggle-password-visibility');
-    const passwordInput = document.getElementById('password');
-    const icon = togglePasswordButton.querySelector('i');
-
-    if (togglePasswordButton && passwordInput) {
-      togglePasswordButton.addEventListener('click', function() {
-        // Toggle the input type attribute
-        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
-        passwordInput.setAttribute('type', type);
-
-        // Toggle the icon class
-        if (type === 'password') {
-          icon.classList.remove('bi-eye');
-          icon.classList.add('bi-eye-slash');
-        } else {
-          icon.classList.remove('bi-eye-slash');
-          icon.classList.add('bi-eye');
-        }
-      });
-    }
-  });
-    </script>
-{% endblock %}
+{% block scripts %}<script src="{{ static_url('js/login.js') }}"></script>{% endblock %}

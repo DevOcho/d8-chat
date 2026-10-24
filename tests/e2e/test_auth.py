@@ -60,3 +60,16 @@ def test_forgot_password_form_accepts_email(page: Page):
 def test_forgot_password_link_visible_on_login_page(page: Page):
     page.goto("/")
     expect(page.locator('a:has-text("Forgot password?")')).to_be_visible()
+
+
+def test_password_visibility_toggle(page: Page):
+    page.goto("/")
+    password = page.locator("#password")
+    toggle = page.locator("#toggle-password-visibility")
+    expect(password).to_have_attribute("type", "password")
+    toggle.click()
+    expect(password).to_have_attribute("type", "text")
+    expect(toggle.locator("i")).to_have_class(re.compile(r"\bbi-eye\b"))
+    toggle.click()
+    expect(password).to_have_attribute("type", "password")
+    expect(toggle.locator("i")).to_have_class(re.compile(r"\bbi-eye-slash\b"))

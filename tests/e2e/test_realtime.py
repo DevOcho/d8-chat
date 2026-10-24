@@ -92,6 +92,21 @@ def test_channel_message_appears_live_for_other_user(alice, bob, user_a, user_b)
     )
 
 
+def test_edit_and_delete_show_only_on_your_own_messages(alice, bob, user_b):
+    both_in_channel(alice, bob, user_b)
+    text = unique_text("mine")
+    send_message(alice, text)
+    wait_for_message_with_text(bob, text)
+
+    for action in ("edit", "delete"):
+        toolbar_button(message_container(alice, text), action)
+        mine_for_bob = message_container(bob, text)
+        mine_for_bob.hover()
+        expect(
+            mine_for_bob.locator(f".message-toolbar button[data-action='{action}']")
+        ).to_be_hidden()
+
+
 def test_typing_indicator_clears_when_typist_leaves_channel(alice, bob, user_a, user_b):
     """The typist's client only sends typing_stop for the conversation it's
     on *now*, so leaving mid-word relies on the server's unsubscribe path to

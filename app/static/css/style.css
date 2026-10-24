@@ -1617,3 +1617,10 @@ a.hashtag-link {
     color: #d3d7db;
 }
 [data-bs-theme="dark"] .poll-content .text-muted { color: #c2c7cc !important; }
+
+/* Author-only toolbar actions (edit, delete) are hidden on every message;
+   chat.js adds the rule that shows them on the viewer's own messages (it needs
+   the viewer's id, and message HTML is rendered once for everyone). */
+.message-toolbar .author-only-action {
+    display: none !important;
+}
