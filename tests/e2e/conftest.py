@@ -26,6 +26,7 @@ drives the login form itself.
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 from pathlib import Path
@@ -51,7 +52,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # any violation of a directive in CSP_FAIL_DIRECTIVES (the groups the app
 # enforces strictly); the rest are collected for the end-of-run summary, which
 # is the burn-down list for the next phase.
-CSP_FAIL_DIRECTIVES: tuple[str, ...] = ("script-src",)
+CSP_FAIL_DIRECTIVES: tuple[str, ...] = ("script-src", "style-src-elem")
 
 CSP_RECORDER = """
 (() => {
@@ -200,11 +201,15 @@ def pytest_terminal_summary(terminalreporter):
         return
     from collections import Counter
 
+    dump = os.environ.get("E2E_CSP_DUMP")
+    if dump:
+        Path(dump).write_text(json.dumps(_csp_violations, indent=1), encoding="utf-8")
     grouped = Counter(
         (
             v["directive"],
             v["disposition"],
-            v["source"] or v["blocked"] or "(inline)",
+            (v["source"] or v["blocked"] or "(inline)")
+            + (f":{v['line']}" if v["line"] else ""),
             v["sample"],
         )
         for v in _csp_violations

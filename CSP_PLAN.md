@@ -1,8 +1,9 @@
 # CSP_PLAN.md — dropping `'unsafe-inline'` (and `'unsafe-eval'`)
 
-Status (2026-10-24): **Phases 0–4 done**; scripts are strict
-(`script-src 'self'`, enforced on the local cluster, report-only elsewhere until
-each environment's soak is clean). Phases 5–6 (styles) next. One phase per
+Status (2026-10-24): **Phases 0–5 done**; scripts and `<style>` elements are
+strict (`script-src 'self'`, `style-src-elem 'self' 'sha256-…'`), enforced on
+the local cluster, report-only elsewhere until each environment's soak is
+clean. Phase 6 (`style` attributes) next. One phase per
 commit, each one test-gated, each one shippable on its own. Built from a full
 inventory of the templates and scripts plus the graphify map in `graphify-out/`
 (see "What the graph showed"; `graphify-out/` is gitignored, rebuild it with
@@ -14,7 +15,8 @@ inventory of the templates and scripts plus the graphify map in `graphify-out/`
 | 1 Page-level scripts | fa7c13e |
 | 2 Chat partials | 086a4ae |
 | 3 Admin pages | 5680b05 |
-| 4 htmx hardening + enforce scripts | (the commit adding this file) |
+| 4 htmx hardening + enforce scripts | e55db1e |
+| 5 `<style>` elements | (this commit) |
 
 ---
 
@@ -180,12 +182,14 @@ CSP fixture from Phase 0 and the axe checks), pre-commit, and one commit.
 
 1. Both template `<style>` blocks are already gone (Phases 1, 3).
 2. emoji-picker-element's shadow `<style>` is static per version: allow it by
-   hash. A JS test loads the vendored bundle in jsdom, captures that style
-   text, hashes it, and asserts it matches the hash in `_build_csp`, so a
-   vendor upgrade fails CI instead of silently unstyling the picker.
-3. Policy: `style-src 'self'; style-src-elem 'self' 'sha256-…'; style-src-attr 'unsafe-inline'`
+   hash (`EMOJI_PICKER_STYLE_HASH`). `tests/js/emoji-picker-csp.test.js`
+   loads the vendored bundle in jsdom, hashes that style text and compares,
+   so a vendor upgrade fails CI instead of silently unstyling the picker.
+3. Policy: `style-src 'self' 'unsafe-inline'; style-src-elem 'self' 'sha256-…'; style-src-attr 'unsafe-inline'`
    (interim). The split is required: a hash in a source list makes
-   `'unsafe-inline'` ignored, which would block every `style=` attribute.
+   `'unsafe-inline'` ignored, which would block every `style=` attribute; so
+   the `style-src` fallback (for browsers without `-elem`/`-attr`) keeps
+   `'unsafe-inline'` and no hash until Phase 6.
    `style-src-elem` / `-attr` need Chrome 75+, Firefox 108+, Safari 15.4+.
 
 ### Phase 6 — `style` attributes → classes (drop `style-src-attr`)

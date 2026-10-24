@@ -53,7 +53,7 @@ def test_local_cluster_enforces_the_strict_script_policy(page: Page, base_url: s
 
         pytest.skip("only the local cluster is known to run CSP_MODE=enforce")
     csp = _headers_for(page, "/").get("content-security-policy", "")
-    assert "script-src 'self';" in csp, csp
+    assert "script-src 'self' 'report-sample';" in csp, csp
     assert "unsafe-eval" not in csp, csp
 
 

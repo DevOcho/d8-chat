@@ -7,7 +7,15 @@ import logging
 
 import pytest
 
-from app import CSP_ENFORCEABLE, _build_csp, _csp_headers, create_app
+from app import (
+    CSP_ENFORCEABLE,
+    EMOJI_PICKER_STYLE_HASH,
+    _build_csp,
+    _csp_headers,
+    create_app,
+)
+
+PICKER = f"'{EMOJI_PICKER_STYLE_HASH}'"
 
 
 def _directives(policy):
@@ -34,8 +42,9 @@ def test_report_mode_enforces_loose_and_reports_the_full_target():
     enforced, report_only = _csp_headers("", "report")
     assert "'unsafe-inline'" in _directives(enforced)["script-src"]
     target = _directives(report_only)
-    assert target["script-src"] == "'self'"
-    assert target["style-src"] == "'self'"
+    assert target["script-src"] == "'self' 'report-sample'"
+    assert target["style-src"] == f"'self' {PICKER} 'report-sample'"
+    assert target["style-src-elem"] == f"'self' {PICKER} 'report-sample'"
     assert target["style-src-attr"] == "'none'"
     for policy in (enforced, report_only):
         d = _directives(policy)
@@ -45,26 +54,49 @@ def test_report_mode_enforces_loose_and_reports_the_full_target():
 
 def test_enforce_mode_tightens_only_the_groups_the_code_is_ready_for(monkeypatch):
     monkeypatch.setitem(CSP_ENFORCEABLE, "scripts", True)
-    monkeypatch.setitem(CSP_ENFORCEABLE, "styles", False)
+    monkeypatch.setitem(CSP_ENFORCEABLE, "style_elements", False)
+    monkeypatch.setitem(CSP_ENFORCEABLE, "style_attributes", False)
     enforced, report_only = _csp_headers("", "enforce")
     d = _directives(enforced)
-    assert d["script-src"] == "'self'"
+    assert d["script-src"] == "'self' 'report-sample'"
     assert d["style-src"] == "'self' 'unsafe-inline'"
+    assert "style-src-elem" not in d
     assert _directives(report_only)["style-src-attr"] == "'none'"
 
 
-def test_enforce_mode_enforces_strict_scripts_today():
-    """Phase 4: no template, partial or script needs inline script or eval."""
-    enforced, report_only = _csp_headers("", "enforce")
+def test_strict_style_elements_with_loose_attributes(monkeypatch):
+    """Phase 5 on its own: <style> by hash only, style= attributes still
+    allowed. The fallback keeps 'unsafe-inline' without the hash, which would
+    switch it off for browsers that only know style-src."""
+    monkeypatch.setitem(CSP_ENFORCEABLE, "style_elements", True)
+    monkeypatch.setitem(CSP_ENFORCEABLE, "style_attributes", False)
+    d = _directives(_csp_headers("", "enforce")[0])
+    assert d["style-src-elem"] == f"'self' {PICKER} 'report-sample'"
+    assert d["style-src-attr"] == "'unsafe-inline'"
+    assert d["style-src"] == "'self' 'unsafe-inline'"
+
+
+def test_enforce_mode_enforces_what_the_code_is_ready_for_today():
+    enforced, _ = _csp_headers("", "enforce")
     d = _directives(enforced)
-    assert d["script-src"] == "'self'"
-    assert "'unsafe-inline'" in d["style-src"]
-    assert _directives(report_only)["style-src-attr"] == "'none'"
+    for group, ready in CSP_ENFORCEABLE.items():
+        strict = {
+            "scripts": d["script-src"] == "'self' 'report-sample'",
+            "style_elements": d.get("style-src-elem")
+            == f"'self' {PICKER} 'report-sample'",
+            "style_attributes": d.get("style-src-attr") == "'none'",
+        }[group]
+        assert strict is ready, group
 
 
 def test_strict_policy_keeps_the_other_directives():
     d = _directives(
-        _build_csp("http://minio.local", strict_scripts=True, strict_styles=True)
+        _build_csp(
+            "http://minio.local",
+            strict_scripts=True,
+            strict_style_elements=True,
+            strict_style_attributes=True,
+        )
     )
     assert d["object-src"] == "'none'"
     assert d["base-uri"] == "'self'"
@@ -83,7 +115,10 @@ def test_unknown_mode_fails_at_boot(monkeypatch):
 def test_html_pages_carry_both_headers_and_the_reporting_endpoint(client):
     res = client.get("/")
     assert "unsafe-inline" in res.headers["Content-Security-Policy"]
-    assert "script-src 'self';" in res.headers["Content-Security-Policy-Report-Only"]
+    assert (
+        "script-src 'self' 'report-sample';"
+        in res.headers["Content-Security-Policy-Report-Only"]
+    )
     assert res.headers["Reporting-Endpoints"] == 'csp="http://localhost/csp-report"'
 
 

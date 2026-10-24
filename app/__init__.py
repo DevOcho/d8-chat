@@ -417,7 +417,13 @@ def _check_valkey_health(app):
 # Which strict directive groups the code is ready to enforce (CSP_PLAN.md).
 # A phase flips its group once nothing in the app needs the loose rule; until
 # then the strict rule is only reported (Content-Security-Policy-Report-Only).
-CSP_ENFORCEABLE = {"scripts": True, "styles": False}
+CSP_ENFORCEABLE = {"scripts": True, "style_elements": True, "style_attributes": False}
+
+# emoji-picker-element styles its shadow root with one <style> whose text is
+# fixed per version; the policy allows exactly that text. Upgrading the vendored
+# bundle changes it: tests/js/emoji-picker-csp.test.js then fails with the new
+# value to put here.
+EMOJI_PICKER_STYLE_HASH = "sha256-rg2BpwZ4T9EADaas/dlxn0KsISPDXXIabE9pnJ++3UQ="
 
 CSP_MODES = ("legacy", "report", "enforce")
 CSP_REPORT_PATH = "/csp-report"
@@ -425,7 +431,12 @@ CSP_REPORT_GROUP = "csp"
 
 
 def _build_csp(
-    minio_origin, *, strict_scripts=False, strict_styles=False, report=False
+    minio_origin,
+    *,
+    strict_scripts=False,
+    strict_style_elements=False,
+    strict_style_attributes=False,
+    report=False,
 ):
     """
     Build the Content-Security-Policy for HTML responses.
@@ -434,7 +445,8 @@ def _build_csp(
     ``'unsafe-inline'`` for inline ``<script>``s, ``on*=`` handlers and
     ``style="..."`` attributes, and ``'unsafe-eval'`` because htmx evaluates
     ``hx-on`` attributes with ``new Function()``. ``strict_scripts`` /
-    ``strict_styles`` give the target rules instead. ``report`` adds the
+    ``strict_style_elements`` / ``strict_style_attributes`` give the target
+    rules instead, per directive group. ``report`` adds the
     ``report-uri`` / ``report-to`` directives that send violations to
     ``/csp-report``.
     """
@@ -444,18 +456,34 @@ def _build_csp(
 
     # No third-party origins are allowed — emoji-picker-element, chart.js,
     # and their data bundles are all vendored under `static/js/local/`.
+    # 'report-sample' puts the first 40 characters of what was blocked in the
+    # violation report, which is what makes a csp_violation line actionable.
     if strict_scripts:
-        script_directives = ["script-src 'self'"]
+        script_directives = ["script-src 'self' 'report-sample'"]
     else:
         script_directives = ["script-src 'self' 'unsafe-inline' 'unsafe-eval'"]
-    if strict_styles:
-        style_directives = [
-            "style-src 'self'",
-            "style-src-elem 'self'",
-            "style-src-attr 'none'",
-        ]
-    else:
+    picker = f"'{EMOJI_PICKER_STYLE_HASH}'"
+    if not (strict_style_elements or strict_style_attributes):
         style_directives = ["style-src 'self' 'unsafe-inline'"]
+    else:
+        # style-src is only the fallback for browsers without the -elem /
+        # -attr directives (Safari < 15.4). While attributes are still allowed
+        # it must allow them too, and a hash next to 'unsafe-inline' would
+        # switch 'unsafe-inline' off, so the hash only joins once they're not.
+        fallback = (
+            f"style-src 'self' {picker} 'report-sample'"
+            if strict_style_attributes
+            else "style-src 'self' 'unsafe-inline'"
+        )
+        style_directives = [
+            fallback,
+            f"style-src-elem 'self' {picker} 'report-sample'"
+            if strict_style_elements
+            else "style-src-elem 'self' 'unsafe-inline'",
+            "style-src-attr 'none'"
+            if strict_style_attributes
+            else "style-src-attr 'unsafe-inline'",
+        ]
 
     directives = [
         "default-src 'self'",
@@ -492,11 +520,16 @@ def _csp_headers(minio_origin, mode):
     enforced = _build_csp(
         minio_origin,
         strict_scripts=enforce and CSP_ENFORCEABLE["scripts"],
-        strict_styles=enforce and CSP_ENFORCEABLE["styles"],
+        strict_style_elements=enforce and CSP_ENFORCEABLE["style_elements"],
+        strict_style_attributes=enforce and CSP_ENFORCEABLE["style_attributes"],
         report=True,
     )
     target = _build_csp(
-        minio_origin, strict_scripts=True, strict_styles=True, report=True
+        minio_origin,
+        strict_scripts=True,
+        strict_style_elements=True,
+        strict_style_attributes=True,
+        report=True,
     )
     return enforced, target
 
