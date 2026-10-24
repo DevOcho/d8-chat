@@ -42,6 +42,7 @@ from app.routes import (
     login_required,
     previous_visible_message,
 )
+from app.services import chat_service
 
 channels_bp = Blueprint("channels", __name__)
 
@@ -86,7 +87,7 @@ def get_channel_chat(channel_id):
     # Get the latest messages
     messages = list(
         Message.select()
-        .where(Message.conversation == conversation)
+        .where((Message.conversation == conversation) & Message.in_timeline())
         .order_by(Message.created_at.desc())
         .limit(PAGE_SIZE)
     )
@@ -396,16 +397,15 @@ def add_channel_member(channel_id):
     UserConversationStatus.get_or_create(
         user_id=user_id_to_add, conversation=conversation
     )
-    if chat_manager.local_sockets(user_id_to_add):
-        try:
-            new_channel_html = render_template(
-                "partials/channel_list_item.html", channel=channel
-            )
-            chat_manager.send_local(user_id_to_add, new_channel_html)
-        except Exception:
-            current_app.logger.exception(
-                f"Could not send real-time channel add to user {user_id_to_add}"
-            )
+    try:
+        new_channel_html = render_template(
+            "partials/channel_list_item.html", channel=channel
+        )
+        chat_manager.send_to_user(user_id_to_add, new_channel_html)
+    except Exception:
+        current_app.logger.exception(
+            f"Could not send real-time channel add to user {user_id_to_add}"
+        )
 
     admins = list(
         ChannelMember.select()
@@ -513,7 +513,7 @@ def remove_channel_member(channel_id, user_id_to_remove):
             )
             if admin_count == 1:
                 return "You cannot remove the last admin of the channel.", 403
-        membership_to_delete.delete_instance()
+        chat_service.end_channel_membership(user_to_remove.id, channel)
 
         # Announce that the user has been removed
         conversation, _ = Conversation.get_or_create(
@@ -533,21 +533,22 @@ def remove_channel_member(channel_id, user_id_to_remove):
         ) + message_list_append_oob(f"channel_{channel.id}", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
-        if chat_manager.local_sockets(user_id_to_remove):
-            try:
-                remove_html = oob_by_id(f"channel-item-{int(channel_id)}", "delete")
-                notification = {
-                    "type": "notification",
-                    "title": "Removed from Channel",
-                    "body": f"You have been removed from #{channel.name} by {g.user.username}.",
-                    "icon": external_url_for("static", filename="favicon.ico"),
-                }
-                chat_manager.send_local(user_id_to_remove, remove_html)
-                chat_manager.send_local(user_id_to_remove, notification)
-            except Exception:
-                current_app.logger.exception(
-                    f"Could not send removal notification to user {user_id_to_remove}"
-                )
+        # Every tab and device of theirs, on any worker (send_local only
+        # reached sockets on the worker handling this request).
+        try:
+            remove_html = oob_by_id(f"channel-item-{int(channel_id)}", "delete")
+            notification = {
+                "type": "notification",
+                "title": "Removed from Channel",
+                "body": f"You have been removed from #{channel.name} by {g.user.username}.",
+                "icon": external_url_for("static", filename="favicon.ico"),
+            }
+            chat_manager.send_to_user(user_id_to_remove, remove_html)
+            chat_manager.send_to_user(user_id_to_remove, notification)
+        except Exception:
+            current_app.logger.exception(
+                f"Could not send removal notification to user {user_id_to_remove}"
+            )
 
     admins = list(
         ChannelMember.select()
@@ -730,9 +731,7 @@ def leave_channel(channel_id):
                     403,
                 )
 
-        ChannelMember.delete().where(
-            (ChannelMember.user == g.user) & (ChannelMember.channel == channel)
-        ).execute()
+        chat_service.end_channel_membership(g.user.id, channel)
 
         # Announce that the user has left
         conversation, _ = Conversation.get_or_create(
@@ -755,6 +754,9 @@ def leave_channel(channel_id):
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     remove_from_list_html = oob_by_id(f"channel-item-{int(channel_id)}", "delete")
+    # The user's other tabs and devices drop it too.
+    if membership:
+        chat_manager.send_to_user(g.user.id, remove_from_list_html)
 
     user_self = g.user
     conv_id_str_self = f"dm_{user_self.id}_{user_self.id}"
@@ -763,7 +765,7 @@ def leave_channel(channel_id):
     )
     messages_query = (
         Message.select()
-        .where(Message.conversation == conversation_self)
+        .where((Message.conversation == conversation_self) & Message.in_timeline())
         .order_by(Message.created_at.desc())
         .limit(PAGE_SIZE)
     )

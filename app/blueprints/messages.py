@@ -37,6 +37,7 @@ from app.models import (
 from app.routes import (
     PAGE_SIZE,
     annotate_message_grouping,
+    delete_message_and_broadcast,
     get_attachments_for_messages,
     get_reactions_for_messages,
     handle_inbound_message,
@@ -107,14 +108,22 @@ def update_message(message_id):
     message = Message.get_or_none(id=message_id)
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
+    if message.is_deleted:
+        return "This message was deleted.", 400
     is_in_thread_view = request.form.get("is_in_thread_view") == "true"
-    new_content = request.form.get("content")
+    new_content = (request.form.get("content") or "").strip()
+    # An empty edit used to fall through to the render with no maps built: a
+    # 500. Deleting is its own action.
+    if not new_content:
+        return "A message can't be empty. Delete it instead.", 400
     if new_content:
         with db.atomic():
             MessageHashtag.delete().where(MessageHashtag.message == message).execute()
             message.content = new_content
             message.is_edited = True
-            message.save()
+            # Only the edited columns: a full save could revert a concurrent
+            # thread reply's last_reply_at.
+            message.save(only=[Message.content, Message.is_edited, Message.updated_at])
             hashtag_names = set(re.findall(r"(?<!#)#([a-zA-Z0-9_-]+)", new_content))
             if hashtag_names:
                 existing_channels = {
@@ -160,20 +169,11 @@ def delete_message(message_id):
     message = Message.get_or_none(id=message_id)
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
-    conv_id_str = message.conversation.conversation_id_str
     try:
-        chat_service.delete_message_and_files(message)
+        delete_message_and_broadcast(message)
     except Exception:
         current_app.logger.exception(f"Error deleting message {message_id}")
         return "Error deleting message", 500
-    broadcast_html = oob_by_id(f"message-{int(message_id)}", "delete")
-    api_data = {
-        "type": "message_deleted",
-        "data": {"message_id": message_id, "conversation_id_str": conv_id_str},
-    }
-    chat_manager.broadcast(
-        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
-    )
     return "", 204
 
 
@@ -395,7 +395,9 @@ def get_messages_page(conversation_id):
 
     query = (
         Message.select()
-        .where((Message.conversation == conversation) & condition)
+        .where(
+            (Message.conversation == conversation) & condition & Message.in_timeline()
+        )
         .order_by(order)
         .limit(PAGE_SIZE)
     )
@@ -438,10 +440,16 @@ def jump_to_message(message_id):
     if not user_can_access_message(g.user, target_message):
         return "Unauthorized", 403
 
+    # A thread reply isn't in the timeline: show its parent in context.
+    if target_message.reply_type == "thread" and target_message.parent_message_id:
+        target_message = Message.get_by_id(target_message.parent_message_id)
+
     messages_before = list(
         Message.select()
         .where(
-            (Message.conversation == conversation) & (Message.id < target_message.id)
+            (Message.conversation == conversation)
+            & (Message.id < target_message.id)
+            & Message.in_timeline()
         )
         .order_by(Message.created_at.desc())
         .limit(30)
@@ -450,7 +458,9 @@ def jump_to_message(message_id):
     messages_after = list(
         Message.select()
         .where(
-            (Message.conversation == conversation) & (Message.id > target_message.id)
+            (Message.conversation == conversation)
+            & (Message.id > target_message.id)
+            & Message.in_timeline()
         )
         .order_by(Message.created_at.asc())
         .limit(30)

@@ -37,7 +37,8 @@
                     {% if message.is_edited %}<small class="text-muted">(edited)</small>{% endif %}
                 </div>
             {% endif %}
-            {% if message.parent_message and message.reply_type == 'quote' %}
+            {% if message.is_deleted %}
+            {% elif message.parent_message and message.reply_type == 'quote' %}
                 <div class="quoted-reply p-2 mb-2 quoted-reply-clickable"
                      role="button"
                      title="Go to original message"
@@ -113,7 +114,11 @@
                 {% endfor %}
             </div>
         {% endif %}
-        {% if message.poll %}
+        {% if message.is_deleted %}
+            {# A deleted message that starts a thread stays as a placeholder so
+               its replies are still reachable (chat_service.delete_message_and_files). #}
+            <div class="message-content message-deleted text-muted fst-italic">This message was deleted.</div>
+        {% elif message.poll %}
             {# The message has a poll, so we render our special partial. #}
             {% set poll_context = get_poll_context(message.poll.get(), g.user) %}
             {% include 'partials/message_poll.html' %}
@@ -165,7 +170,7 @@
             {% endif %}
         </div>
     </div>
-    {% if g.user %}
+    {% if g.user and not message.is_deleted %}
         {% include 'partials/message_toolbar.html' %}
     {% endif %}
 </div>

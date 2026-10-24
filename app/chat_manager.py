@@ -239,6 +239,13 @@ class ChatManager:
             if "_disconnect" in payload_data:
                 self._close_local(target_user_id, payload_data["_disconnect"])
                 return
+            # Control frame from unsubscribe_user_everywhere(): the user lost
+            # access to a conversation, so stop their sockets following it.
+            if "_unsubscribe" in payload_data:
+                for ws in list(self.all_clients.get(target_user_id, ())):
+                    if getattr(ws, "channel_id", None) == payload_data["_unsubscribe"]:
+                        self.unsubscribe(ws)
+                return
             # Deliver to every socket this user holds on this worker (multi-tab
             # / web + mobile), applying the active-channel exclusion per socket.
             exclude_channel = payload_data.get("_exclude_channel")
@@ -361,7 +368,7 @@ class ChatManager:
         payload_data["_sender_id"] = sender_id
         if exclude_sender:
             payload_data["_exclude_sender"] = True
-        self.redis_client.publish(redis_channel, json.dumps(payload_data))
+        self._publish(redis_channel, payload_data)
 
     def send_to_user(self, user_id, message, exclude_channel=None):
         """Publishes a message to a user-specific channel on Valkey."""
@@ -374,7 +381,30 @@ class ChatManager:
         if exclude_channel:
             payload_data["_exclude_channel"] = exclude_channel
 
-        self.redis_client.publish(redis_channel, json.dumps(payload_data))
+        self._publish(redis_channel, payload_data)
+
+    def _publish(self, redis_channel, payload_data):
+        """Publish best-effort; returns whether it went out.
+
+        Callers have already committed whatever they're announcing (a message,
+        a reaction, an edit). Raising here turned a Valkey blip — or the
+        listener's reconnect window, when redis_client is None — into a 500,
+        and the web client keeps the draft on an error, so the user re-sent
+        and the message was saved twice. Clients recover what they missed via
+        the reconnect / subscribe backfill.
+        """
+        client = self.redis_client
+        if client is None:
+            current_app.logger.warning(
+                "Valkey unavailable; dropped publish to %s", redis_channel
+            )
+            return False
+        try:
+            client.publish(redis_channel, json.dumps(payload_data))
+        except Exception:  # pylint: disable=broad-exception-caught
+            current_app.logger.exception("Publish to %s failed", redis_channel)
+            return False
+        return True
 
     def _handle_disconnect(self, ws):
         owner = None
@@ -410,6 +440,15 @@ class ChatManager:
             current_app.logger.exception(
                 "Couldn't broadcast the disconnect for user %s", user_id
             )
+
+    def unsubscribe_user_everywhere(self, user_id, conv_id_str):
+        """Stop ``user_id``'s sockets following ``conv_id_str`` on every worker.
+
+        For a user who just left or was removed from a channel: subscribe is
+        only authorized when it happens, so a socket already following the
+        channel kept receiving its messages until it switched away.
+        """
+        self._publish(f"user:{user_id}", {"_unsubscribe": conv_id_str})
 
     def _close_local(self, user_id, reason):
         for ws in self.local_sockets(user_id):
@@ -600,7 +639,7 @@ class ChatManager:
 
     def broadcast_to_all(self, message):
         """Publishes a message to all users globally."""
-        self.redis_client.publish("global:events", json.dumps({"_raw_html": message}))
+        self._publish("global:events", {"_raw_html": message})
 
     def subscribe(self, channel_id, ws):
         """Subscribes a websocket to a specific conversation channel."""

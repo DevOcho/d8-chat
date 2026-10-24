@@ -221,6 +221,22 @@ class Message(BaseModel):
     reply_type = CharField(null=True)  # Can be 'quote' or 'thread'
     last_reply_at = DateTimeField(null=True)
     quoted_message = DeferredForeignKey("Message", backref="quotes", null=True)
+    # Set when a message that starts a thread is deleted: the row stays as a
+    # "This message was deleted." placeholder so its replies stay reachable.
+    is_deleted = BooleanField(default=False)
+
+    @classmethod
+    def in_timeline(cls):
+        """Expression for messages shown in a conversation's main timeline:
+        everything but thread replies, which live in the thread panel.
+
+        Every page, backfill and unread query must filter on this. Without it a
+        thread reply took a slot in the 30-message page (and was then hidden,
+        so a busy thread could open a channel nearly empty), was rendered
+        inline by older pages and the reconnect backfill, and lit up the
+        conversation as unread with nothing new to see.
+        """
+        return cls.reply_type.is_null() | (cls.reply_type != "thread")
 
     @property
     def attachments(self):

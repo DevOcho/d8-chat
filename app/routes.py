@@ -22,11 +22,15 @@ from flask import (
 from peewee import JOIN, fn
 
 from . import limiter, sock
-from .access import user_can_post, user_has_conversation_access
+from .access import (
+    accessible_conversations,
+    user_can_post,
+    user_has_conversation_access,
+)
 from .background import spawn_background
 from .chat_manager import chat_manager
 from .conversation_id import parse_conversation_id
-from .htmx_oob import message_list_append_oob, oob_to_selector
+from .htmx_oob import message_list_append_oob, oob_by_id, oob_to_selector
 from .models import (
     Channel,
     ChannelMember,
@@ -197,7 +201,7 @@ def previous_visible_message(new_message):
         .where(
             (Message.conversation == new_message.conversation)
             & (Message.id < new_message.id)
-            & ((Message.reply_type != "thread") | Message.reply_type.is_null())
+            & Message.in_timeline()
         )
         .order_by(Message.id.desc())
         .first()
@@ -248,6 +252,8 @@ def check_and_get_read_state_oob(current_user, just_read_conversation):
             (Message.user != current_user)
             & (Message.created_at > UserConversationStatus.last_read_timestamp)
             & (Conversation.id != just_read_conversation.id)
+            & Message.in_timeline()
+            & Conversation.id.in_(accessible_conversations(current_user))
         )
         .exists()
     )
@@ -264,6 +270,7 @@ def had_unread_messages(user, conversation, last_read_timestamp):
             (Message.conversation == conversation)
             & (Message.created_at > last_read_timestamp)
             & (Message.user != user)
+            & Message.in_timeline()
         )
         .exists()
     )
@@ -361,6 +368,7 @@ def _get_unread_info(all_conversations):
         .where(
             (Message.conversation.in_(conv_ids))
             & (Message.user != g.user)
+            & Message.in_timeline()
             & (
                 Message.created_at
                 > fn.COALESCE(UserConversationStatus.last_read_timestamp, fallback_date)
@@ -573,7 +581,11 @@ def catch_up_messages(conv_id_str, last_id):
 
     messages = list(
         Message.select()
-        .where((Message.conversation == conversation) & (Message.id > last_id))
+        .where(
+            (Message.conversation == conversation)
+            & (Message.id > last_id)
+            & Message.in_timeline()
+        )
         .order_by(Message.id.asc())
         .limit(CATCHUP_LIMIT + 1)
     )
@@ -759,8 +771,11 @@ def _notify_thread_participant(user_id, conversation, now, conv_id_str):
         chat_manager.send_to_user(
             user_id, {"type": "sound"}, exclude_channel=conv_id_str
         )
-        status.last_notified_timestamp = now
-        status.save()
+        # Targeted UPDATE: see chat_service._mark_notified.
+        UserConversationStatus.update(last_notified_timestamp=now).where(
+            (UserConversationStatus.user == user_id)
+            & (UserConversationStatus.conversation == conversation)
+        ).execute()
 
 
 def _notify_all_thread_participants(sender, parent_message, conv_id_str):
@@ -817,6 +832,56 @@ def message_oob_html(
         f'id="message-{message.id}" hx-swap-oob="outerHTML:{selector}"',
         1,
     )
+
+
+def delete_message_and_broadcast(message):
+    """Delete ``message`` (see ``chat_service.delete_message_and_files``) and
+    tell every client. Deleting the last reply under a deleted thread parent
+    removes the parent's placeholder too."""
+    conv_id_str = message.conversation.conversation_id_str
+    parent_id = message.parent_message_id if message.reply_type == "thread" else None
+    placeholder = chat_service.delete_message_and_files(message)
+    broadcast_message_removed(message, conv_id_str, placeholder)
+
+    parent = Message.get_or_none(id=parent_id) if parent_id else None
+    if parent is not None and parent.is_deleted:
+        has_replies = (
+            Message.select()
+            .where(
+                (Message.parent_message == parent) & (Message.reply_type == "thread")
+            )
+            .exists()
+        )
+        if not has_replies:
+            chat_service.delete_message_and_files(parent)
+            broadcast_message_removed(parent, conv_id_str, False)
+
+
+def broadcast_message_removed(message, conv_id_str, placeholder):
+    """Tell every client in ``conv_id_str`` that ``message`` is gone.
+
+    ``placeholder`` (from ``chat_service.delete_message_and_files``) means the
+    message started a thread and now renders as "This message was deleted.":
+    web copies are re-rendered in place and mobile gets ``message_edited``
+    with ``is_deleted``. Otherwise every copy is removed (``message_deleted``).
+    """
+    # pylint: disable=import-outside-toplevel
+    from app.blueprints.api_v1 import serialize_message
+
+    if placeholder:
+        message = Message.get_by_id(message.id)
+        html = message_update_oob(message, {}, {})
+        api_data = {
+            "type": "message_edited",
+            "data": serialize_message(message, {}, {}),
+        }
+    else:
+        html = oob_by_id(f"message-{int(message.id)}", "delete")
+        api_data = {
+            "type": "message_deleted",
+            "data": {"message_id": message.id, "conversation_id_str": conv_id_str},
+        }
+    chat_manager.broadcast(conv_id_str, {"_raw_html": html, "api_data": api_data})
 
 
 def message_update_oob(message, reactions_map, attachments_map):

@@ -213,6 +213,7 @@ def serialize_message(message, reactions_map, attachments_map):
         "content": message.content,
         "created_at": message.created_at.isoformat() if message.created_at else None,
         "is_edited": message.is_edited,
+        "is_deleted": message.is_deleted,
         "user": user_to_dict(message.user) if message.user else None,
         "reply_type": message.reply_type,
         "parent_message_id": message.parent_message_id,
@@ -583,6 +584,7 @@ def get_channels():
                     (Message.conversation == conv)
                     & (Message.created_at > last_read)
                     & (Message.user != g.api_user)
+                    & Message.in_timeline()
                 )
                 .count()
             )
@@ -648,6 +650,7 @@ def get_dms():
                 (Message.conversation == conv)
                 & (Message.created_at > last_read)
                 & (Message.user != g.api_user)
+                & Message.in_timeline()
             )
             .count()
         )
@@ -739,6 +742,7 @@ def create_dm():
             (Message.conversation == conversation)
             & (Message.created_at > status.last_read_timestamp)
             & (Message.user != g.api_user)
+            & Message.in_timeline()
         )
         .count()
     )
@@ -804,9 +808,7 @@ def get_messages(conv_id_str):
     before_message_id = request.args.get("before_message_id", type=int)
     around_message_id = request.args.get("around_message_id", type=int)
 
-    base_condition = (Message.conversation == conv) & (
-        (Message.reply_type != "thread") | (Message.reply_type.is_null())
-    )
+    base_condition = (Message.conversation == conv) & (Message.in_timeline())
 
     messages = list()
 
@@ -1023,15 +1025,19 @@ def edit_message(message_id):
         return jsonify({"error": "Message not found"}), 404
     if message.user.id != g.api_user.id:
         return jsonify({"error": "Forbidden"}), 403
+    if message.is_deleted:
+        return jsonify({"error": "This message was deleted"}), 400
 
-    data = request.get_json() or {}
-    new_content = (data.get("content") or "").strip()
+    data = request.get_json(silent=True) or {}
+    content = data.get("content")
+    new_content = content.strip() if isinstance(content, str) else ""
     if not new_content:
         return jsonify({"error": "content is required"}), 400
 
     message.content = new_content
     message.is_edited = True
-    message.save()
+    # Only the edited columns (see the web edit).
+    message.save(only=[Message.content, Message.is_edited, Message.updated_at])
 
     reactions_map = get_reactions_for_messages([message])
     attachments_map = get_attachments_for_messages([message])
@@ -1065,8 +1071,6 @@ def edit_message(message_id):
 @api_token_required
 def delete_message(message_id):
     """Deletes a message. Only the author may delete."""
-    from app.chat_manager import chat_manager
-    from app.services import chat_service
 
     message = Message.get_or_none(Message.id == message_id)
     if not message:
@@ -1074,20 +1078,9 @@ def delete_message(message_id):
     if message.user.id != g.api_user.id:
         return jsonify({"error": "Forbidden"}), 403
 
-    conv_id_str = message.conversation.conversation_id_str
-    chat_service.delete_message_and_files(message)
+    from app.routes import delete_message_and_broadcast
 
-    api_data = {
-        "type": "message_deleted",
-        "data": {"message_id": message_id, "conversation_id_str": conv_id_str},
-    }
-    # Parity with the web delete path: OOB-delete the message node for web clients.
-    from app.htmx_oob import oob_by_id
-
-    broadcast_html = oob_by_id(f"message-{int(message_id)}", "delete")
-    chat_manager.broadcast(
-        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
-    )
+    delete_message_and_broadcast(message)
     return "", 204
 
 
@@ -1142,7 +1135,12 @@ def mark_conversation_read(conv_id_str):
 
     status, _ = UserConversationStatus.get_or_create(user=g.api_user, conversation=conv)
     status.last_read_timestamp = utc_now()
-    status.save()
+    status.save(
+        only=[
+            UserConversationStatus.last_read_timestamp,
+            UserConversationStatus.updated_at,
+        ]
+    )
 
     # Always re-send the clear, even when nothing was unread: pub/sub is
     # at-most-once, so this heals a badge another client missed earlier.
@@ -1284,10 +1282,8 @@ def api_search():
     """Searches messages, channels, and people across the workspace."""
     from peewee import JOIN, fn
 
-    from app.blueprints.search import (
-        _get_accessible_conversations,
-        _get_message_context,
-    )
+    from app.access import accessible_conversations
+    from app.blueprints.search import _get_message_context
 
     q = request.args.get("q", "").strip()
     if not q:
@@ -1298,7 +1294,7 @@ def api_search():
         limit = 50
 
     # 1. Search Messages
-    accessible_convs_query = _get_accessible_conversations(g.api_user)
+    accessible_convs_query = accessible_conversations(g.api_user)
     message_query = (
         Message.select(Message, User, Conversation)
         .join(User)

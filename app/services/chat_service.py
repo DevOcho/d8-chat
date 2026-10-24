@@ -125,8 +125,39 @@ def validate_message_refs(
     return parent_id, reply_type, quoted_message_id, file_ids
 
 
+def end_channel_membership(user_id, channel):
+    """Remove ``user_id`` from ``channel`` and everything that followed from it.
+
+    Deletes the membership and the user's read-state row — that row kept the
+    channel's new messages flowing into an ex-member's Unreads — and stops
+    their open sockets following the channel on every worker.
+    """
+    conv_id_str = f"channel_{channel.id}"
+    ChannelMember.delete().where(
+        (ChannelMember.user == user_id) & (ChannelMember.channel == channel)
+    ).execute()
+    conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
+    if conversation is not None:
+        UserConversationStatus.delete().where(
+            (UserConversationStatus.user == user_id)
+            & (UserConversationStatus.conversation == conversation)
+        ).execute()
+    try:
+        chat_manager.unsubscribe_user_everywhere(user_id, conv_id_str)
+    except Exception:  # pylint: disable=broad-exception-caught
+        current_app.logger.exception(
+            "Couldn't unsubscribe user %s from %s", user_id, conv_id_str
+        )
+
+
 def delete_message_and_files(message):
     """Delete ``message`` and the uploads that belong to it alone.
+
+    A message that starts a thread isn't removed: deleting the row orphaned
+    its replies (parent set to NULL), so they disappeared from both the thread
+    panel and the timeline. It becomes a placeholder instead — content,
+    attachments, reactions, mentions, hashtags and poll removed,
+    ``is_deleted`` set. Returns True for a placeholder, False for a delete.
 
     A file is removed only when the message's author uploaded it and nothing
     else uses it — no other message (a forward reuses the original's file ids)
@@ -154,8 +185,26 @@ def delete_message_and_files(message):
         if not shared and not is_avatar:
             orphans.append(uploaded)
 
+    # pylint: disable=import-outside-toplevel
+    from app.models import Poll, Reaction
+
+    has_thread = (
+        Message.select()
+        .where((Message.parent_message == message) & (Message.reply_type == "thread"))
+        .exists()
+    )
     with db.atomic():
-        message.delete_instance(recursive=True)
+        if has_thread:
+            for model in (Reaction, Mention, MessageHashtag, MessageAttachment):
+                model.delete().where(model.message == message).execute()
+            poll = Poll.get_or_none(message=message)
+            if poll is not None:
+                poll.delete_instance(recursive=True)
+            Message.update(content="", is_deleted=True, is_edited=False).where(
+                Message.id == message.id
+            ).execute()
+        else:
+            message.delete_instance(recursive=True)
         if orphans:
             UploadedFile.delete().where(
                 UploadedFile.id.in_([f.id for f in orphans])
@@ -170,6 +219,7 @@ def delete_message_and_files(message):
                 uploaded.stored_filename,
                 message.id,
             )
+    return has_thread
 
 
 def handle_new_message(
@@ -208,11 +258,12 @@ def handle_new_message(
         )
 
         # If this is a thread reply, update the parent's last_reply_at timestamp
+        # (A targeted UPDATE, not a full-row save that could revert a
+        # concurrent edit of the parent.)
         if reply_type == "thread" and parent_id:
-            parent_message = Message.get_or_none(id=parent_id)
-            if parent_message:
-                parent_message.last_reply_at = new_message.created_at
-                parent_message.save()
+            Message.update(last_reply_at=new_message.created_at).where(
+                Message.id == parent_id
+            ).execute()
 
         # Step 2: Link any attachments if IDs are provided
         for file_id in parse_file_ids(attachment_file_ids):
@@ -385,6 +436,7 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                     (Message.conversation == conversation)
                     & (Message.created_at > status.last_read_timestamp)
                     & (Message.user != member)
+                    & Message.in_timeline()
                 )
                 .exists()
             ):
@@ -403,6 +455,7 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                     (Message.conversation == conversation)
                     & (Message.created_at > status.last_read_timestamp)
                     & (Message.user != member)
+                    & Message.in_timeline()
                 )
                 .count()
             )
@@ -475,8 +528,7 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
             chat_manager.send_to_user(
                 member.id, notification_payload, exclude_channel=conv_id_str
             )
-            status.last_notified_timestamp = now
-            status.save()
+            _mark_notified(member, conversation, now)
         elif conversation.type == "dm":
             should_notify = status.last_notified_timestamp is None or (
                 now - status.last_notified_timestamp
@@ -496,10 +548,20 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 chat_manager.send_to_user(
                     member.id, notification_payload, exclude_channel=conv_id_str
                 )
-                status.last_notified_timestamp = now
-                status.save()
+                _mark_notified(member, conversation, now)
 
     _dispatch_push_notifications(new_message, sender_user, conversation, parsed_conv)
+
+
+def _mark_notified(user, conversation, now):
+    """Stamp last_notified_timestamp with a targeted UPDATE. The fan-out loads
+    the status row, then spends milliseconds on queries, renders and publishes;
+    saving the whole row afterwards wrote back a stale last_read_timestamp, so
+    a DM the user read in the meantime showed as unread again."""
+    UserConversationStatus.update(last_notified_timestamp=now).where(
+        (UserConversationStatus.user == user)
+        & (UserConversationStatus.conversation == conversation)
+    ).execute()
 
 
 def _push_recipients(new_message, sender_user, conversation, parsed_conv):

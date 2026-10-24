@@ -9,8 +9,10 @@ conversation by sending a crafted WS frame. Centralizing the check here means
 new callers can't forget it and the policy lives in one place.
 """
 
+from peewee import fn
+
 from .conversation_id import ConversationKey, parse_conversation_id
-from .models import Channel, ChannelMember
+from .models import Channel, ChannelMember, Conversation, UserConversationStatus
 
 
 def user_has_conversation_access(user, parsed: ConversationKey) -> bool:
@@ -37,6 +39,34 @@ def user_has_conversation_access(user, parsed: ConversationKey) -> bool:
     if parsed.type == "dm":
         return user.id in parsed.user_ids
     return False
+
+
+def accessible_conversations(user):
+    """Query of the ids of every Conversation ``user`` can read: the channels
+    they're a member of and their DMs.
+
+    For queries that join through ``UserConversationStatus``: a status row
+    outlives leaving (or being removed from) a channel, so joining on it alone
+    kept feeding an ex-member that channel's new messages (Unreads, the
+    read-state check).
+    """
+    user_channels_query = (
+        Channel.select(Channel.id).join(ChannelMember).where(ChannelMember.user == user)
+    )
+    channel_convs_query = (
+        Conversation.select(Conversation.id)
+        .join(
+            Channel,
+            on=(Conversation.conversation_id_str == fn.CONCAT("channel_", Channel.id)),
+        )
+        .where(Channel.id.in_(user_channels_query))
+    )
+    dm_convs_query = (
+        Conversation.select(Conversation.id)
+        .join(UserConversationStatus)
+        .where((UserConversationStatus.user == user) & (Conversation.type == "dm"))
+    )
+    return channel_convs_query | dm_convs_query
 
 
 def user_can_access_conversation(user, conversation) -> bool:

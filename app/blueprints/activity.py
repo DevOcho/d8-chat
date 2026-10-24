@@ -2,6 +2,7 @@ from collections import defaultdict
 
 from flask import Blueprint, g, make_response, render_template, url_for
 
+from app.access import accessible_conversations
 from app.conversation_id import parse_conversation_id
 from app.models import (
     Channel,
@@ -27,8 +28,12 @@ def view_all_threads():
     Renders a view showing all threads the current user is a participant in,
     ordered by the most recent reply.
     """
+    # A targeted UPDATE: a full-row save would write back every other column
+    # as loaded at the start of the request, reverting concurrent changes.
     g.user.last_threads_view_at = utc_now()
-    g.user.save()
+    User.update(last_threads_view_at=g.user.last_threads_view_at).where(
+        User.id == g.user.id
+    ).execute()
 
     # Get the threads so we can show them
     user_thread_replies = Message.select().where(
@@ -119,6 +124,8 @@ def view_all_unreads():
         .where(
             (Message.user != g.user)
             & (Message.created_at > UserConversationStatus.last_read_timestamp)
+            & Message.in_timeline()
+            & Conversation.id.in_(accessible_conversations(g.user))
         )
         .order_by(Conversation.id, Message.created_at)
     )

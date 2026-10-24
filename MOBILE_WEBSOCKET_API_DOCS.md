@@ -112,6 +112,7 @@ Many of the events below utilize a standardized `Message` and `User` object payl
   "content": "Hello team! Check out this new feature.",
   "created_at": "2024-04-03T09:30:00.123456",
   "is_edited": false,
+  "is_deleted": false,
   "user": { ...User Object... },
   "reply_type": null, // null, "quote", or "thread"
   "parent_message_id": null, // int or null
@@ -616,7 +617,11 @@ Received when an existing message is edited. The payload contains the fully upda
 ```
 
 ### Message Deleted
-Received when a message is deleted.
+Received when a message is deleted. A message that starts a thread is not
+removed: it arrives as `message_edited` with `"is_deleted": true` and empty
+`content`, and should render as a "This message was deleted." placeholder that
+still opens its thread. When its last reply is deleted, the placeholder gets a
+`message_deleted` of its own.
 ```json
 {
   "type": "message_deleted",

@@ -168,7 +168,7 @@ def get_dm_chat(other_user_id):
 
     messages = list(
         Message.select()
-        .where(Message.conversation == conversation)
+        .where((Message.conversation == conversation) & Message.in_timeline())
         .order_by(Message.created_at.desc())
         .limit(PAGE_SIZE)
     )

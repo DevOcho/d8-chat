@@ -1,8 +1,8 @@
 # app/blueprints/search.py
 
 from flask import Blueprint, g, render_template, request
-from peewee import fn
 
+from ..access import accessible_conversations
 from ..conversation_id import parse_conversation_id
 from ..models import (
     Channel,
@@ -12,38 +12,12 @@ from ..models import (
     Message,
     MessageHashtag,
     User,
-    UserConversationStatus,
 )
 from ..routes import login_required
-
 
 search_bp = Blueprint("search", __name__)
 
 SEARCH_PAGE_SIZE = 20
-
-
-def _get_accessible_conversations(user):
-    """
-    Helper function to build a query that returns all Conversation
-    objects a given user has access to (their DMs and channels).
-    """
-    user_channels_query = (
-        Channel.select(Channel.id).join(ChannelMember).where(ChannelMember.user == user)
-    )
-    channel_convs_query = (
-        Conversation.select(Conversation.id)
-        .join(
-            Channel,
-            on=(Conversation.conversation_id_str == fn.CONCAT("channel_", Channel.id)),
-        )
-        .where(Channel.id.in_(user_channels_query))
-    )
-    dm_convs_query = (
-        Conversation.select(Conversation.id)
-        .join(UserConversationStatus)
-        .where((UserConversationStatus.user == user) & (Conversation.type == "dm"))
-    )
-    return channel_convs_query | dm_convs_query
 
 
 def _get_message_context(messages, current_user):
@@ -118,7 +92,7 @@ def search():
     if not query:
         return '<div id="search-results-content"></div>'
 
-    accessible_convs_query = _get_accessible_conversations(g.user)
+    accessible_convs_query = accessible_conversations(g.user)
 
     # Check if this is a hashtag search
     if query.startswith("#"):
@@ -199,7 +173,7 @@ def search_messages_paginated():
     query = request.args.get("q", "").strip()
     page = request.args.get("page", 1, type=int)
 
-    accessible_convs_query = _get_accessible_conversations(g.user)
+    accessible_convs_query = accessible_conversations(g.user)
 
     if query.startswith("#"):
         hashtag_name = query[1:]

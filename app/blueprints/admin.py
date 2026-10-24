@@ -15,7 +15,9 @@ from flask import (
 from peewee import JOIN, IntegrityError, fn
 
 from ..audit import audit
+from ..chat_manager import chat_manager
 from ..groups import group_names_for, set_local_groups
+from ..htmx_oob import oob_by_id
 from ..models import (
     Channel,
     ChannelMember,
@@ -32,7 +34,7 @@ from ..models import (
     utc_now,
 )
 from ..password_policy import validate_password
-from ..services import account_service
+from ..services import account_service, chat_service
 
 admin_bp = Blueprint("admin", __name__, template_folder="../templates/admin")
 
@@ -561,6 +563,10 @@ def admin_add_channel_member(channel_id):
         )
 
         ChannelMember.create(user=user_id_to_add, channel=channel)
+        chat_manager.send_to_user(
+            user_id_to_add,
+            render_template("partials/channel_list_item.html", channel=channel),
+        )
         audit(
             "channel.member_added",
             target=channel,
@@ -608,7 +614,10 @@ def remove_channel_member(channel_id, user_id):
             )
             return redirect(url_for("admin.edit_channel", channel_id=channel_id))
 
-    membership.delete_instance()
+    chat_service.end_channel_membership(user_id, channel)
+    chat_manager.send_to_user(
+        user_id, oob_by_id(f"channel-item-{int(channel_id)}", "delete")
+    )
     audit(
         "channel.member_removed",
         target=channel,
