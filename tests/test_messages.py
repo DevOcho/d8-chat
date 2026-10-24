@@ -214,7 +214,7 @@ def test_load_message_for_edit_success(logged_in_client, setup_conversation):
     assert response.status_code == 200
     assert b"Editing Message" in response.data
     assert (
-        b'<textarea id="chat-message-input" name="content" style="display: none;">Original message content</textarea>'
+        b'<textarea class="d-none" id="chat-message-input" name="content">Original message content</textarea>'
         in response.data
     )
 

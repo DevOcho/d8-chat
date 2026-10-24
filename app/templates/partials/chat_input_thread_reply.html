@@ -70,18 +70,16 @@
             </div>
             <!-- Editor elements -->
             <div id="wysiwyg-editor-thread-{{ parent_message.id }}"
-                 class="wysiwyg-content"
+                 class="wysiwyg-content{% if not g.user.wysiwyg_enabled %} is-hidden{% endif %}"
                  contenteditable="true"
-                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"
                  data-placeholder="Write a reply..."></div>
             <textarea id="markdown-toggle-view-thread-{{ parent_message.id }}"
-                      class="form-control"
+                      class="form-control{% if g.user.wysiwyg_enabled %} is-hidden{% endif %}"
                       rows="1"
-                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}"
                       placeholder="Write a reply..."></textarea>
-            <textarea id="chat-message-input-thread-{{ parent_message.id }}"
-                      name="chat_message"
-                      style="display: none"></textarea>
+            <textarea class="d-none"
+                      id="chat-message-input-thread-{{ parent_message.id }}"
+                      name="chat_message"></textarea>
             <!-- Bottom Toolbar -->
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <button type="button"
@@ -111,13 +109,10 @@
                 </div>
             </div>
         </div>
-        <div id="emoji-picker-container-thread-{{ parent_message.id }}"
-             style="display: none">
+        <div class="is-hidden"
+             id="emoji-picker-container-thread-{{ parent_message.id }}">
             <emoji-picker class="light" data-source="/js/local/emoji.json"></emoji-picker>
         </div>
     </form>
-    <div id="typing-sender"
-         ws-send
-         hx-trigger="typing-event"
-         style="display: none"></div>
+    <div class="d-none" id="typing-sender" ws-send hx-trigger="typing-event"></div>
 </div>

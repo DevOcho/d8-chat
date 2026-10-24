@@ -4,7 +4,7 @@
 // click, kept composer, per-conversation drafts), the "N new messages" pill,
 // and the page title.
 import { describe, expect, it } from 'vitest';
-import { createPage } from './helpers/env.js';
+import { createPage, isShown } from './helpers/env.js';
 import {
     ENGINEER, ME, chatInputDefault, chatPage, conversationPane, message, messageFrame, messageListAppend,
     unreadBadge,
@@ -235,7 +235,7 @@ describe('new messages pill', () => {
         scrolledUp(env);
         await env.frame(messageFrame({ id: 102, user: ENGINEER, createdAt: '2026-10-17T13:01:00' }));
         await env.frame(messageFrame({ id: 103, user: ENGINEER, createdAt: '2026-10-17T13:02:00' }));
-        expect(pill(env).style.display).toBe('block');
+        expect(isShown(pill(env))).toBe(true);
         expect(pill(env).querySelector('.jump-label').textContent).toBe('2 new messages');
     });
 
@@ -250,6 +250,6 @@ describe('new messages pill', () => {
         await env.frame(messageFrame({ id: 102, user: ENGINEER, createdAt: '2026-10-17T13:01:00' }));
         container.scrollTop = 4500;
         container.dispatchEvent(new env.window.Event('scroll'));
-        expect(pill(env).style.display).toBe('none');
+        expect(isShown(pill(env))).toBe(false);
     });
 });

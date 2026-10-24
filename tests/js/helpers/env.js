@@ -68,6 +68,13 @@ function script(name) {
     return new vm.Script(source, { filename });
 }
 
+// Mirrors chat.js isShown(): an element chat.js shows and hides through
+// style.display starts hidden by the .is-hidden class in the markup.
+export function isShown(el) {
+    if (el.style.display) return el.style.display !== 'none';
+    return !el.classList.contains('is-hidden');
+}
+
 export function readSource(rel) {
     return fs.readFileSync(path.join(ROOT, rel), 'utf8');
 }

@@ -6,10 +6,7 @@
                 data-username="{{ mention.username }}">
             <div class="d-flex align-items-center">
                 <div class="flex-shrink-0">
-                    <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center"
-                         style="width: 24px;
-                                height: 24px;
-                                font-size: 0.8rem">
+                    <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center avatar-24 avatar-initial">
                         <i class="bi bi-broadcast-pin"></i>
                     </div>
                 </div>
@@ -27,10 +24,9 @@
                 data-username="{{ user.username }}">
             <div class="d-flex align-items-center">
                 <div class="flex-shrink-0">
-                    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center"
-                         style="width: 24px;
-                                height: 24px;
-                                font-size: 0.8rem">{{ (user.display_name or user.username)[0]|upper }}</div>
+                    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center avatar-24 avatar-initial">
+                        {{ (user.display_name or user.username)[0]|upper }}
+                    </div>
                 </div>
                 <div class="flex-grow-1 ms-2">
                     <strong class="me-2">{{ user.display_name or user.username }}</strong>

@@ -37,9 +37,9 @@ function utcClock(iso) {
 // partials/_avatar_display.html (no avatar_url → initial fallback)
 export function avatar(user, size = 40) {
     if (user.avatarUrl) {
-        return `<img src="${esc(user.avatarUrl)}" alt="${esc(user.username)}'s avatar" class="rounded-circle avatar-image" data-user-id="${user.id}" style="width: ${size}px; height: ${size}px; object-fit: cover">`;
+        return `<img src="${esc(user.avatarUrl)}" alt="${esc(user.username)}'s avatar" class="rounded-circle avatar-image avatar-${size}" data-user-id="${user.id}">`;
     }
-    return `<div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center avatar-image" data-user-id="${user.id}" style="width: ${size}px; height: ${size}px; font-size: ${(size / 24) * 0.8}rem">${esc(name(user)[0].toUpperCase())}</div>`;
+    return `<div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center avatar-image avatar-${size} avatar-initial" data-user-id="${user.id}">${esc(name(user)[0].toUpperCase())}</div>`;
 }
 
 // partials/date_separator.html
@@ -75,8 +75,8 @@ export function message({ id, user, createdAt, content = 'hello', sameSender = f
                 <small class="text-muted local-time" data-timestamp="${createdAt}Z">${utcClock(`${createdAt}Z`)}</small>
             </div>`;
     const avatarCol = sameSender
-        ? '<div class="flex-shrink-0" style="width: 40px; height: 40px;"></div>'
-        : `<div class="flex-shrink-0" style="cursor: pointer" hx-get="/chat/dm/${user.id}/details?context=channel" hx-target="#right-panel-offcanvas" title="View user details">${avatar(user, 40)}</div>`;
+        ? '<div class="flex-shrink-0 avatar-40"></div>'
+        : `<div class="flex-shrink-0 cursor-pointer" hx-get="/chat/dm/${user.id}/details?context=channel" hx-target="#right-panel-offcanvas" title="View user details">${avatar(user, 40)}</div>`;
     return `<div class="d-flex mb-1 message-container ${sameSender ? 'grouped-message' : ''} ${mentioned ? 'mentioned-message' : ''}"
          id="message-${id}"
          data-user-id="${user.id}"
@@ -185,7 +185,7 @@ export function unreadsLink({ unread }) {
    hx-target="#chat-messages-container"
    hx-swap="innerHTML"
    hx-swap-oob="true">
-    <i class="bi bi-envelope-fill me-2" style="width: 16px; display: inline-block"></i>Unreads
+    <i class="bi bi-envelope-fill me-2 icon-slot"></i>Unreads
 </a>`;
 }
 
@@ -322,7 +322,7 @@ export function chatInputDefault({ wysiwyg = true } = {}) {
         <input type="file" id="file-attachment-input" class="d-none" multiple>
         <input type="hidden" name="attachment_file_ids" id="attachment-file-ids">
         <div class="wysiwyg-editor-container">
-            <div id="attachment-previews" class="p-2 flex-wrap gap-2" style="display: none"></div>
+            <div id="attachment-previews" class="p-2 flex-wrap gap-2 is-hidden"></div>
             <div class="wysiwyg-toolbar toolbar-hidden">
                 <button type="button" data-command="bold" title="Bold (Ctrl+B)"><i class="bi bi-type-bold"></i></button>
                 <button type="button" data-command="italic" title="Italic (Ctrl+I)"><i class="bi bi-type-italic"></i></button>
@@ -333,14 +333,12 @@ export function chatInputDefault({ wysiwyg = true } = {}) {
                 <button type="button" data-command="formatBlock" data-value="pre" title="Code Block"><i class="bi bi-code-slash"></i></button>
             </div>
             <div id="wysiwyg-editor"
-                 class="wysiwyg-content"
-                 contenteditable="true"
-                 style="display: ${wysiwyg ? 'block' : 'none'}"></div>
+                 class="wysiwyg-content${wysiwyg ? '' : ' is-hidden'}"
+                 contenteditable="true"></div>
             <textarea id="markdown-toggle-view"
-                      class="form-control"
-                      rows="1"
-                      style="display: ${wysiwyg ? 'none' : 'block'}"></textarea>
-            <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>
+                      class="form-control${wysiwyg ? ' is-hidden' : ''}"
+                      rows="1"></textarea>
+            <textarea id="chat-message-input" name="chat_message" class="d-none"></textarea>
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting"><i class="bi bi-type"></i></button>
                 <button type="button" id="file-attachment-btn" title="Attach a file"><i class="bi bi-paperclip"></i></button>
@@ -351,14 +349,14 @@ export function chatInputDefault({ wysiwyg = true } = {}) {
                 </div>
             </div>
         </div>
-        <div id="emoji-picker-container" style="display: none">
+        <div id="emoji-picker-container" class="is-hidden">
             <emoji-picker class="light" data-source="/js/local/emoji.json"></emoji-picker>
         </div>
     </form>
     <div id="typing-sender"
          ws-send
          hx-trigger="typing-event"
-         style="display: none"></div>
+         class="d-none"></div>
 </div>`;
 }
 
@@ -465,7 +463,7 @@ export function chatPage({
     <head>
         <meta charset="utf-8">
         <meta name="csrf-token" content="csrf-test-token">
-        <meta name="htmx-config" content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'>
+        <meta name="htmx-config" content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false, "attributesToSettle": ["class", "width", "height"]}'>
         <title>D8 - Chat</title>
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=0123abcd">
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=4567ef01">
@@ -530,22 +528,20 @@ ${dmItems}
         </div>
         <div id="pane-progress" class="pane-progress" aria-hidden="true"></div>
         <div id="connection-status-bar"
-             class="p-2 bg-warning text-dark text-center"
-             style="display: none; flex-shrink: 0">
+             class="p-2 bg-warning text-dark text-center is-hidden flex-shrink-0">
             <div class="spinner-border spinner-border-sm me-2" role="status">
                 <span class="visually-hidden">Loading...</span>
             </div>
             Connection lost. Attempting to reconnect...
         </div>
-        <div id="chat-header-container" class="p-3 border-bottom bg-white" style="flex-shrink: 0"></div>
+        <div id="chat-header-container" class="p-3 border-bottom bg-white flex-shrink-0"></div>
         <div id="chat-messages-container"
-             class="chat-messages position-relative"
-             style="flex-grow: 1; overflow-y: auto"
+             class="chat-messages position-relative flex-grow-1 overflow-y-auto"
              ${containerAttrs}>
             ${paneContent}
         </div>
         <div class="jump-to-latest-anchor">
-            <button id="jump-to-bottom-btn" type="button" class="btn btn-primary btn-sm rounded-pill shadow" style="display: none">
+            <button id="jump-to-bottom-btn" type="button" class="btn btn-primary btn-sm rounded-pill shadow is-hidden">
                 <span class="jump-label">New messages</span> <i class="bi bi-arrow-down" aria-hidden="true"></i>
             </button>
         </div>
@@ -558,7 +554,7 @@ ${dmItems}
                 <div class="pager-footer">Acknowledging stops the alarm for everyone and tells the team you're on it.</div>
             </div>
         </div>
-        <div id="search-results-overlay" style="display: none; flex-direction: column"></div>
+        <div id="search-results-overlay" class="is-hidden"></div>
         <div class="offcanvas offcanvas-end" tabindex="-1" id="right-panel-offcanvas">
             <div class="offcanvas-body" id="right-panel-body"></div>
         </div>
@@ -580,7 +576,7 @@ ${dmItems}
         <div class="modal fade" id="htmx-modal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-lg"><div class="modal-content" id="htmx-modal-content"></div></div>
         </div>
-        <div id="enable-notifications-banner" class="bg-primary text-white text-center p-2 position-fixed bottom-0 start-0 w-100 shadow-lg" style="z-index: 1060; display: none">
+        <div id="enable-notifications-banner" class="bg-primary text-white text-center p-2 position-fixed bottom-0 start-0 w-100 shadow-lg notifications-banner is-hidden">
             <button id="enable-notifications-btn" class="btn btn-light btn-sm fw-bold">Enable Notifications</button>
         </div>
         ${extraMain}

@@ -111,6 +111,15 @@ const ToastManager = {
 // A short, human message for a failed request: the server's own text when it
 // sent a short plain one, a JSON body's "error", otherwise one by status. Raw
 // bodies (an HTML error page, a stack of JSON) used to land in the toast.
+// Whether an element chat.js shows and hides through style.display is shown.
+// Until the first toggle the markup hides it with the .is-hidden class (the
+// page CSP allows no style attributes), so an unset style.display isn't
+// "shown" by itself.
+function isShown(el) {
+    if (el.style.display) return el.style.display !== 'none';
+    return !el.classList.contains('is-hidden');
+}
+
 function friendlyErrorText(xhr) {
     if (!xhr) return 'Please try again.';
     const body = (xhr.responseText || '').trim();
@@ -1091,7 +1100,7 @@ const createEditor = function(idSuffix = '') {
             return;
         }
 
-        const isMarkdownMode = !!(elements.markdownView && elements.markdownView.style.display !== 'none');
+        const isMarkdownMode = !!(elements.markdownView && isShown(elements.markdownView));
 
         const turndownService = new TurndownService({
             headingStyle: 'atx',
@@ -1342,7 +1351,7 @@ const createEditor = function(idSuffix = '') {
                     picker.style.display = 'none';
                 }
             });
-            const isHidden = emojiPickerContainer.style.display === 'none';
+            const isHidden = !isShown(emojiPickerContainer);
             emojiPickerContainer.style.display = isHidden ? 'block' : 'none';
         });
         emojiPicker.addEventListener('emoji-click', event => {
@@ -2097,7 +2106,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (channelSidebar) {
         channelSidebar.addEventListener('click', (e) => {
-            if (searchOverlay && e.target.closest('a[hx-get]') && searchOverlay.style.display !== 'none') {
+            if (searchOverlay && e.target.closest('a[hx-get]') && isShown(searchOverlay)) {
                 hideSearch();
             }
         });
@@ -3168,9 +3177,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             const newImg = document.createElement('img');
                             newImg.src = avatar_url;
                             newImg.alt = `${el.textContent.trim()}'s avatar`;
-                            newImg.className = 'rounded-circle avatar-image';
-                            newImg.style.cssText = el.style.cssText;
-                            newImg.style.objectFit = 'cover';
+                            // Same size class (.avatar-40...) as the initial it replaces.
+                            const size = [...el.classList].find((c) => /^avatar-\d+$/.test(c));
+                            newImg.className = `rounded-circle avatar-image${size ? ` ${size}` : ''}`;
                             newImg.dataset.userId = user_id;
                             el.replaceWith(newImg);
                         }
@@ -3253,7 +3262,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.body.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
-            if (searchOverlay && searchOverlay.style.display !== 'none') {
+            if (searchOverlay && isShown(searchOverlay)) {
                 e.preventDefault();
                 const closeBtn = document.getElementById('close-search-btn');
                 if (closeBtn) closeBtn.click();

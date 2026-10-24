@@ -85,9 +85,10 @@ class Config:
     MINIO_PUBLIC_URL = s3_setting("S3_PUBLIC_URL", "MINIO_PUBLIC_URL")
 
     # Content-Security-Policy rollout (CSP_PLAN.md): "report" enforces the
-    # loose policy and reports the strict one; "enforce" also enforces every
-    # strict directive group the code is ready for; "legacy" turns reporting
-    # off. Switching back to "report" is the rollback for a bad enforcement.
+    # loose policy and reports the strict one; "enforce" enforces the strict
+    # one; "enforce-scripts" enforces only its script rules; "legacy" turns
+    # reporting off. Switching back to "report" is the rollback for a bad
+    # enforcement.
     CSP_MODE = os.environ.get("CSP_MODE", "report").strip().lower()
 
     # Password-login rate limits (web /login and /api/v1/auth/login), per

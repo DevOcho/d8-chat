@@ -6,7 +6,7 @@
         <small class="text-muted">{{ incident.title }}</small>
     </h1>
     {% include 'admin/_flash.html' %}
-    <dl class="row mt-3" style="max-width: 720px">
+    <dl class="row mt-3 mw-720">
         <dt class="col-sm-3">State</dt>
         <dd class="col-sm-9">
             {{ incident.state | capitalize }}
@@ -37,7 +37,7 @@
         </dd>
     </dl>
     <h3 class="mt-4">Timeline (UTC)</h3>
-    <ul class="list-group mt-2" style="max-width: 720px">
+    <ul class="list-group mt-2 mw-720">
         {% for row in events %}
             {% set event = row.event %}
             <li class="list-group-item">

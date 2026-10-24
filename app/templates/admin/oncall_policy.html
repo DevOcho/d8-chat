@@ -55,8 +55,8 @@
         <table class="table align-middle mt-3">
             <thead>
                 <tr>
-                    <th scope="col" style="width: 90px">Level</th>
-                    <th scope="col" style="width: 140px">Delay (min)</th>
+                    <th class="col-w-90" scope="col">Level</th>
+                    <th class="col-w-140" scope="col">Delay (min)</th>
                     <th scope="col">Target</th>
                     <th scope="col">Would page now</th>
                     <th scope="col"></th>
@@ -154,9 +154,9 @@
         </table>
         <!-- Settings -->
         <h3 class="mt-5">Settings</h3>
-        <form action="{{ url_for('admin.oncall_policy_settings', policy_id=policy.id) }}"
-              method="POST"
-              style="max-width: 640px">
+        <form class="mw-640"
+              action="{{ url_for('admin.oncall_policy_settings', policy_id=policy.id) }}"
+              method="POST">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="mb-3">
                 <label class="form-label" for="policy-name">Name</label>
@@ -199,7 +199,7 @@
             Group levels page every active member. Membership comes from the SSO <code>groups</code> claim (refreshed each
             time the user signs in with SSO) or is set by an admin in the user editor.
         </p>
-        <table class="table table-sm" style="max-width: 640px">
+        <table class="table table-sm mw-640">
             <tbody>
                 {% for name, members in groups.items() %}
                     <tr>

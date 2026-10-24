@@ -52,7 +52,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 # any violation of a directive in CSP_FAIL_DIRECTIVES (the groups the app
 # enforces strictly); the rest are collected for the end-of-run summary, which
 # is the burn-down list for the next phase.
-CSP_FAIL_DIRECTIVES: tuple[str, ...] = ("script-src", "style-src-elem")
+CSP_FAIL_DIRECTIVES: tuple[str, ...] = ("script-src", "style-src")
 
 CSP_RECORDER = """
 (() => {

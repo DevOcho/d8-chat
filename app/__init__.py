@@ -417,7 +417,7 @@ def _check_valkey_health(app):
 # Which strict directive groups the code is ready to enforce (CSP_PLAN.md).
 # A phase flips its group once nothing in the app needs the loose rule; until
 # then the strict rule is only reported (Content-Security-Policy-Report-Only).
-CSP_ENFORCEABLE = {"scripts": True, "style_elements": True, "style_attributes": False}
+CSP_ENFORCEABLE = {"scripts": True, "style_elements": True, "style_attributes": True}
 
 # emoji-picker-element styles its shadow root with one <style> whose text is
 # fixed per version; the policy allows exactly that text. Upgrading the vendored
@@ -425,7 +425,7 @@ CSP_ENFORCEABLE = {"scripts": True, "style_elements": True, "style_attributes": 
 # value to put here.
 EMOJI_PICKER_STYLE_HASH = "sha256-rg2BpwZ4T9EADaas/dlxn0KsISPDXXIabE9pnJ++3UQ="
 
-CSP_MODES = ("legacy", "report", "enforce")
+CSP_MODES = ("legacy", "report", "enforce-scripts", "enforce")
 CSP_REPORT_PATH = "/csp-report"
 CSP_REPORT_GROUP = "csp"
 
@@ -513,15 +513,19 @@ def _csp_headers(minio_origin, mode):
                    Report-Only, so violations are logged but nothing breaks.
     - ``enforce``: every group in CSP_ENFORCEABLE enforced strictly (the rest
                    loose), plus the full target as Report-Only for what's left.
+    - ``enforce-scripts``: only the script group strict, styles loose; for an
+                   environment whose soak turned up a style problem, so the
+                   script protection doesn't wait on the fix.
     """
     if mode == "legacy":
         return _build_csp(minio_origin), None
-    enforce = mode == "enforce"
+    scripts = mode in ("enforce", "enforce-scripts")
+    styles = mode == "enforce"
     enforced = _build_csp(
         minio_origin,
-        strict_scripts=enforce and CSP_ENFORCEABLE["scripts"],
-        strict_style_elements=enforce and CSP_ENFORCEABLE["style_elements"],
-        strict_style_attributes=enforce and CSP_ENFORCEABLE["style_attributes"],
+        strict_scripts=scripts and CSP_ENFORCEABLE["scripts"],
+        strict_style_elements=styles and CSP_ENFORCEABLE["style_elements"],
+        strict_style_attributes=styles and CSP_ENFORCEABLE["style_attributes"],
         report=True,
     )
     target = _build_csp(

@@ -1,9 +1,9 @@
 # CSP_PLAN.md — dropping `'unsafe-inline'` (and `'unsafe-eval'`)
 
-Status (2026-10-24): **Phases 0–5 done**; scripts and `<style>` elements are
-strict (`script-src 'self'`, `style-src-elem 'self' 'sha256-…'`), enforced on
-the local cluster, report-only elsewhere until each environment's soak is
-clean. Phase 6 (`style` attributes) next. One phase per
+Status (2026-10-24): **Phases 0–6 done**: the full target policy (no
+`'unsafe-inline'`, no `'unsafe-eval'`, no style attributes) is enforced on the
+local cluster and report-only elsewhere until each environment's soak is clean
+(see "Enforcing in a deployed environment"). One phase per
 commit, each one test-gated, each one shippable on its own. Built from a full
 inventory of the templates and scripts plus the graphify map in `graphify-out/`
 (see "What the graph showed"; `graphify-out/` is gitignored, rebuild it with
@@ -16,7 +16,8 @@ inventory of the templates and scripts plus the graphify map in `graphify-out/`
 | 2 Chat partials | 086a4ae |
 | 3 Admin pages | 5680b05 |
 | 4 htmx hardening + enforce scripts | e55db1e |
-| 5 `<style>` elements | (this commit) |
+| 5 `<style>` elements | 8e68c69 |
+| 6 `style` attributes | (this commit) |
 
 ---
 
@@ -199,11 +200,27 @@ CSP fixture from Phase 0 and the axe checks), pre-commit, and one commit.
    `[hidden] { display: none !important }` beats the `el.style.display = …`
    that `chat.js` uses, so the `hidden` attribute is not a drop-in.
 2. `cursor:pointer`, fixed widths/max-widths → a handful of utility classes.
-3. Dynamic values → data attributes applied through the CSSOM on `htmx.onLoad`:
-   poll bars (`data-percent`), the single-image box (`data-ratio`,
-   `data-width`); avatars → size classes (`.avatar-24/36/40/60`).
+3. Dynamic values: poll bars carry `data-width-percent`, applied through the
+   CSSOM by `ui.js` on `htmx.onLoad`; avatars use size classes
+   (`.avatar-24/32/36/40/60`, a guard test checks every size used has one);
+   the single-image box needs no CSS value at all: its `<img>` carries the
+   display size as `width`/`height` attributes and `.attachment-grid-sized`
+   lets it shrink keeping that ratio.
 4. Policy: `style-src-attr 'none'`. The e2e recorder fails on any style
    violation.
+
+What it took beyond the templates:
+- `.is-hidden` (not `!important`) for what `chat.js` toggles through
+  `el.style.display`, and an `isShown()` helper for the four places it read
+  `style.display` to decide what's showing.
+- htmx's settle step copied the old element's `style` attribute onto its
+  replacement (`attributesToSettle` included `style`); with chat.js styling
+  through the CSSOM that attribute exists, so the copy was blocked. The
+  `htmx-config` meta drops `style` from `attributesToSettle`.
+- emoji-picker-element binds `style="${…}"` in its templates with
+  `setAttribute`. The vendored bundle carries a one-line `D8-PATCH` to set
+  those through `el.style.cssText` instead (CSSOM, allowed); its header says
+  how to re-apply it on upgrade.
 
 Burn-down after Phase 4 (e2e run, strict policy, report-only):
 `style-src-attr` from htmx (~3100: htmx re-applies our templates' `style=`
@@ -257,17 +274,18 @@ emoji-picker (its shadow `<style>`, Phase 5's hash), 6 `inline`, and 2 from
    and the less common admin flows have run at least once.
 4. **Where reports go:** app logs only (`csp_violation` lines).
 
-## Enforcing scripts in a deployed environment
+## Enforcing in a deployed environment
 
 1. Deploy with `CSP_MODE=report` (the default). The strict policy is sent as
    Report-Only: browsers enforce nothing new, they only report.
-2. Soak a week. Watch the app's logs for first-party violations of
-   `script-src*`, e.g.
-   `kubectl logs deploy/d8-chat --since=24h | grep csp_violation | grep script-src`
-   (adjust the deployment name per environment).
-   Ignore `style-src*` (Phases 5–6) and anything from extensions (already
-   dropped by `/csp-report`).
-3. Zero `script-src*` lines for the week → set `CSP_MODE=enforce` and restart.
+2. Soak a week. Watch the app's logs for `csp_violation` lines, e.g.
+   `kubectl logs deploy/d8-chat --since=24h | grep csp_violation`
+   (adjust the deployment name per environment). Extension noise is already
+   dropped by `/csp-report`; each line names the directive, the source
+   file:line and a sample of what was blocked.
+3. None for the week → set `CSP_MODE=enforce` and restart. Only `style-src*`
+   ones (cosmetic) → `CSP_MODE=enforce-scripts` gets the script protection
+   now, and `enforce` follows the fix. Any `script-src*` one → fix it first.
    Rollback is setting it back to `report`.
 
 ## Effort

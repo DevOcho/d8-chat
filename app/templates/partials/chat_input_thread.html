@@ -21,8 +21,7 @@
                id="attachment-file-ids-thread-{{ parent_message.id }}">
         <div class="wysiwyg-editor-container">
             <div id="attachment-previews-thread-{{ parent_message.id }}"
-                 class="p-2 flex-wrap gap-2"
-                 style="display: none">
+                 class="p-2 flex-wrap gap-2 is-hidden">
                 <!-- Image previews will be injected here by JavaScript -->
             </div>
             <div class="wysiwyg-toolbar toolbar-hidden">
@@ -59,22 +58,20 @@
             </div>
             <!-- The contenteditable div for the rich editor -->
             <div id="wysiwyg-editor-thread-{{ parent_message.id }}"
-                 class="wysiwyg-content"
+                 class="wysiwyg-content{% if not g.user.wysiwyg_enabled %} is-hidden{% endif %}"
                  contenteditable="true"
-                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"
                  place-holder="Reply..."
                  data-placeholder="Reply..."></div>
             <!-- The textarea for Markdown mode -->
             <textarea id="markdown-toggle-view-thread-{{ parent_message.id }}"
-                      class="form-control"
+                      class="form-control{% if g.user.wysiwyg_enabled %} is-hidden{% endif %}"
                       rows="1"
-                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}"
                       placeholder="Reply..."
                       data-placeholder="Reply..."></textarea>
             <!-- This hidden input will hold the final markdown content for submission -->
-            <textarea id="chat-message-input-thread-{{ parent_message.id }}"
-                      name="chat_message"
-                      style="display: none"></textarea>
+            <textarea class="d-none"
+                      id="chat-message-input-thread-{{ parent_message.id }}"
+                      name="chat_message"></textarea>
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <!-- Bottom toolbar buttons (attachments, @mention, emoji) -->
                 <button type="button"
@@ -105,13 +102,10 @@
             </div>
         </div>
         <!-- Emoji picker container, positioned relative to the form -->
-        <div id="emoji-picker-container-thread-{{ parent_message.id }}"
-             style="display: none">
+        <div class="is-hidden"
+             id="emoji-picker-container-thread-{{ parent_message.id }}">
             <emoji-picker class="light" data-source="/js/local/emoji.json"></emoji-picker>
         </div>
     </form>
-    <div id="typing-sender"
-         ws-send
-         hx-trigger="typing-event"
-         style="display: none"></div>
+    <div class="d-none" id="typing-sender" ws-send hx-trigger="typing-event"></div>
 </div>

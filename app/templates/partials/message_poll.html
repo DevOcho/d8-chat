@@ -24,7 +24,8 @@
                     {# Conditionally render the progress bar #}
                     {% if poll_context.user_vote_option_id %}
                         <div id="poll-{{ poll_context.poll.id }}-option-{{ option.id }}-progress">
-                            <div class="poll-progress" style="width: {{ vote_percentage }}%;"></div>
+                            <div class="poll-progress"
+                                 data-width-percent="{{ '%.1f'|format(vote_percentage) }}"></div>
                         </div>
                     {% endif %}
                     <!-- Content on top of the progress bar -->

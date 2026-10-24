@@ -1,9 +1,8 @@
 <!-- app/templates/partials/channel_member_item.html -->
 <li class="list-group-item d-flex align-items-center px-0">
-    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2"
-         style="width: 24px;
-                height: 24px;
-                font-size: 0.8rem">{{ (member.user.display_name or member.user.username)[0]|upper }}</div>
+    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center me-2 avatar-24 avatar-initial">
+        {{ (member.user.display_name or member.user.username)[0]|upper }}
+    </div>
     <span>{{ member.user.display_name or member.user.username }}</span>
     <div class="ms-auto">
         {% if current_user_membership.role == 'admin' and member.user.id != g.user.id %}

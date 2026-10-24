@@ -13,7 +13,7 @@ import { readSource } from './helpers/env.js';
 const HOOKS = {
     'app/templates/base.html': [
         '<meta name="csrf-token"',
-        `content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'`,
+        `content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false, "attributesToSettle": ["class", "width", "height"]}'`,
         'sizes="32x32"',
         'id="app-toast"',
         'id="toast-header"',
@@ -22,6 +22,8 @@ const HOOKS = {
     ],
     'app/static/js/csrf.js': ["evt.detail.headers['X-CSRFToken'] = token"],
     'app/templates/chat.html': [
+        'class="is-hidden" id="search-results-overlay"',
+        'notifications-banner is-hidden',
         'id="global-search-form"',
         'ws-connect="/ws/chat"',
         'hx-ext="ws"',
@@ -91,6 +93,9 @@ const HOOKS = {
     ],
     'app/templates/admin/edit_channel.html': ['data-autosubmit', 'data-confirm='],
     'app/templates/admin/user_list_content.html': ['hx-confirm="Deactivate'],
+    'app/templates/partials/_avatar_display.html': ['avatar-{{ size }}', 'avatar-{{ size }} avatar-initial'],
+    'app/templates/partials/message_poll.html': ['class="poll-progress"', `data-width-percent="{{ '%.1f'|format(vote_percentage) }}"`],
+    'app/templates/partials/message_poll_oob_update.html': ['class="poll-progress"', `data-width-percent="{{ '%.1f'|format(vote_percentage) }}"`],
     'app/templates/partials/confirm_modal.html': [
         'id="confirm-modal"',
         'id="confirm-modal-body"',
@@ -192,6 +197,11 @@ const HOOKS = {
         'data-autosubmit',
     ],
     'app/templates/partials/chat_input_default.html': [
+        // Hidden by class until chat.js shows it (CSP: no style attributes).
+        'class="wysiwyg-content{% if not g.user.wysiwyg_enabled %} is-hidden{% endif %}"',
+        'class="form-control{% if g.user.wysiwyg_enabled %} is-hidden{% endif %}"',
+        'class="is-hidden" id="emoji-picker-container"',
+        'class="p-2 flex-wrap gap-2 is-hidden"',
         'id="chat-input-container"',
         'id="typing-indicator"',
         'hx-post="/chat/conversations/_pending_/messages"',

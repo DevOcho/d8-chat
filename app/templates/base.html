@@ -8,9 +8,11 @@
         {# The page CSP is script-src 'self', so htmx evaluates nothing (no
            on-event attributes, js: values or trigger filters) and runs no
            scripts from swapped content. Its indicator styles are in style.css
-           rather than injected into the head. #}
+           rather than injected into the head, and settling a swap leaves the
+           style attribute alone: copying one there (style-src-attr 'none')
+           would be blocked. #}
         <meta name="htmx-config"
-              content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'>
+              content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false, "attributesToSettle": ["class", "width", "height"]}'>
         <!-- CSS & Icons -->
         <link rel="stylesheet"
               href="{{ static_url('css/local/bootstrap.min.css') }}">

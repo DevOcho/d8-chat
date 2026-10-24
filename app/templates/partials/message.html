@@ -18,8 +18,7 @@
          data-raw-content="{{ message.content | e }}"
          data-attachments='[ {%- for att in image_attachments -%} { "url": "{{ att.url }}", "filename": "{{ att.original_filename | e }}" } {{- ", " if not loop.last else "" -}} {%- endfor -%} ]'>
         {% if not message.same_sender %}
-            <div class="flex-shrink-0"
-                 style="cursor: pointer"
+            <div class="flex-shrink-0 cursor-pointer"
                  hx-get="{{ url_for('dms.get_dm_details', other_user_id=message.user.id, context='channel') }}"
                  hx-target="#right-panel-offcanvas"
                  title="View user details">
@@ -28,7 +27,7 @@
                 {% endwith %}
             </div>
         {% else %}
-            <div class="flex-shrink-0" style="width: 40px; height: 40px;"></div>
+            <div class="flex-shrink-0 avatar-40"></div>
         {% endif %}
         <div class="flex-grow-1 ms-3">
             {% if not message.same_sender %}
@@ -68,17 +67,19 @@
             {% set image_count = image_attachments | length %}
             {% if image_count > 0 %}
                 {% set grid_count = '4+' if image_count >= 4 else image_count|string %}
-                <div class="attachment-grid mt-2" data-count="{{ grid_count }}">
+                {# A single image with known dimensions reserves its box (at most
+                   380x300) so the timeline doesn't jump as it loads: its <img>
+                   carries that display size as width/height (.attachment-grid-sized). #}
+                {% set first = image_attachments[0] %}
+                {% set sized = image_count == 1 and first.width and first.height %}
+                <div class="attachment-grid mt-2{% if sized %} attachment-grid-sized{% endif %}"
+                     data-count="{{ grid_count }}">
                     {% for attachment in image_attachments[:4] %}
-                        {# A single image with known dimensions reserves its box
-                           (at most 380x300) so the timeline doesn't jump as it loads. #}
-                        {% set box_style = "" %}
-                        {% if image_count == 1 and attachment.width and attachment.height %}
+                        {% if sized %}
                             {% set display_width = [380, attachment.width, (300 * attachment.width / attachment.height)|int]|min %}
-                            {% set box_style = "aspect-ratio: " ~ attachment.width ~ " / " ~ attachment.height ~ "; width: " ~ display_width ~ "px; max-width: 100%" %}
+                            {% set display_height = (display_width * attachment.height / attachment.width)|round|int %}
                         {% endif %}
-                        <div class="attachment-grid-item"
-                             {% if box_style %}style="{{ box_style }}"{% endif %}>
+                        <div class="attachment-grid-item">
                             <a href="#"
                                data-bs-toggle="modal"
                                data-bs-target="#image-carousel-modal"
@@ -88,7 +89,7 @@
                                      alt="{{ attachment.original_filename }}"
                                      loading="lazy"
                                      decoding="async"
-                                     {% if attachment.width and attachment.height %}width="{{ attachment.width }}" height="{{ attachment.height }}"{% endif %}>
+                                     {% if sized %}width="{{ display_width }}" height="{{ display_height }}"{% elif attachment.width and attachment.height %}width="{{ attachment.width }}" height="{{ attachment.height }}"{% endif %}>
                                 {% if loop.index == 4 and image_count > 4 %}<div class="attachment-overlay">+{{ image_count - 4 }}</div>{% endif %}
                             </a>
                         </div>
@@ -99,7 +100,7 @@
             {% if other_count > 0 %}
                 <div class="d-flex flex-wrap justify-content-start gap-3">
                     {% for attachment in other_attachments %}
-                        <div class="card h-100 shadow-sm attachment-card" style="width: 120px;">
+                        <div class="card h-100 shadow-sm attachment-card">
                             <div class="card-body p-2 text-center d-flex flex-column align-items-center justify-content-center">
                                 <div class="file-icon-wrapper">
                                     {% if attachment.mime_type == "application/pdf" %}

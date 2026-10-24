@@ -11,7 +11,7 @@
 </div>
 <div class="offcanvas-body p-0 d-flex flex-column">
     <!-- Scrollable content area -->
-    <div class="flex-grow-1" style="overflow-y: auto;">
+    <div class="flex-grow-1 overflow-y-auto">
         <!-- Parent Message -->
         <div id="thread-parent-message-container-{{ parent_message.id }}">
             <div class="p-3">
@@ -24,14 +24,12 @@
         <!-- Replies -->
         <div class="p-3" id="thread-replies-list-{{ parent_message.id }}">
             {% for reply in thread_replies %}
-
                 {# Date Separator Logic for Threads #}
                 {% if loop.first or reply.created_at.date() != loop.previtem.created_at.date() %}
                     {% with date_obj=reply.created_at %}
                         {% include 'partials/date_separator.html' %}
                     {% endwith %}
                 {% endif %}
-
                 {% with message=reply, is_in_thread_view=True %}
                     {% include 'partials/message.html' %}
                 {% endwith %}

@@ -25,6 +25,8 @@ HANDLER_ATTR = re.compile(r"(?<![\w-])on[a-z]+\s*=\s*[\"']", re.I)
 # Inside an HTML string built in JS or Python: <tag ... onclick= / style=
 HTML_WITH_HANDLER = re.compile(r"<[a-zA-Z][^<>]*\son[a-z]+\s*=", re.I)
 HTML_WITH_STYLE = re.compile(r"<[a-zA-Z][^<>]*\sstyle\s*=", re.I)
+# A style attribute in a template (style-src-attr 'none'); not data-style.
+STYLE_ATTR = re.compile(r"(?<![\w-])style\s*=\s*[\"'{]", re.I)
 EVAL_ATTRS = [
     (
         re.compile(r"(?<![\w-])(data-)?hx-on\b"),
@@ -68,6 +70,8 @@ def _inline_scripts(text):
 def _handler_and_eval_attributes(text):
     for m in HANDLER_ATTR.finditer(text):
         yield m.start(), f"inline handler {m.group(0)!r}"
+    for m in STYLE_ATTR.finditer(text):
+        yield m.start(), "style attribute (use a class; runtime values via the CSSOM)"
     for pattern, what in EVAL_ATTRS:
         for m in pattern.finditer(text):
             yield m.start(), what
@@ -142,6 +146,9 @@ def test_the_script_check(snippet, caught):
         ('<div data-onboarding="x">', False),
         ('<option value="a">', False),
         ('<input hx-trigger="keyup changed delay:300ms">', False),
+        ('<div style="display: none">', True),
+        ('<div {% if x %}style="width: 4px"{% endif %}>', True),
+        ('<div data-style="x" class="is-hidden">', False),
     ],
 )
 def test_the_attribute_check(snippet, caught):
@@ -160,3 +167,16 @@ def test_the_attribute_check(snippet, caught):
 )
 def test_the_built_markup_check(snippet, caught):
     assert bool(list(_built_markup(snippet, js=True))) is caught
+
+
+def test_every_avatar_size_has_a_class():
+    """_avatar_display.html sizes avatars with .avatar-<size> classes; a size
+    without one would render a full-size image."""
+    css = (ROOT / "app" / "static" / "css" / "style.css").read_text(encoding="utf-8")
+    sizes = set()
+    for path in TEMPLATES:
+        text = path.read_text(encoding="utf-8")
+        sizes |= set(re.findall(r"\bsize\s*=\s*(\d+)", text))
+    assert sizes, "no avatar sizes found"
+    missing = sorted(s for s in sizes if f".avatar-{s} " not in css)
+    assert missing == [], f"add .avatar-<size> rules to style.css for {missing}"

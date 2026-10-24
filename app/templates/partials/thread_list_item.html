@@ -1,6 +1,5 @@
 {% set channel = thread_channel_map.get(message.id) %}
-<div class="d-flex p-3 border-bottom text-decoration-none text-body"
-     style="cursor: pointer"
+<div class="d-flex p-3 border-bottom text-decoration-none text-body cursor-pointer"
      hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"
      hx-target="#right-panel-offcanvas">
     <div class="flex-shrink-0">
@@ -15,9 +14,7 @@
                    data-timestamp="{{ message.created_at.isoformat() }}Z">{{ message.created_at.strftime("%I:%M %p") }}</small>
             {% if channel %}<span class="text-muted small">in #{{ channel.name }}</span>{% endif %}
         </div>
-        <div class="message-content text-muted" style="font-size: 0.9rem;">
-            {{ message.content | emojize | truncate(150) }}
-        </div>
+        <div class="message-content text-muted thread-preview-text">{{ message.content | emojize | truncate(150) }}</div>
         {# Thread reply indicator #}
         {% set thread_reply_count = message.thread_reply_count %}
         {% if thread_reply_count > 0 %}

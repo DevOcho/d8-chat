@@ -2,7 +2,7 @@
 // presence, typing, avatar, desktop notifications, sounds, and the routing of
 // on-call `page` / `page_cleared` frames to the pager.
 import { describe, expect, it, vi } from 'vitest';
-import { PAGE_SCRIPTS, createPage } from './helpers/env.js';
+import { PAGE_SCRIPTS, createPage, isShown } from './helpers/env.js';
 import {
     ENGINEER, ME, ROBERT, chatInputDefault, chatPage, conversationPane, incident, pageClearedFrame,
     pageFrame, preferenceReply, preferenceSelects, profileHeader,
@@ -91,11 +91,16 @@ describe('typing_update', () => {
 describe('avatar_update', () => {
     it('replaces initial placeholders with the new image and updates existing images', async () => {
         const env = await chatEnv();
-        expect(env.$$(`.avatar-image[data-user-id="${ENGINEER.id}"]`).every((el) => el.tagName === 'DIV')).toBe(true);
+        const before = env.$$(`.avatar-image[data-user-id="${ENGINEER.id}"]`);
+        expect(before.every((el) => el.tagName === 'DIV')).toBe(true);
+        const sizes = before.map((el) => [...el.classList].find((c) => /^avatar-\d+$/.test(c)));
         await env.frame({ type: 'avatar_update', user_id: ENGINEER.id, avatar_url: '/files/avatars/eng.png' });
         const avatars = env.$$(`.avatar-image[data-user-id="${ENGINEER.id}"]`);
         expect(avatars.length).toBeGreaterThan(0);
         expect(avatars.every((el) => el.tagName === 'IMG' && el.getAttribute('src') === '/files/avatars/eng.png')).toBe(true);
+        // Each keeps its size class (no style attribute to copy; the CSP allows none).
+        expect(avatars.map((el) => [...el.classList].find((c) => /^avatar-\d+$/.test(c)))).toEqual(sizes);
+        expect(avatars.every((el) => !el.hasAttribute('style') && !el.classList.contains('avatar-initial'))).toBe(true);
 
         await env.frame({ type: 'avatar_update', user_id: ENGINEER.id, avatar_url: '/files/avatars/eng2.png' });
         expect(env.$$(`.avatar-image[data-user-id="${ENGINEER.id}"]`).map((el) => el.getAttribute('src')))
@@ -185,12 +190,12 @@ describe('notification frames', () => {
 
     it('offers the enable-notifications banner while permission is undecided', async () => {
         const env = await chatEnv({ notificationPermission: 'default' });
-        expect(env.$('#enable-notifications-banner').style.display).toBe('block');
+        expect(isShown(env.$('#enable-notifications-banner'))).toBe(true);
         env.state.notificationPermission = 'granted';
         env.$('#enable-notifications-btn').click();
         await env.flush();
         expect(env.window.Notification.requestPermission).toHaveBeenCalled();
-        expect(env.$('#enable-notifications-banner').style.display).toBe('none');
+        expect(isShown(env.$('#enable-notifications-banner'))).toBe(false);
     });
 });
 

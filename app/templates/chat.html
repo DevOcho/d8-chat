@@ -61,9 +61,7 @@
                    hx-get="{{ url_for('activity.view_all_unreads') }}"
                    hx-target="#chat-messages-container"
                    hx-swap="innerHTML">
-                    <i class="bi bi-envelope-fill me-2"
-                       style="width: 16px;
-                              display: inline-block"></i>Unreads
+                    <i class="bi bi-envelope-fill me-2 icon-slot"></i>Unreads
                 </a>
             </li>
             <!-- Threads -->
@@ -74,9 +72,7 @@
                    hx-get="{{ url_for('activity.view_all_threads') }}"
                    hx-target="#chat-messages-container"
                    hx-swap="innerHTML">
-                    <i class="bi bi-chat-square-text me-2"
-                       style="width: 16px;
-                              display: inline-block"></i>Threads
+                    <i class="bi bi-chat-square-text me-2 icon-slot"></i>Threads
                 </a>
             </li>
         </ul>
@@ -264,17 +260,14 @@
         <div id="pane-progress" class="pane-progress" aria-hidden="true"></div>
         <!-- Connection Status Bar -->
         <div id="connection-status-bar"
-             class="p-2 bg-warning text-dark text-center"
-             style="display: none;
-                    flex-shrink: 0">
+             class="p-2 bg-warning text-dark text-center is-hidden flex-shrink-0">
             <div class="spinner-border spinner-border-sm me-2" role="status">
                 <span class="visually-hidden">Loading...</span>
             </div>
             Connection lost. Attempting to reconnect...
         </div>
         <div id="chat-header-container"
-             class="p-3 border-bottom bg-white"
-             style="flex-shrink: 0">
+             class="p-3 border-bottom bg-white flex-shrink-0">
             <!-- The header content will be swapped in from the backend -->
             <div class="text-center text-muted">
                 <h4 class="mb-0">Welcome, {{ g.user.username }}!</h4>
@@ -283,9 +276,7 @@
         </div>
         <!-- Scrollable Messages Container -->
         <div id="chat-messages-container"
-             class="chat-messages position-relative"
-             style="flex-grow: 1;
-                    overflow-y: auto"
+             class="chat-messages position-relative flex-grow-1 overflow-y-auto"
              hx-get="/chat/dm/{{ g.user.id }}"
              hx-trigger="load">
             <!-- The message list and new messages will be swapped in here -->
@@ -300,8 +291,7 @@
         <div class="jump-to-latest-anchor">
             <button id="jump-to-bottom-btn"
                     type="button"
-                    class="btn btn-primary btn-sm rounded-pill shadow"
-                    style="display: none">
+                    class="btn btn-primary btn-sm rounded-pill shadow is-hidden">
                 <span class="jump-label">New messages</span> <i class="bi bi-arrow-down" aria-hidden="true"></i>
             </button>
         </div>
@@ -332,9 +322,7 @@
             </div>
         </div>
         <!-- Search Results Overlay -->
-        <div id="search-results-overlay"
-             style="display: none;
-                    flex-direction: column">
+        <div class="is-hidden" id="search-results-overlay">
             <!-- HTMX will populate this container with the search_results.html partial -->
         </div>
         <!-- Modal for the View Image Carousel -->
@@ -424,9 +412,7 @@
         </div>
         <!-- Notification permission -->
         <div id="enable-notifications-banner"
-             class="bg-primary text-white text-center p-2 position-fixed bottom-0 start-0 w-100 shadow-lg"
-             style="z-index: 1060;
-                    display: none">
+             class="bg-primary text-white text-center p-2 position-fixed bottom-0 start-0 w-100 shadow-lg notifications-banner is-hidden">
             <span class="me-3">Don't miss a message! Enable desktop notifications to stay in the loop.</span>
             <button id="enable-notifications-btn" class="btn btn-light btn-sm fw-bold">
                 <i class="bi bi-bell-fill me-1"></i> Enable Notifications

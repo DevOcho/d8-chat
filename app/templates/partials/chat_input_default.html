@@ -11,9 +11,7 @@
         <input type="file" id="file-attachment-input" class="d-none" multiple>
         <input type="hidden" name="attachment_file_ids" id="attachment-file-ids">
         <div class="wysiwyg-editor-container">
-            <div id="attachment-previews"
-                 class="p-2 flex-wrap gap-2"
-                 style="display: none">
+            <div id="attachment-previews" class="p-2 flex-wrap gap-2 is-hidden">
                 <!-- Image previews will be injected here by JavaScript -->
             </div>
             <!-- Top Toolbar is now hidden by default -->
@@ -50,16 +48,14 @@
             </div>
             <!-- Rich editor -->
             <div id="wysiwyg-editor"
-                 class="wysiwyg-content"
-                 contenteditable="true"
-                 style="display: {% if g.user.wysiwyg_enabled %}block{% else %}none{% endif %}"></div>
+                 class="wysiwyg-content{% if not g.user.wysiwyg_enabled %} is-hidden{% endif %}"
+                 contenteditable="true"></div>
             <!-- Markdown view -->
             <textarea id="markdown-toggle-view"
-                      class="form-control"
-                      rows="1"
-                      style="display: {% if g.user.wysiwyg_enabled %}none{% else %}block{% endif %}"></textarea>
+                      class="form-control{% if g.user.wysiwyg_enabled %} is-hidden{% endif %}"
+                      rows="1"></textarea>
             <!-- Hidden textarea that will be sent to the server -->
-            <textarea id="chat-message-input" name="chat_message" style="display: none;"></textarea>
+            <textarea class="d-none" id="chat-message-input" name="chat_message"></textarea>
             <!-- Bottom Toolbar (always visible) -->
             <div class="wysiwyg-toolbar wysiwyg-toolbar-bottom">
                 <button type="button" id="format-toggle-btn" title="Toggle Rich Formatting">
@@ -94,12 +90,9 @@
             </div>
         </div>
         <!-- This container holds the emoji picker, positioned above the input -->
-        <div id="emoji-picker-container" style="display: none">
+        <div class="is-hidden" id="emoji-picker-container">
             <emoji-picker class="light" data-source="/js/local/emoji.json"></emoji-picker>
         </div>
     </form>
-    <div id="typing-sender"
-         ws-send
-         hx-trigger="typing-event"
-         style="display: none"></div>
+    <div class="d-none" id="typing-sender" ws-send hx-trigger="typing-event"></div>
 </div>

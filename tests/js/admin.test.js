@@ -16,7 +16,7 @@ const CONFIRM_MODAL = `<div class="modal fade" id="confirm-modal" tabindex="-1" 
 function adminPage(content, { withModal = true, theme = 'light' } = {}) {
     return `<!doctype html><html data-bs-theme="${theme}"><head>
         <meta name="csrf-token" content="csrf-test-token">
-        <meta name="htmx-config" content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'></head>
+        <meta name="htmx-config" content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false, "attributesToSettle": ["class", "width", "height"]}'></head>
         <body class="admin-page"><main id="admin-content">${content}</main>
         ${withModal ? CONFIRM_MODAL : ''}</body></html>`;
 }

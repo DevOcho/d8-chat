@@ -1,20 +1,13 @@
 {# This partial displays a user's avatar image or their initial as a fallback. #}
-{# It accepts a `user` object and a `size` in pixels. #}
-{% set size_px = size ~ 'px' %}
-{% set font_size_rem = (size / 24) * 0.8 ~ 'rem' %} {# Scale font size relative to avatar size #}
+{# It accepts a `user` object and a `size` in pixels: one of the .avatar-<size>
+   classes in style.css (24, 32, 36, 40, 60), which also scale the initial. #}
 {% set avatar_url = user.avatar_url %}
 {% if avatar_url %}
     <img src="{{ avatar_url }}"
          alt="{{ user.username }}'s avatar"
-         class="rounded-circle avatar-image"
-         data-user-id="{{ user.id }}"
-         style="width: {{ size_px }};
-                height: {{ size_px }};
-                object-fit: cover">
+         class="rounded-circle avatar-image avatar-{{ size }}"
+         data-user-id="{{ user.id }}">
 {% else %}
-    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center avatar-image"
-         data-user-id="{{ user.id }}"
-         style="width: {{ size_px }};
-                height: {{ size_px }};
-                font-size: {{ font_size_rem }}">{{ (user.display_name or user.username)[0]|upper }}</div>
+    <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center avatar-image avatar-{{ size }} avatar-initial"
+         data-user-id="{{ user.id }}">{{ (user.display_name or user.username)[0]|upper }}</div>
 {% endif %}

@@ -89,6 +89,15 @@ def test_enforce_mode_enforces_what_the_code_is_ready_for_today():
         assert strict is ready, group
 
 
+def test_enforce_scripts_mode_leaves_styles_loose():
+    enforced, report_only = _csp_headers("", "enforce-scripts")
+    d = _directives(enforced)
+    assert d["script-src"] == "'self' 'report-sample'"
+    assert d["style-src"] == "'self' 'unsafe-inline'"
+    assert "style-src-attr" not in d
+    assert _directives(report_only)["style-src-attr"] == "'none'"
+
+
 def test_strict_policy_keeps_the_other_directives():
     d = _directives(
         _build_csp(

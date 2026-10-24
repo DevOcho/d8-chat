@@ -83,8 +83,8 @@ describe('composers swapped in by htmx', () => {
         await swapIn(env, '/chat/thread/101', '#thread-slot');
         expect(env.$('#message-form-thread-101').dataset.editorReady).toBe('1');
         // The editor is live: Enter sends what was typed, as a thread reply.
-        // (No inline display styles in this fixture, so it starts in the
-        // markdown view.)
+        // (Neither view is marked is-hidden in this fixture, so it starts in
+        // the markdown view.)
         const input = env.$('#markdown-toggle-view-thread-101');
 
         input.value = 'in the thread';
@@ -300,5 +300,70 @@ describe('htmx config (base.html meta)', () => {
         env.$('#evil-btn').click();
         expect(env.window.ranScript).toBeUndefined();
         expect(env.window.ranHxOn).toBeUndefined();
+    });
+});
+
+describe('sizes from data attributes (ui.js)', () => {
+    it('gives poll bars their width when htmx loads them, clamped to 0-100%', async () => {
+        const env = await chatEnv({
+            routes: [{
+                match: '/chat/poll/1/results',
+                reply: { body: '<div id="bars"><div class="poll-progress" data-width-percent="42.5"></div><div class="poll-progress" data-width-percent="140"></div></div>' },
+            }],
+            extraMain: '<div id="bars"></div>',
+        });
+        await swapIn(env, '/chat/poll/1/results', '#bars');
+        const widths = env.$$('#bars .poll-progress').map((el) => el.style.width);
+        expect(widths).toEqual(['42.5%', '100%']);
+        expect(env.$$('#bars .poll-progress').every((el) => el.style.transition === '')).toBe(true);
+    });
+});
+
+describe('elements hidden by class until chat.js shows them', () => {
+    it('the emoji picker opens on the first click and closes on the second', async () => {
+        const env = await chatEnv();
+        const container = env.$('#emoji-picker-container');
+        expect(container.classList.contains('is-hidden')).toBe(true);
+        env.$('#emoji-btn').click();
+        expect(container.style.display).toBe('block');
+        env.$('#emoji-btn').click();
+        expect(container.style.display).toBe('none');
+    });
+
+    it('a composer marked for markdown starts in the markdown view', async () => {
+        const env = await createPage({
+            html: chatPage({ pane: conversationPane({ convIdStr: 'channel_1', rows: MINE }), inputLoader: true }),
+            xhrRoutes: [{ match: '/chat/input/default', reply: { body: chatInputDefault({ wysiwyg: false }) } }],
+        });
+        await env.tick(50);
+        const markdown = env.$('#markdown-toggle-view');
+        markdown.value = 'from the **markdown** view';
+        markdown.dispatchEvent(new env.window.Event('input', { bubbles: true }));
+        env.$('#send-button').click();
+        await env.flush();
+        const [post] = env.xhrs(/\/messages$/).filter((x) => x.method === 'POST');
+        expect(new URLSearchParams(post.body).get('chat_message')).toBe('from the **markdown** view');
+    });
+});
+
+describe('htmx settling', () => {
+    it('never copies a style attribute onto swapped-in content', async () => {
+        const env = await chatEnv({
+            routes: [{ match: '/chat/box', reply: { body: '<div id="box" class="b"></div>' } }],
+            extraMain: '<div id="box" class="a"></div>',
+        });
+        expect(env.window.htmx.config.attributesToSettle).toEqual(['class', 'width', 'height']);
+        const old = env.$('#box');
+        old.style.height = '120px'; // what chat.js does through the CSSOM
+        const writes = [];
+        const setAttribute = env.window.Element.prototype.setAttribute;
+        env.window.Element.prototype.setAttribute = function (name, value) {
+            if (name === 'style') writes.push(value);
+            return setAttribute.call(this, name, value);
+        };
+        await swapIn(env, '/chat/box', '#box');
+        env.window.Element.prototype.setAttribute = setAttribute;
+        expect(writes).toEqual([]);
+        expect(env.$('#box').className).toBe('b');
     });
 });

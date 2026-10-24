@@ -689,10 +689,12 @@ emoji-picker {
 }
 
 .attachment-grid-item img {
-    width: 100%;
-    height: 100%;
     object-fit: cover; /* Ensures images fill their grid area without distortion */
     display: block;
+}
+.attachment-grid:not(.attachment-grid-sized) .attachment-grid-item img {
+    width: 100%;
+    height: 100%;
 }
 
 /* Layout for a single image */
@@ -1294,6 +1296,7 @@ a.hashtag-link:hover {
 }
 
 .attachment-card {
+    width: 120px;
     transition: transform 0.2s ease;
     overflow: hidden;
 }
@@ -1538,10 +1541,16 @@ a.hashtag-link:hover {
     }
 }
 
-/* A single image with known dimensions gets its exact box before it loads
-   (message.html sets aspect-ratio and width), so the timeline doesn't jump. */
-.attachment-grid[data-count="1"] .attachment-grid-item[style*="aspect-ratio"] img {
-    height: 100%;
+/* A single image with known dimensions gets its exact box before it loads,
+   so the timeline doesn't jump: message.html gives its <img> the display size
+   (at most 380x300) as width/height attributes. The grid shrinks to it, and
+   on a narrow column the image shrinks keeping that ratio. */
+.attachment-grid.attachment-grid-sized {
+    width: fit-content;
+}
+.attachment-grid.attachment-grid-sized .attachment-grid-item img {
+    max-width: 100%;
+    height: auto;
 }
 
 /* A reaction pill toggled off to zero, until the server's copy removes it. */
@@ -1657,3 +1666,51 @@ a.hashtag-link {
     opacity: 1;
     transition: opacity 200ms ease-in;
 }
+
+/* --- What used to be style="..." attributes (CSP_PLAN.md, Phase 6) --------
+   The page CSP is style-src-attr 'none', so markup sizes and hides things
+   with these classes, and runtime values go through the CSSOM. */
+
+/* Hidden until chat.js shows it: it sets el.style.display, which beats this
+   class. (Bootstrap's d-none and [hidden] are !important and would win.) */
+.is-hidden {
+    display: none;
+}
+
+.cursor-pointer {
+    cursor: pointer;
+}
+
+/* Avatars and avatar-sized boxes; initials scale with the circle. */
+.avatar-24 { width: 24px; height: 24px; }
+.avatar-32 { width: 32px; height: 32px; }
+.avatar-36 { width: 36px; height: 36px; }
+.avatar-40 { width: 40px; height: 40px; }
+.avatar-60 { width: 60px; height: 60px; }
+.avatar-initial.avatar-24 { font-size: 0.8rem; }
+.avatar-initial.avatar-36 { font-size: 1.2rem; }
+.avatar-initial.avatar-40 { font-size: 1.3333rem; }
+.avatar-initial.avatar-60 { font-size: 2rem; }
+img.avatar-image { object-fit: cover; }
+
+/* The fixed-width icon column in the sidebar (Unreads, Threads). */
+.icon-slot {
+    width: 16px;
+    display: inline-block;
+}
+
+.thread-preview-text {
+    font-size: 0.9rem;
+}
+
+/* Above Bootstrap's modals and toasts. */
+.notifications-banner {
+    z-index: 1060;
+}
+
+/* Admin forms and tables. */
+.mw-480 { max-width: 480px; }
+.mw-640 { max-width: 640px; }
+.mw-720 { max-width: 720px; }
+.col-w-90 { width: 90px; }
+.col-w-140 { width: 140px; }

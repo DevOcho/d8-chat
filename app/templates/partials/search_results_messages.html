@@ -1,8 +1,7 @@
 <!-- This partial renders a list of message results and a "Load More" button -->
 {% for message in messages %}
     {# Use a DIV instead of an A tag to prevent default browser navigation #}
-    <div class="text-decoration-none text-body search-result-item d-block py-2"
-         style="cursor: pointer"
+    <div class="text-decoration-none text-body search-result-item d-block py-2 cursor-pointer"
          hx-get="{{ url_for('messages.jump_to_message', message_id=message.id) }}"
          hx-target="#chat-messages-container"
          hx-swap="innerHTML">
@@ -14,9 +13,9 @@
         <!-- Message Body -->
         <div class="d-flex">
             <div class="flex-shrink-0">
-                <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center"
-                     style="width: 40px;
-                            height: 40px">{{ (message.user.display_name or message.user.username)[0]|upper }}</div>
+                <div class="rounded-circle bg-secondary text-white d-flex align-items-center justify-content-center avatar-40">
+                    {{ (message.user.display_name or message.user.username)[0]|upper }}
+                </div>
             </div>
             <div class="flex-grow-1 ms-3">
                 <div>

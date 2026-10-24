@@ -1,7 +1,7 @@
 {# app/templates/partials/threads_view.html #}
 {# Swapped into #chat-messages-container, so it mustn't reuse that id. #}
 <div id="threads-view" class="chat-messages position-relative h-100">
-    <div id="thread-list-container" class="h-100" style="overflow-y: auto;">
+    <div id="thread-list-container" class="h-100 overflow-y-auto">
         {% for thread in threads %}
             {% with message=thread %}
                 {% include 'partials/thread_list_item.html' %}

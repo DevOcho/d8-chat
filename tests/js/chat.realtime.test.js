@@ -3,7 +3,7 @@
 // backfill, edits, reactions, thread replies and the scroll / "Jump to Latest"
 // behaviour.
 import { describe, expect, it } from 'vitest';
-import { createPage } from './helpers/env.js';
+import { createPage, isShown } from './helpers/env.js';
 import {
     ENGINEER, ME, chatPage, conversationPane, dateSeparator, message, messageFrame, oobToSelector,
 } from './helpers/fixtures.js';
@@ -90,7 +90,7 @@ describe('timestamp localization', () => {
     it('localizes a live thread reply', async () => {
         const env = await chatEnv({ rows: message({ id: 50, user: ENGINEER, createdAt: '2026-10-17T12:00:00' }) });
         env.$('#right-panel-body').innerHTML = `
-            <div class="flex-grow-1" style="overflow-y: auto">
+            <div class="flex-grow-1 overflow-y-auto">
                 <div id="thread-replies-list-50"></div>
             </div>`;
         await env.frame(oobToSelector('beforeend', '#thread-replies-list-50',
@@ -226,7 +226,7 @@ describe('scrolling and Jump to Latest', () => {
         const env = await chatEnv();
         scrolledUp(env);
         await env.frame(messageFrame({ id: 300, user: ENGINEER, createdAt: '2026-10-17T13:00:00' }));
-        expect(env.$('#jump-to-bottom-btn').style.display).toBe('block');
+        expect(isShown(env.$('#jump-to-bottom-btn'))).toBe(true);
     });
 
     it('scrolls to my own new message instead of showing Jump to Latest', async () => {
@@ -238,7 +238,7 @@ describe('scrolling and Jump to Latest', () => {
         };
         await env.frame(messageFrame({ id: 300, user: ME, createdAt: '2026-10-17T13:00:00' }));
         await env.tick(0);
-        expect(env.$('#jump-to-bottom-btn').style.display).toBe('none');
+        expect(isShown(env.$('#jump-to-bottom-btn'))).toBe(false);
         expect(scrolled).toBeGreaterThan(0);
     });
 
@@ -250,7 +250,7 @@ describe('scrolling and Jump to Latest', () => {
         };
         await env.frame(messageFrame({ id: 300, user: ENGINEER, createdAt: '2026-10-17T13:00:00' }));
         await env.tick(0);
-        expect(env.$('#jump-to-bottom-btn').style.display).toBe('none');
+        expect(isShown(env.$('#jump-to-bottom-btn'))).toBe(false);
         expect(scrolled).toBeGreaterThan(0);
     });
 });

@@ -3,13 +3,13 @@
 // subscribe ack, dropping appends meant for another conversation's pane, and
 // keeping the DM sidebar most-recent first.
 import { describe, expect, it } from 'vitest';
-import { createPage } from './helpers/env.js';
+import { createPage, isShown } from './helpers/env.js';
 import {
     ENGINEER, ME, ROBERT, chatPage, conversationPane, dmBadgeFrame, dmConvId, message, messageFrame,
     messageListAppend,
 } from './helpers/fixtures.js';
 
-const TYPING_SENDER = '<div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none"></div>';
+const TYPING_SENDER = '<div id="typing-sender" ws-send hx-trigger="typing-event" class="d-none"></div>';
 
 async function chatEnv({ pane, dms, ...opts } = {}) {
     const env = await createPage({
@@ -51,7 +51,7 @@ describe('heartbeat', () => {
         await env.tick(10000);
         expect(pings(env.socket)).toHaveLength(3);
         expect(env.sockets).toHaveLength(1);
-        expect(bar(env).style.display).toBe('none');
+        expect(isShown(bar(env))).toBe(false);
     });
 
     it('any frame counts as a reply, not only a pong', async () => {
@@ -71,7 +71,7 @@ describe('heartbeat', () => {
         await env.tick(10000);
         expect(dead.clientClose).not.toBeNull();
         expect(env.sockets).toHaveLength(2);
-        expect(bar(env).style.display).toBe('block');
+        expect(isShown(bar(env))).toBe(true);
 
         await env.openSocket();
         expect(bar(env).textContent).toBe('Connection restored.');

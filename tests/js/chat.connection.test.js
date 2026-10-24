@@ -2,12 +2,12 @@
 // auth-rejected socket (1008 "Not authenticated"), resubscribing and the
 // post-reconnect backfill, and the visibility/online-triggered reconnect.
 import { describe, expect, it, vi } from 'vitest';
-import { createPage } from './helpers/env.js';
+import { createPage, isShown } from './helpers/env.js';
 import {
     ENGINEER, ME, chatPage, conversationPane, dateSeparator, message, messageFrame, unreadBadge,
 } from './helpers/fixtures.js';
 
-const TYPING_SENDER = '<div id="typing-sender" ws-send hx-trigger="typing-event" style="display: none"></div>';
+const TYPING_SENDER = '<div id="typing-sender" ws-send hx-trigger="typing-event" class="d-none"></div>';
 
 function rows() {
     // Ids deliberately out of order: the backfill cursor must be the highest
@@ -38,7 +38,7 @@ describe('wsClose handling', () => {
         env.socket.serverClose(1008, 'Not authenticated');
         await env.flush();
         expect(env.reloads).toBe(1);
-        expect(bar(env).style.display).toBe('none');
+        expect(isShown(bar(env))).toBe(false);
     });
 
     it('does not reload for a 1008 with any other reason', async () => {
@@ -47,7 +47,7 @@ describe('wsClose handling', () => {
         env.socket.serverClose(1008, 'Rate limited');
         await env.flush();
         expect(env.reloads).toBe(0);
-        expect(bar(env).style.display).toBe('none');
+        expect(isShown(bar(env))).toBe(false);
     });
 
     it.each([1000, 1001, 1008])('does not show the reconnect bar for a %i close', async (code) => {
@@ -55,7 +55,7 @@ describe('wsClose handling', () => {
         await env.openSocket();
         env.socket.serverClose(code);
         await env.flush();
-        expect(bar(env).style.display).toBe('none');
+        expect(isShown(bar(env))).toBe(false);
         expect(env.reloads).toBe(0);
     });
 
@@ -64,7 +64,7 @@ describe('wsClose handling', () => {
         await env.openSocket();
         env.socket.serverClose(code);
         await env.flush();
-        expect(bar(env).style.display).toBe('block');
+        expect(isShown(bar(env))).toBe(true);
         expect(env.reloads).toBe(0);
     });
 
@@ -73,7 +73,7 @@ describe('wsClose handling', () => {
         await env.openSocket();
         env.socket.error();
         await env.flush();
-        expect(bar(env).style.display).toBe('block');
+        expect(isShown(bar(env))).toBe(true);
     });
 
     it('says "Connection restored." on reconnect, then hides and resets the bar after 2s', async () => {
@@ -82,11 +82,11 @@ describe('wsClose handling', () => {
         env.socket.serverClose(1006);
         await env.tick(500);
         await env.openSocket();
-        expect(bar(env).style.display).toBe('block');
+        expect(isShown(bar(env))).toBe(true);
         expect(bar(env).textContent).toBe('Connection restored.');
         expect(bar(env).classList.contains('bg-success')).toBe(true);
         await env.tick(2000);
-        expect(bar(env).style.display).toBe('none');
+        expect(isShown(bar(env))).toBe(false);
         expect(bar(env).classList.contains('bg-warning')).toBe(true);
         expect(bar(env).textContent).toContain('Connection lost. Attempting to reconnect...');
     });
@@ -94,7 +94,7 @@ describe('wsClose handling', () => {
     it('leaves the bar alone on the first, non-reconnect open', async () => {
         const env = await chatEnv();
         await env.openSocket();
-        expect(bar(env).style.display).toBe('none');
+        expect(isShown(bar(env))).toBe(false);
     });
 });
 

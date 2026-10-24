@@ -75,6 +75,26 @@ document.addEventListener('submit', (evt) => {
     });
 }, true);
 
+// --- Sizes from data attributes -------------------------------------------------
+// The page CSP allows no style attributes, so values only known at render time
+// travel as data attributes and are applied through the CSSOM (which CSP
+// allows) whenever htmx loads content: <div data-width-percent="42.5">.
+function applyDataSizes(root) {
+    if (!root || !root.querySelectorAll) return;
+    const bars = [...root.querySelectorAll('[data-width-percent]')];
+    if (root.matches && root.matches('[data-width-percent]')) bars.unshift(root);
+    bars.forEach((el) => {
+        const percent = Math.max(0, Math.min(100, parseFloat(el.dataset.widthPercent) || 0));
+        // Straight to the value: a CSS width transition would otherwise run
+        // from 0 every time a bar is (re)rendered.
+        el.style.transition = 'none';
+        el.style.width = `${percent}%`;
+        void el.offsetWidth;
+        el.style.removeProperty('transition');
+    });
+}
+if (window.htmx) htmx.onLoad(applyDataSizes);
+
 // --- Autosubmit ------------------------------------------------------------------
 // <input|select data-autosubmit>: submit its form on change. requestSubmit
 // fires the submit event, so an htmx form (hx-post) sends as if its submit
