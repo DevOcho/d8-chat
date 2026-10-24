@@ -14,7 +14,11 @@ from flask import (
 )
 
 from app import _sanitize_and_linkify, limiter
-from app.access import user_has_conversation_access
+from app.access import (
+    user_can_access_message,
+    user_can_post,
+    user_has_conversation_access,
+)
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
 from app.htmx_oob import oob_by_id
@@ -39,7 +43,7 @@ from app.routes import (
     login_required,
     message_update_oob,
 )
-from app.services import chat_service, minio_service
+from app.services import chat_service
 
 
 def _opt_int(value):
@@ -74,6 +78,8 @@ def get_message_view(message_id):
     message = Message.get_or_none(id=message_id)
     if not message:
         return "", 404
+    if not user_can_access_message(g.user, message):
+        return "Unauthorized", 403
     reactions_map = get_reactions_for_messages([message])
     attachments_map = get_attachments_for_messages([message])
     return render_template(
@@ -154,19 +160,9 @@ def delete_message(message_id):
     message = Message.get_or_none(id=message_id)
     if not message or message.user.id != g.user.id:
         return "Unauthorized", 403
-    attachments_to_delete = list(message.attachments)
     conv_id_str = message.conversation.conversation_id_str
     try:
-        with db.atomic():
-            message.delete_instance(recursive=True)
-            for attachment in attachments_to_delete:
-                try:
-                    minio_service.delete_file(attachment.stored_filename)
-                    attachment.delete_instance()
-                except Exception:
-                    current_app.logger.exception(
-                        f"Error during attachment cleanup for message {message_id}"
-                    )
+        chat_service.delete_message_and_files(message)
     except Exception:
         current_app.logger.exception(f"Error deleting message {message_id}")
         return "Error deleting message", 500
@@ -194,7 +190,7 @@ def post_message(conv_id_str):
     via the WS broadcast echo, so on success the UX is unchanged. Returns 204;
     the client clears the composer on 2xx and preserves the draft on error.
     """
-    status = handle_inbound_message(
+    status, _ = handle_inbound_message(
         sender=g.user,
         conv_id_str=conv_id_str,
         chat_text=request.form.get("chat_message"),
@@ -213,6 +209,8 @@ def post_message(conv_id_str):
         return "Conversation not found.", 404
     if status == "forbidden":
         return "You can't post to this conversation.", 403
+    if status == "bad_ref":
+        return "That reply, quote or attachment can't be used here.", 400
     return "", 204
 
 
@@ -229,6 +227,8 @@ def get_reply_chat_input(message_id):
     message_to_reply_to = Message.get_or_none(id=message_id)
     if not message_to_reply_to:
         return "Message not found", 404
+    if not user_can_access_message(g.user, message_to_reply_to):
+        return "Unauthorized", 403
     draft_content = request.args.get("draft", "")
     draft_content_html = to_html(draft_content) if draft_content else ""
     return render_template(
@@ -245,6 +245,8 @@ def load_for_thread_reply(message_id):
     """Loads the thread chat input component configured for quoting another message."""
     try:
         message_to_reply_to = Message.get_by_id(message_id)
+        if not user_can_access_message(g.user, message_to_reply_to):
+            return "Unauthorized", 403
         if not message_to_reply_to.parent_message:
             return "Cannot reply to this message in a thread context.", 400
         return render_template(
@@ -264,6 +266,8 @@ def view_thread(parent_message_id):
         parent_message = Message.get_by_id(parent_message_id)
     except Message.DoesNotExist:
         return "Message not found", 404
+    if not user_can_access_message(g.user, parent_message):
+        return "Unauthorized", 403
     channel = None
     if parent_message.conversation.type == "channel":
         channel = Channel.get_by_id(
@@ -304,6 +308,8 @@ def get_thread_chat_input(parent_message_id):
     """Serves the dedicated chat input form for a thread view."""
     try:
         parent_message = Message.get_by_id(parent_message_id)
+        if not user_can_access_message(g.user, parent_message):
+            return "Unauthorized", 403
         return render_template(
             "partials/chat_input_thread.html", parent_message=parent_message
         )
@@ -427,15 +433,9 @@ def jump_to_message(message_id):
         return "Message not found", 404
 
     conversation = target_message.conversation
-    is_member = (
-        UserConversationStatus.select()
-        .where(
-            (UserConversationStatus.user == g.user)
-            & (UserConversationStatus.conversation == conversation)
-        )
-        .exists()
-    )
-    if not is_member:
+    # Membership, not a read-state row: those outlive leaving (or being removed
+    # from) a channel, which let ex-members keep reading it.
+    if not user_can_access_message(g.user, target_message):
         return "Unauthorized", 403
 
     messages_before = list(
@@ -560,6 +560,8 @@ def toggle_reaction(message_id):
     message = Message.get_or_none(id=message_id)
     if not emoji or not message:
         return "Invalid request.", 400
+    if not user_can_access_message(g.user, message):
+        return "Unauthorized", 403
     existing_reaction = Reaction.get_or_none(user=g.user, message=message, emoji=emoji)
     if existing_reaction:
         existing_reaction.delete_instance()
@@ -595,6 +597,8 @@ def get_forward_message_modal(message_id):
     message = Message.get_or_none(id=message_id)
     if not message:
         return "Message not found", 404
+    if not user_can_access_message(g.user, message):
+        return "Unauthorized", 403
 
     # Get user's channels
     user_channels = list(
@@ -660,23 +664,14 @@ def forward_message(message_id):
     if not target_conv:
         return "Target conversation not found", 404
 
-    # Verify access to the target conversation
-    if target_conv.type == "channel":
-        channel_id = int(target_conv_id_str.split("_")[1])
-        is_member = (
-            ChannelMember.select()
-            .where(
-                (ChannelMember.user == g.user)
-                & (ChannelMember.channel_id == channel_id)
-            )
-            .exists()
-        )
-        if not is_member:
-            return "You are not a member of the target channel", 403
-    else:
-        user_ids = list(int(uid) for uid in target_conv_id_str.split("_")[1:])
-        if g.user.id not in user_ids:
-            return "You are not part of this DM", 403
+    # Verify the user may post to the target (membership, plus the
+    # admins-only restriction a forward used to slip past).
+    try:
+        target_parsed = parse_conversation_id(target_conv_id_str)
+    except ValueError:
+        return "Invalid target conversation", 400
+    if not user_can_post(g.user, target_parsed):
+        return "You can't post to that conversation", 403
 
     # Add default text if no note is provided so the message isn't completely empty
     if not optional_note:

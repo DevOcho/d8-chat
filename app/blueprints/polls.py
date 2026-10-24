@@ -1,7 +1,9 @@
 # app/blueprints/polls.py
 from flask import Blueprint, g, make_response, render_template, request
 
+from app.access import user_can_access_message, user_can_post
 from app.chat_manager import chat_manager
+from app.conversation_id import parse_conversation_id
 from app.htmx_oob import oob_to_selector
 from app.models import Conversation, Message, Poll, PollOption, Vote, db
 from app.routes import (
@@ -78,7 +80,15 @@ def create_poll():
     conv_id_str = request.form.get("conversation_id_str")
     if not conv_id_str:
         return "Could not determine the current conversation.", 400
-    conversation = Conversation.get(conversation_id_str=conv_id_str)
+    conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
+    if conversation is None:
+        return "Conversation not found.", 404
+    try:
+        parsed = parse_conversation_id(conv_id_str)
+    except ValueError:
+        return "Malformed conversation id.", 400
+    if not user_can_post(g.user, parsed):
+        return "You can't post to this conversation.", 403
 
     with db.atomic():
         # Create a message to act as the container for our poll
@@ -136,6 +146,8 @@ def vote_on_poll(option_id):
 
     poll = option.poll
     message = poll.message
+    if not user_can_access_message(g.user, message):
+        return "Unauthorized", 403
 
     with db.atomic():
         # Find if the user has already voted on any option in this poll

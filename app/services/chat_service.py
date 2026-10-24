@@ -3,7 +3,7 @@
 import datetime
 import re
 
-from flask import render_template, url_for
+from flask import current_app, render_template, url_for
 from peewee import fn
 
 from app.chat_manager import chat_manager
@@ -22,13 +22,154 @@ from app.models import (
     db,
     utc_now,
 )
-from app.services import push_service
+from app.services import minio_service, push_service
 
 # How recent a user's activity stamp must be for a mobile push to be
 # suppressed. Deliberately tighter than chat_manager.ACTIVE_TTL (the 15-minute
 # presence-dot window): within ~5 minutes of walking away from the web app,
 # new-message pushes start reaching the phone again.
 PUSH_ACTIVE_MAX_AGE = 300
+
+REPLY_TYPES = ("thread", "quote")
+
+
+class MessageRefError(ValueError):
+    """A client-supplied reference on a new message is invalid or forbidden."""
+
+
+def parse_file_ids(attachment_file_ids):
+    """Normalize attachment ids — a comma-separated string (web form) or a
+    list (mobile JSON) — into a list of ints, dropping anything non-numeric."""
+    if not attachment_file_ids:
+        return []
+    if isinstance(attachment_file_ids, (list, tuple)):
+        parts = attachment_file_ids
+    else:
+        parts = str(attachment_file_ids).split(",")
+    ids = []
+    for part in parts:
+        if isinstance(part, bool):
+            continue
+        text = str(part).strip()
+        if text.isdigit():
+            ids.append(int(text))
+    return list(dict.fromkeys(ids))
+
+
+def validate_message_refs(
+    sender,
+    conversation,
+    parent_id=None,
+    reply_type=None,
+    quoted_message_id=None,
+    attachment_file_ids=None,
+):
+    """Check the ids a client attached to a new message before it is created.
+
+    Every one of them used to be trusted, so any member of one conversation
+    could pull another conversation's content into it: quote (or quote-reply
+    to) a private DM message by id, or attach someone else's upload, after
+    which the file proxy authorized them to download it — and deleting their
+    own message deleted the victim's file.
+
+    Returns the cleaned ``(parent_id, reply_type, quoted_message_id,
+    file_ids)``. Raises ``MessageRefError`` for a reference the sender can't
+    use.
+    """
+    # pylint: disable=import-outside-toplevel
+    from app.access import user_can_access_message
+    from app.models import UploadedFile
+
+    if reply_type is not None and reply_type not in REPLY_TYPES:
+        raise MessageRefError("Unknown reply type.")
+
+    if parent_id is not None:
+        try:
+            parent_id = int(parent_id)
+        except (TypeError, ValueError) as exc:
+            raise MessageRefError("Invalid parent message.") from exc
+        parent = Message.get_or_none(id=parent_id)
+        if parent is None or parent.conversation_id != conversation.id:
+            raise MessageRefError("The message you replied to isn't here.")
+        # Threads are one level deep: a reply to a thread reply joins the
+        # thread it belongs to, or it would be invisible in the thread panel.
+        if (
+            reply_type == "thread"
+            and parent.reply_type == "thread"
+            and parent.parent_message_id
+        ):
+            parent_id = parent.parent_message_id
+    else:
+        reply_type = None
+
+    if quoted_message_id is not None:
+        try:
+            quoted_message_id = int(quoted_message_id)
+        except (TypeError, ValueError) as exc:
+            raise MessageRefError("Invalid quoted message.") from exc
+        quoted = Message.get_or_none(id=quoted_message_id)
+        if not user_can_access_message(sender, quoted):
+            raise MessageRefError("You can't quote that message.")
+
+    file_ids = parse_file_ids(attachment_file_ids)
+    if file_ids:
+        owned = {
+            f.id
+            for f in UploadedFile.select(UploadedFile.id).where(
+                (UploadedFile.id.in_(file_ids)) & (UploadedFile.uploader == sender)
+            )
+        }
+        if owned != set(file_ids):
+            raise MessageRefError("You can only attach files you uploaded.")
+
+    return parent_id, reply_type, quoted_message_id, file_ids
+
+
+def delete_message_and_files(message):
+    """Delete ``message`` and the uploads that belong to it alone.
+
+    A file is removed only when the message's author uploaded it and nothing
+    else uses it — no other message (a forward reuses the original's file ids)
+    and no avatar. Deleting every attached file let a user destroy someone
+    else's upload by attaching it to their own message and deleting that, and
+    broke forwards of the deleted message. Object storage is touched only after
+    the DB transaction commits, so a rollback can't leave rows pointing at a
+    deleted object.
+    """
+    # pylint: disable=import-outside-toplevel
+    from app.models import UploadedFile
+
+    candidates = [f for f in message.attachments if f.uploader_id == message.user_id]
+    orphans = []
+    for uploaded in candidates:
+        shared = (
+            MessageAttachment.select()
+            .where(
+                (MessageAttachment.attachment == uploaded)
+                & (MessageAttachment.message != message)
+            )
+            .exists()
+        )
+        is_avatar = User.select().where(User.avatar == uploaded).exists()
+        if not shared and not is_avatar:
+            orphans.append(uploaded)
+
+    with db.atomic():
+        message.delete_instance(recursive=True)
+        if orphans:
+            UploadedFile.delete().where(
+                UploadedFile.id.in_([f.id for f in orphans])
+            ).execute()
+
+    for uploaded in orphans:
+        try:
+            minio_service.delete_file(uploaded.stored_filename)
+        except Exception:  # pylint: disable=broad-exception-caught
+            current_app.logger.exception(
+                "Couldn't delete object %s for message %s",
+                uploaded.stored_filename,
+                message.id,
+            )
 
 
 def handle_new_message(
@@ -74,12 +215,8 @@ def handle_new_message(
                 parent_message.save()
 
         # Step 2: Link any attachments if IDs are provided
-        if attachment_file_ids:
-            file_ids = [
-                int(id) for id in attachment_file_ids.split(",") if id.isdigit()
-            ]
-            for file_id in file_ids:
-                MessageAttachment.create(message=new_message, attachment=file_id)
+        for file_id in parse_file_ids(attachment_file_ids):
+            MessageAttachment.create(message=new_message, attachment=file_id)
 
         # --- Mention handling logic ---
         # 1. Handle regular @username mentions

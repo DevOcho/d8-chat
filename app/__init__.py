@@ -175,10 +175,51 @@ def _process_code_blocks(text, code_blocks):
                 }
             },
         )
-        code_blocks.append(block_html)
+        code_blocks.append(_sanitize_code_block(block_html))
         return f"D8CHATCODEBLOCKPLACEHOLDER{len(code_blocks) - 1}"
 
     return re.sub(r"(?s)(```.*?```|~~~.*?~~~)", extract_and_process_code_block, text)
+
+
+# The only markup a rendered message may contain. Everything that ends up in a
+# message's HTML must pass through bleach with this allowlist — including the
+# code blocks that are rendered separately and spliced back in afterwards.
+_ALLOWED_TAGS = [
+    "p",
+    "br",
+    "strong",
+    "em",
+    "del",
+    "ul",
+    "ol",
+    "li",
+    "blockquote",
+    "pre",
+    "code",
+    "span",
+    "div",
+    "a",
+    "h2",
+    "h3",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+]
+_ALLOWED_ATTRS = {"*": ["class"], "a": ["href", "rel", "target"]}
+
+
+def _sanitize_code_block(block_html):
+    """Sanitize a separately rendered code block before it's spliced back in.
+
+    The code-block regex also matches fences Python-Markdown doesn't treat as
+    code (e.g. a four-backtick opener closed by three), and Markdown passes raw
+    HTML through, so an unsanitized block was a stored-XSS hole. Highlighted
+    code is only div/pre/code/span with classes, so this leaves it untouched.
+    """
+    return bleach.clean(block_html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS)
 
 
 def _sanitize_and_linkify(html_text):
@@ -193,33 +234,7 @@ def _sanitize_and_linkify(html_text):
         html_text, callbacks=[set_link_attrs], skip_tags=["pre", "code"]
     )
 
-    allowed_tags = [
-        "p",
-        "br",
-        "strong",
-        "em",
-        "del",
-        "ul",
-        "ol",
-        "li",
-        "blockquote",
-        "pre",
-        "code",
-        "span",
-        "div",
-        "a",
-        "h2",
-        "h3",
-        "table",
-        "thead",
-        "tbody",
-        "tr",
-        "th",
-        "td",
-    ]
-    allowed_attrs = {"*": ["class"], "a": ["href", "rel", "target"]}
-
-    return bleach.clean(linkified_html, tags=allowed_tags, attributes=allowed_attrs)
+    return bleach.clean(linkified_html, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS)
 
 
 def _validate_config(app):

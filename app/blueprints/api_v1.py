@@ -20,7 +20,7 @@ from playhouse.shortcuts import model_to_dict
 from werkzeug.utils import secure_filename
 
 from app import limiter, login_username_key
-from app.access import user_has_conversation_access
+from app.access import user_can_access_message, user_has_conversation_access
 from app.conversation_id import parse_conversation_id
 from app.htmx_oob import oob_to_selector
 from app.models import (
@@ -855,11 +855,14 @@ def get_messages(conv_id_str):
 @api_token_required
 @limiter.limit("60 per minute", key_func=_api_user_key)
 def create_message(conv_id_str):
-    """Creates a new message in a conversation via REST API."""
-    from flask import render_template
+    """Creates a new message in a conversation via REST API.
 
-    from app.chat_manager import chat_manager
-    from app.services import chat_service
+    Goes through the same ``handle_inbound_message`` as the web and WebSocket
+    sends, so access, the admins-only posting restriction, reference checks
+    (parent / quote / attachments), broadcasts and notifications are
+    identical on every path.
+    """
+    from app.routes import handle_inbound_message
 
     conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
     if not conv:
@@ -873,105 +876,33 @@ def create_message(conv_id_str):
     if not user_has_conversation_access(g.api_user, parsed):
         return jsonify({"error": "Access denied"}), 403
 
-    # 2. Parse incoming JSON
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     content = data.get("content")
-    if not content:
+    if not content or not isinstance(content, str):
         return jsonify({"error": "Message content is required"}), 400
 
-    parent_id = data.get("parent_message_id")
-    reply_type = data.get("reply_type")
-    quoted_message_id = data.get("quoted_message_id")
-    attachment_file_ids = data.get("attachment_file_ids")
-
-    # 3. Create the message using our centralized service
-    new_message = chat_service.handle_new_message(
+    status, new_message = handle_inbound_message(
         sender=g.api_user,
-        conversation=conv,
+        conv_id_str=conv_id_str,
         chat_text=content,
-        parent_id=parent_id,
-        reply_type=reply_type,
-        attachment_file_ids=attachment_file_ids,
-        quoted_message_id=quoted_message_id,
+        parent_id=data.get("parent_message_id"),
+        reply_type=data.get("reply_type"),
+        attachment_file_ids=data.get("attachment_file_ids"),
+        quoted_message_id=data.get("quoted_message_id"),
     )
+    if status == "forbidden":
+        return jsonify({"error": "You can't post to this conversation"}), 403
+    if status == "bad_ref":
+        return (
+            jsonify({"error": "That reply, quote or attachment can't be used here"}),
+            400,
+        )
+    if status != "ok":
+        return jsonify({"error": "Message could not be sent"}), 400
 
-    # Prepare maps for serialization and HTML rendering
     reactions_map = get_reactions_for_messages([new_message])
     attachments_map = get_attachments_for_messages([new_message])
-    message_data = serialize_message(new_message, reactions_map, attachments_map)
-
-    # 4. Broadcast the new message to active websocket clients (Web & Mobile)
-    if reply_type == "thread" and parent_id:
-        parent_message = Message.get_by_id(parent_id)
-        parent_reactions = get_reactions_for_messages([parent_message])
-        parent_attachments = get_attachments_for_messages([parent_message])
-
-        new_reply_html = render_template(
-            "partials/message.html",
-            message=new_message,
-            reactions_map=reactions_map,
-            attachments_map=attachments_map,
-            Message=Message,
-            is_in_thread_view=True,
-        )
-        broadcast_html = oob_to_selector(
-            "beforeend", f"#thread-replies-list-{int(parent_id)}", new_reply_html
-        )
-
-        parent_html = render_template(
-            "partials/message.html",
-            message=parent_message,
-            reactions_map=parent_reactions,
-            attachments_map=parent_attachments,
-            Message=Message,
-            is_in_thread_view=False,
-        )
-        parent_oob = parent_html.replace(
-            f'id="message-{parent_id}"',
-            f'id="message-{parent_id}" hx-swap-oob="true"',
-            1,
-        )
-        broadcast_html += parent_oob
-
-        api_data = {
-            "type": "new_thread_reply",
-            "data": {
-                "parent_message": serialize_message(
-                    parent_message, parent_reactions, parent_attachments
-                ),
-                "reply": message_data,
-            },
-        }
-
-        chat_manager.broadcast(
-            conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
-        )
-    else:
-        new_message_html = render_template(
-            "partials/message.html",
-            message=new_message,
-            reactions_map=reactions_map,
-            attachments_map=attachments_map,
-            Message=Message,
-        )
-        broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
-
-        api_data = {"type": "new_message", "data": message_data}
-
-        chat_manager.broadcast(
-            conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
-        )
-
-    # 5. Process standard push notifications / badges for inactive users, off
-    #    the hot path so slow FCM HTTP can't block the response / worker.
-    from app.background import spawn_background
-
-    spawn_background(
-        chat_service.send_notifications_for_new_message, new_message, g.api_user
-    )
-
-    # 6. Return the created message object to the REST caller
-    return jsonify(message_data), 201
+    return jsonify(serialize_message(new_message, reactions_map, attachments_map)), 201
 
 
 @api_v1_bp.route("/threads/<int:parent_message_id>", methods=["GET"])
@@ -1028,6 +959,8 @@ def toggle_reaction(message_id):
     message = Message.get_or_none(Message.id == message_id)
     if not message:
         return jsonify({"error": "Message not found"}), 404
+    if not user_can_access_message(g.api_user, message):
+        return jsonify({"error": "Access denied"}), 403
 
     data = request.get_json() or {}
     emoji = data.get("emoji", "").strip()
@@ -1129,7 +1062,7 @@ def edit_message(message_id):
 def delete_message(message_id):
     """Deletes a message. Only the author may delete."""
     from app.chat_manager import chat_manager
-    from app.services import minio_service
+    from app.services import chat_service
 
     message = Message.get_or_none(Message.id == message_id)
     if not message:
@@ -1137,19 +1070,8 @@ def delete_message(message_id):
     if message.user.id != g.api_user.id:
         return jsonify({"error": "Forbidden"}), 403
 
-    attachments_to_delete = list(message.attachments)
     conv_id_str = message.conversation.conversation_id_str
-
-    with db.atomic():
-        message.delete_instance(recursive=True)
-        for attachment in attachments_to_delete:
-            try:
-                minio_service.delete_file(attachment.stored_filename)
-                attachment.delete_instance()
-            except Exception as e:
-                current_app.logger.warning(
-                    f"Attachment cleanup failed for message {message_id}: {e}"
-                )
+    chat_service.delete_message_and_files(message)
 
     api_data = {
         "type": "message_deleted",
@@ -1297,6 +1219,8 @@ def api_vote_on_poll(poll_id):
     poll = Poll.get_or_none(Poll.id == poll_id)
     if not poll:
         return jsonify({"error": "Poll not found"}), 404
+    if not user_can_access_message(g.api_user, poll.message):
+        return jsonify({"error": "Access denied"}), 403
 
     data = request.get_json() or {}
     option_id = data.get("option_id")

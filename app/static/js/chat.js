@@ -290,10 +290,11 @@ const createAttachmentManager = function(editorState) {
                 ? `<img src="" alt="Uploading..." />`
                 : `<img src="${iconPath}" class="file-icon-img" alt="file" />`
             }
-            <div class="file-name-small">${file.name.substring(0, 15)}</div>
+            <div class="file-name-small"></div>
             <div class="spinner-border spinner-border-sm text-light position-absolute top-50 start-50"></div>
             <button type="button" class="remove-attachment-btn">&times;</button>
         `;
+        thumbnailDiv.querySelector('.file-name-small').textContent = file.name.substring(0, 15);
 
 
         state.previewContainer.appendChild(thumbnailDiv);

@@ -22,7 +22,7 @@ from flask import (
 from peewee import JOIN, fn
 
 from . import limiter, sock
-from .access import user_has_conversation_access
+from .access import user_can_post, user_has_conversation_access
 from .background import spawn_background
 from .chat_manager import chat_manager
 from .conversation_id import parse_conversation_id
@@ -1085,18 +1085,20 @@ def handle_inbound_message(
 ):
     """Create, broadcast, and notify for one new message from ``sender``.
 
-    Shared by the WebSocket path (``_process_ws_event``) and the web HTTP POST
-    endpoint so both enforce identical access rules and produce identical
-    broadcasts. Returns a short status string:
+    Shared by the WebSocket path (``_process_ws_event``), the web HTTP POST
+    endpoint and the mobile REST endpoint so all of them enforce identical
+    access rules and produce identical broadcasts. Returns ``(status,
+    message)``: the new ``Message`` on "ok", else ``None``. Status is one of:
 
       "ok"              — message created and broadcast
       "empty"           — nothing to send (no text, no attachments)
       "no_conversation" — conv_id_str resolves to no conversation
       "bad_request"     — malformed conversation id
       "forbidden"       — sender isn't a member / can't post here
+      "bad_ref"         — a parent/quote/attachment id the sender can't use
     """
     if not chat_text and not attachment_file_ids:
-        return "empty"
+        return "empty", None
 
     conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
     if not conversation:
@@ -1108,27 +1110,37 @@ def handle_inbound_message(
             conv_id_str,
             getattr(sender, "id", None),
         )
-        return "no_conversation"
+        return "no_conversation", None
 
     try:
         parsed_conv = parse_conversation_id(conversation.conversation_id_str)
     except ValueError:
-        return "bad_request"
+        return "bad_request", None
 
-    # Membership gate: any authenticated client could otherwise post into any
-    # conversation by naming another conv's id.
-    if not user_has_conversation_access(sender, parsed_conv):
+    # Membership + posting-restriction gate: any authenticated client could
+    # otherwise post into any conversation by naming another conv's id.
+    if not user_can_post(sender, parsed_conv):
         current_app.logger.warning(
-            "Send blocked: user %s not in %r", sender.id, conv_id_str
+            "Send blocked: user %s can't post to %r", sender.id, conv_id_str
         )
-        return "forbidden"
+        return "forbidden", None
 
-    if conversation.type == "channel":
-        channel = Channel.get_by_id(parsed_conv.channel_id)
-        if channel.posting_restricted_to_admins:
-            membership = ChannelMember.get_or_none(user=sender, channel=channel)
-            if not membership or membership.role != "admin":
-                return "forbidden"
+    try:
+        parent_id, reply_type, quoted_message_id, file_ids = (
+            chat_service.validate_message_refs(
+                sender,
+                conversation,
+                parent_id=parent_id,
+                reply_type=reply_type,
+                quoted_message_id=quoted_message_id,
+                attachment_file_ids=attachment_file_ids,
+            )
+        )
+    except chat_service.MessageRefError as exc:
+        current_app.logger.warning(
+            "Send blocked: user %s, bad reference (%s)", sender.id, exc
+        )
+        return "bad_ref", None
 
     new_message = chat_service.handle_new_message(
         sender=sender,
@@ -1136,7 +1148,7 @@ def handle_inbound_message(
         chat_text=chat_text,
         parent_id=parent_id,
         reply_type=reply_type,
-        attachment_file_ids=attachment_file_ids,
+        attachment_file_ids=file_ids,
         quoted_message_id=quoted_message_id,
     )
 
@@ -1152,7 +1164,7 @@ def handle_inbound_message(
     spawn_background(
         chat_service.send_notifications_for_new_message, new_message, sender
     )
-    return "ok"
+    return "ok", new_message
 
 
 # --- WebSocket connection helpers ---

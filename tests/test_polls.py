@@ -1,7 +1,16 @@
 # tests/test_polls.py
 import pytest
 
-from app.models import Channel, Conversation, Message, Poll, PollOption, User, Vote
+from app.models import (
+    Channel,
+    ChannelMember,
+    Conversation,
+    Message,
+    Poll,
+    PollOption,
+    User,
+    Vote,
+)
 
 
 @pytest.fixture
@@ -9,6 +18,8 @@ def setup_poll(test_db):
     """Fixture to set up a basic poll in the general channel."""
     user1 = User.get_by_id(1)
     channel = Channel.get(name="general")
+    # Creating and voting both require membership of the poll's conversation.
+    ChannelMember.get_or_create(user=user1, channel=channel)
     conv = Conversation.get(conversation_id_str=f"channel_{channel.id}")
 
     # Create a poll message
