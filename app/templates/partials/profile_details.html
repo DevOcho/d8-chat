@@ -100,7 +100,7 @@
                         <select class="form-select"
                                 id="notification-sound-select"
                                 name="sound"
-                                onchange="previewNotificationSound(this.value)"
+                                data-preview-sound
                                 hx-put="{{ url_for('profile.update_notification_sound') }}"
                                 hx-trigger="change"
                                 hx-swap="none">

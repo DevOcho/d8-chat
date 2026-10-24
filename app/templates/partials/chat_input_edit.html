@@ -1,15 +1,14 @@
 <div id="chat-input-container" class="chat-input-form">
-    <!--
-      This form has two key HTMX attributes:
-      1. hx-put/hx-target: Submits the form via PUT to update the original message in the chat history.
-      2. hx-on::after-request: A hook that fires after the PUT is complete. If it was successful,
-         it triggers a separate GET request to load the default chat input, effectively exiting "edit mode".
-    -->
+    {# hx-put/hx-target save the edit over the original message; once that
+       succeeds, data-after-save swaps this composer back for the default one
+       (chat.js), leaving edit mode. #}
     <form hx-put="/chat/message/{{ message.id }}"
           hx-target="#message-{{ message.id }}"
           hx-swap="outerHTML"
-          hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/default', {target: '#chat-input-container', swap: 'outerHTML'})"
+          data-after-save="/chat/input/default"
+          data-after-save-target="#chat-input-container"
           id="message-form"
+          data-editor=""
           autocomplete="off">
         <input type="file" id="file-attachment-input" class="d-none" multiple>
         <input type="hidden" name="attachment_file_ids" id="attachment-file-ids">
@@ -108,8 +107,4 @@
          ws-send
          hx-trigger="typing-event"
          style="display: none"></div>
-    {# Inside the root, so it travels with the composer: when a conversation
-       switch keeps the current composer (chat.js drops the OOB swap), it must
-       not run and bind a second editor to the form on screen. #}
-    <script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
 </div>

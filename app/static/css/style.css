@@ -1618,6 +1618,15 @@ a.hashtag-link {
 }
 [data-bs-theme="dark"] .poll-content .text-muted { color: #c2c7cc !important; }
 
+.pending-avatar {
+    width: 40px;
+}
+
+.emoji-suggestion-glyph {
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
 /* Author-only toolbar actions (edit, delete) are hidden on every message;
    chat.js adds the rule that shows them on the viewer's own messages (it needs
    the viewer's id, and message HTML is rendered once for everyone). */

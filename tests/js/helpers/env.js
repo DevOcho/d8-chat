@@ -42,6 +42,7 @@ const SCRIPT_FILES = {
     'htmx-ws': 'app/static/js/local/htmx-ws.js',
     turndown: 'app/static/js/local/turndown.js',
     csrf: 'app/static/js/csrf.js',
+    ui: 'app/static/js/ui.js',
     chat: 'app/static/js/chat.js',
     pager: 'app/static/js/pager.js',
 };
@@ -50,7 +51,7 @@ const SCRIPT_FILES = {
 // to be defined (it awaits customElements.whenDefined('emoji-picker')).
 const EMOJI_PICKER_STUB = "customElements.define('emoji-picker', class extends HTMLElement {});";
 
-export const PAGE_SCRIPTS = ['htmx', 'htmx-ws', 'turndown', 'csrf', 'emoji-picker', 'chat', 'pager'];
+export const PAGE_SCRIPTS = ['htmx', 'htmx-ws', 'turndown', 'csrf', 'ui', 'emoji-picker', 'chat', 'pager'];
 
 const compiled = new Map();
 function script(name) {

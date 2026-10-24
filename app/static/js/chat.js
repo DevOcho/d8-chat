@@ -308,7 +308,7 @@ const PendingMessages = {
         el.id = `pending-${clientId}`;
         el.dataset.clientId = clientId;
         el.innerHTML = `
-            <div class="flex-shrink-0 pending-avatar" style="width: 40px;"></div>
+            <div class="flex-shrink-0 pending-avatar"></div>
             <div class="flex-grow-1 ms-3">
                 <div class="pending-header"><strong class="me-2"></strong></div>
                 <div class="message-content pending-text"></div>
@@ -954,7 +954,7 @@ const createEmojiManager = function(editorState) {
         state.popoverContainer.innerHTML = matches.map((mt, i) => (
             '<button type="button" class="list-group-item list-group-item-action emoji-suggestion-item d-flex align-items-center gap-2 p-2' + (i === 0 ? ' active' : '') + '"' +
             ' data-emoji="' + mt.emoji + '" data-shortcode="' + mt.shortcode + '">' +
-            '<span style="font-size:1.25rem;line-height:1">' + mt.emoji + '</span>' +
+            '<span class="emoji-suggestion-glyph">' + mt.emoji + '</span>' +
             '<span class="text-muted small">:' + mt.shortcode + ':</span>' +
             '</button>'
         )).join('');
@@ -1519,14 +1519,17 @@ const createEditor = function(idSuffix = '') {
         state.editor.addEventListener('keydown', keydownHandler);
         state.markdownView.addEventListener('keydown', keydownHandler);
     };
+    // Copy the composed text (as Markdown) into the form's hidden text field.
+    const syncHiddenInput = function() {
+        if (state.isMarkdownMode) {
+            state.hiddenInput.value = preprocessMarkdown(state.markdownView.value);
+        } else {
+            updateStateAndButtons();
+        }
+    };
     const setupFormListeners = function() {
         state.messageForm.addEventListener('submit', (e) => {
-            if (state.isMarkdownMode) {
-                const rawMarkdown = state.markdownView.value;
-                state.hiddenInput.value = preprocessMarkdown(rawMarkdown);
-            } else {
-                updateStateAndButtons();
-            }
+            syncHiddenInput();
             const hasText = state.hiddenInput.value.trim() !== '';
             const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
             if (!hasText && !hasAttachment) {
@@ -1543,12 +1546,17 @@ const createEditor = function(idSuffix = '') {
         // buttons (poll/emoji/mention), whose events bubble up to the form,
         // pass through untouched.
         state.messageForm.addEventListener('htmx:configRequest', (e) => {
-            if (e.detail.verb !== 'post') return;
-            if (state.isMarkdownMode) {
-                state.hiddenInput.value = preprocessMarkdown(state.markdownView.value);
-            } else {
-                updateStateAndButtons();
+            // An edit composer saves with PUT. htmx may have read the form's
+            // fields before the submit listener above synced the editor into
+            // them (htmx binds its own listener first when the composer is
+            // swapped in), so the text goes into the request here.
+            if (e.detail.verb === 'put' && e.detail.elt === state.messageForm) {
+                syncHiddenInput();
+                e.detail.parameters[state.hiddenInput.name] = state.hiddenInput.value;
+                return;
             }
+            if (e.detail.verb !== 'post') return;
+            syncHiddenInput();
             const text = state.hiddenInput.value;
             const hasText = text.trim() !== '';
             const hasAttachment = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value !== '' : false;
@@ -1757,9 +1765,24 @@ new MutationObserver((mutations) => {
     }
 }).observe(document.body, { childList: true, subtree: true });
 
-document.body.addEventListener('initializeEditor', (event) => {
+// Every element matching `selector` in a newly loaded root, the root included.
+function _within(root, selector) {
+    if (!root || !root.querySelectorAll) return [];
+    const found = [...root.querySelectorAll(selector)];
+    if (root.matches && root.matches(selector)) found.unshift(root);
+    return found;
+}
+
+// Swapped-in partials carry no scripts (the page CSP allows none inline);
+// they mark what needs setting up instead, and this runs on every htmx load
+// (the page itself, then each swap). Composers: <form data-editor="<suffix>">.
+htmx.onLoad((root) => {
+    _within(root, 'form[data-editor]').forEach((form) => initializeEditor(form.dataset.editor));
+    _within(root, '#create-poll-form').forEach((form) => PollForm.init(form));
+});
+
+function initializeEditor(idSuffix) {
     emojiPickerReady.then(() => {
-        const { idSuffix } = event.detail;
         // One editor per form: a second set of listeners on the same form
         // (each clearing the composer on send) made the second one find it
         // empty and cancel the request.
@@ -1826,6 +1849,91 @@ document.body.addEventListener('initializeEditor', (event) => {
             editorInstance.focusActiveInput();
         }
     });
+}
+
+// --- Create-poll modal (partials/create_poll_modal.html) ---
+// Posts to the open conversation; option rows are added from the form's
+// <template> and removed in place, up to data-max-options.
+const PollForm = {
+    init(form) {
+        const target = form.querySelector('#poll-conversation-id-input');
+        const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+        if (target && activeConv) target.value = activeConv.dataset.conversationId;
+        PollForm.refresh(form);
+    },
+    refresh(form) {
+        const rows = form.querySelectorAll('#poll-options-container .poll-option-row');
+        rows.forEach((row, i) => {
+            const input = row.querySelector('input');
+            if (input) input.placeholder = `Option ${i + 1}`;
+        });
+        const max = parseInt(form.dataset.maxOptions, 10) || 10;
+        const add = form.querySelector('[data-poll-add-option]');
+        if (add) add.classList.toggle('d-none', rows.length >= max);
+    },
+};
+document.body.addEventListener('click', (evt) => {
+    const form = evt.target.closest('#create-poll-form');
+    if (!form) return;
+    if (evt.target.closest('[data-poll-add-option]')) {
+        const template = form.querySelector('#poll-option-template');
+        const container = form.querySelector('#poll-options-container');
+        if (!template || !container) return;
+        container.appendChild(template.content.cloneNode(true));
+        PollForm.refresh(form);
+        const inputs = container.querySelectorAll('input');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+        return;
+    }
+    const remove = evt.target.closest('.remove-poll-option-btn');
+    if (remove) {
+        remove.closest('.poll-option-row').remove();
+        PollForm.refresh(form);
+    }
+});
+
+// --- Behaviors partials declare with data attributes ---
+// (What used to be hx-on / onchange attributes, which need 'unsafe-eval' or
+// 'unsafe-inline'.)
+
+// Copy a message's text: the button holds it in a hidden .copy-source input.
+document.body.addEventListener('click', (evt) => {
+    const btn = evt.target.closest('[data-copy-message]');
+    if (!btn) return;
+    const source = btn.querySelector('.copy-source');
+    if (!source || !navigator.clipboard) return;
+    navigator.clipboard.writeText(source.value).then(() => {
+        const icon = btn.querySelector('i');
+        if (!icon) return;
+        icon.className = 'bi bi-check2';
+        setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 2000);
+    }).catch(() => ToastManager.show('Copy failed', 'Your browser blocked access to the clipboard.', 'danger'));
+});
+
+// Picking someone in the new-message modal opens the DM; focus its composer
+// once the modal has closed.
+document.body.addEventListener('click', (evt) => {
+    if (evt.target.closest('[data-focus-composer]')) window.focusChatInputAfterModalClose = true;
+});
+
+// An edit composer, once its edit is saved, swaps itself back for the plain
+// composer: <form data-after-save="<GET url>" data-after-save-target="<selector>">.
+// Only the form's own save counts, not requests from buttons inside it.
+document.body.addEventListener('htmx:afterRequest', (evt) => {
+    const form = evt.detail.elt;
+    if (!evt.detail.successful || !form || !form.matches || !form.matches('form[data-after-save]')) return;
+    const cfg = evt.detail.requestConfig;
+    if (cfg && cfg.verb === 'get') return;
+    htmx.ajax('GET', form.dataset.afterSave, {
+        target: form.dataset.afterSaveTarget,
+        swap: 'outerHTML',
+    });
+});
+
+// The notification-sound select plays the sound it's set to.
+document.body.addEventListener('change', (evt) => {
+    const select = evt.target.closest('[data-preview-sound]');
+    if (select) previewNotificationSound(select.value);
 });
 
 // --- Image Carousel Manager ---

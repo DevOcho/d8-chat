@@ -1,7 +1,7 @@
 // The composer (createEditor): loaded the real way — htmx fetches
-// /chat/input/default, swaps in chat_input_default.html, and its inline script
-// dispatches `initializeEditor`. Covers mention autocomplete insertion (rich
-// and markdown modes) and sending over HTTP POST.
+// /chat/input/default, swaps in chat_input_default.html, and chat.js
+// initializes the form marked data-editor. Covers mention autocomplete
+// insertion (rich and markdown modes) and sending over HTTP POST.
 import { describe, expect, it } from 'vitest';
 import { createPage } from './helpers/env.js';
 import {

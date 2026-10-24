@@ -1,4 +1,21 @@
+{% macro option_row(value="", number=1) %}
+    <div class="input-group mb-2 poll-option-row">
+        <input type="text"
+               class="form-control"
+               name="options[]"
+               placeholder="Option {{ number }}"
+               value="{{ value }}"
+               required>
+        <button class="btn btn-outline-danger remove-poll-option-btn"
+                type="button"
+                title="Remove option">
+            <i class="bi bi-x-lg"></i>
+        </button>
+    </div>
+{% endmacro %}
+{# chat.js PollForm fills in the conversation and adds / removes option rows. #}
 <form id="create-poll-form"
+      data-max-options="10"
       hx-post="{{ url_for('polls.create_poll') }}"
       hx-target="this"
       hx-swap="outerHTML">
@@ -36,10 +53,13 @@
                 <strong>Options</strong>
             </label>
             <div id="poll-options-container">
-                <!-- Options will be added here by JS -->
+                {# What was typed, after a failed submit; otherwise two blank rows. #}
+                {% for value in (options[:10] if options else ["", ""]) %}{{ option_row(value, loop.index) }}{% endfor %}
             </div>
+            <template id="poll-option-template">{{ option_row() }}</template>
             <button type="button"
                     id="add-poll-option-btn"
+                    data-poll-add-option
                     class="btn btn-sm btn-secondary mt-2">
                 <i class="bi bi-plus-circle"></i> Add Option
             </button>
@@ -50,59 +70,3 @@
         <button type="submit" class="btn btn-primary">Create Poll</button>
     </div>
 </form>
-<script>
-  (function() {
-    const container = document.getElementById('poll-options-container');
-    const addButton = document.getElementById('add-poll-option-btn');
-    const existingOptions = {{ (options if options else []) | tojson }};
-    const maxOptions = 10;
-    let optionCount = 0;
-
-    // Set the hidden conversation ID input
-    const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-    if (activeConv) {
-        document.getElementById('poll-conversation-id-input').value = activeConv.dataset.conversationId;
-    }
-
-    const addOption = (value = '') => {
-      if (optionCount >= maxOptions) {
-        addButton.style.display = 'none';
-        return;
-      }
-      optionCount++;
-      const div = document.createElement('div');
-      div.className = 'input-group mb-2';
-      div.innerHTML = `
-        <input type="text" class="form-control" name="options[]" placeholder="Option ${optionCount}" value="${value}" required>
-        <button class="btn btn-outline-danger remove-poll-option-btn" type="button" title="Remove option">
-            <i class="bi bi-x-lg"></i>
-        </button>
-      `;
-      container.appendChild(div);
-      if (optionCount >= maxOptions) {
-        addButton.style.display = 'none';
-      }
-    };
-
-    container.addEventListener('click', e => {
-      const removeButton = e.target.closest('.remove-poll-option-btn');
-      if (removeButton) {
-        removeButton.parentElement.remove();
-        optionCount--;
-        if (optionCount < maxOptions) {
-          addButton.style.display = 'inline-block';
-        }
-      }
-    });
-
-    addButton.addEventListener('click', () => addOption());
-
-    // Initialize with existing options (if form fails validation) or with 2 blank options
-    if (existingOptions.length > 0) {
-        existingOptions.forEach(opt => addOption(opt));
-    } else {
-        addOption();
-        addOption();
-    }
-  })();
-</script>

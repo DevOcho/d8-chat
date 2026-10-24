@@ -88,7 +88,45 @@ const HOOKS = {
         'class="system-message"',
         'data-created-at="{{ message.created_at.isoformat() }}Z"',
     ],
-    'app/templates/partials/message_toolbar.html': ['data-action="edit"', 'data-bs-toggle="popover"'],
+    'app/templates/partials/message_toolbar.html': [
+        'data-action="edit"',
+        'data-bs-toggle="popover"',
+        'data-copy-message',
+        'class="copy-source"',
+    ],
+    'app/templates/partials/dm_user_results.html': ['data-focus-composer'],
+    'app/templates/partials/chat_input_edit.html': [
+        'hx-put="/chat/message/{{ message.id }}"',
+        'data-after-save="/chat/input/default"',
+        'data-after-save-target="#chat-input-container"',
+        'data-editor=""',
+        'data-send-label=',
+    ],
+    'app/templates/partials/chat_input_thread_edit.html': [
+        'data-after-save="/chat/input/thread/{{ message.parent_message.id }}"',
+        'data-after-save-target="#thread-input-container-{{ message.parent_message.id }}"',
+        'data-editor="-thread-{{ message.parent_message.id }}"',
+    ],
+    'app/templates/partials/chat_input_thread.html': [
+        'id="thread-input-container-{{ parent_message.id }}"',
+        'id="message-form-thread-{{ parent_message.id }}"',
+        'data-editor="-thread-{{ parent_message.id }}"',
+        'name="parent_message_id"',
+        'data-value="blockquote"',
+    ],
+    'app/templates/partials/chat_input_thread_reply.html': ['data-editor="-thread-{{ parent_message.id }}"'],
+    'app/templates/partials/chat_input_reply.html': ['data-editor=""'],
+    'app/templates/partials/create_poll_modal.html': [
+        'id="create-poll-form"',
+        'data-max-options=',
+        'id="poll-conversation-id-input"',
+        'id="poll-options-container"',
+        'poll-option-row',
+        'name="options[]"',
+        'id="poll-option-template"',
+        'data-poll-add-option',
+        'remove-poll-option-btn',
+    ],
     'app/templates/partials/reactions.html': ['reaction-pill', 'data-reactor-ids='],
     'app/templates/partials/date_separator.html': ['class="date-separator"'],
     'app/templates/partials/unread_badge.html': [
@@ -117,6 +155,7 @@ const HOOKS = {
         'data-presence-choice="online"',
         'data-presence-choice="away"',
         'data-presence-choice="busy"',
+        'data-autosubmit',
     ],
     'app/templates/partials/chat_input_default.html': [
         'id="chat-input-container"',
@@ -137,7 +176,7 @@ const HOOKS = {
         'id="emoji-picker-container"',
         '<emoji-picker',
         'id="typing-sender"',
-        "new CustomEvent('initializeEditor', { detail: { idSuffix: '' } })",
+        'data-editor=""',
     ],
     'app/templates/partials/mention_results.html': ['mention-suggestion-item', 'data-username="{{ user.username }}"'],
     'app/templates/partials/incident_card.html': ['id="incident-card-{{ incident.id }}"', 'incident-time'],
@@ -178,6 +217,7 @@ const HOOKS = {
         'name="send_on_enter"',
         "hx-put=\"{{ url_for('profile.update_send_on_enter') }}\"",
         'id="notification-sound-select"',
+        'data-preview-sound',
         'name="sound"',
         "hx-put=\"{{ url_for('profile.update_notification_sound') }}\"",
     ],
@@ -194,7 +234,7 @@ describe('fixture hooks still exist in the templates and routes', () => {
 
     it('loads the scripts in the order the fixtures assume', () => {
         const base = readSource('app/templates/base.html');
-        const order = ['js/local/htmx.min.js', 'js/local/htmx-ws.js', 'js/local/turndown.js', 'js/csrf.js'].map((s) => base.indexOf(s));
+        const order = ['js/local/htmx.min.js', 'js/local/htmx-ws.js', 'js/local/turndown.js', 'js/csrf.js', 'js/ui.js'].map((s) => base.indexOf(s));
         expect(order.every((i) => i > 0)).toBe(true);
         expect([...order].sort((a, b) => a - b)).toEqual(order);
 

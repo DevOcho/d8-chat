@@ -288,10 +288,6 @@ export function profileHeader(user = ME) {
 </div>`;
 }
 
-/**
- * partials/chat_input_default.html, including the trailing inline script that
- * dispatches `initializeEditor` once htmx swaps the partial in.
- */
 // The two preference selects from partials/profile_details.html. Changing one
 // PUTs to its route, which answers with an HX-Trigger event (preferenceReply).
 export function preferenceSelects({ sendOnEnter = true, sound = 'd8-notification.mp3' } = {}) {
@@ -313,12 +309,15 @@ export function preferenceReply(event, value) {
     return { status: 200, body: '', headers: { 'HX-Trigger': JSON.stringify({ [event]: value }) } };
 }
 
+// partials/chat_input_default.html. chat.js initializes the editor when htmx
+// loads a form marked data-editor.
 export function chatInputDefault({ wysiwyg = true } = {}) {
     return `<div id="chat-input-container" class="chat-input-form">
     <div id="typing-indicator" class="text-muted small"></div>
     <form hx-post="/chat/conversations/_pending_/messages"
           hx-swap="none"
           id="message-form"
+          data-editor=""
           autocomplete="off">
         <input type="file" id="file-attachment-input" class="d-none" multiple>
         <input type="hidden" name="attachment_file_ids" id="attachment-file-ids">
@@ -360,7 +359,6 @@ export function chatInputDefault({ wysiwyg = true } = {}) {
          ws-send
          hx-trigger="typing-event"
          style="display: none"></div>
-    <script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
 </div>`;
 }
 

@@ -76,6 +76,31 @@ def test_create_poll_validation_fails(logged_in_client, setup_poll):
     assert Poll.select().where(Poll.question == "Only one option?").count() == 0
 
 
+def test_create_poll_form_starts_with_two_blank_options(logged_in_client):
+    html = logged_in_client.get("/chat/poll/create_form").get_data(as_text=True)
+    container = html.split('id="poll-options-container"', 1)[1].split("<template", 1)[0]
+    assert container.count('name="options[]"') == 2
+    assert 'placeholder="Option 2"' in container
+    assert "<script" not in html
+
+
+def test_failed_poll_keeps_what_was_typed_escaped(logged_in_client, setup_poll):
+    """The options come back as rendered rows, escaped (they used to be
+    re-inserted by an inline script through innerHTML)."""
+    response = logged_in_client.post(
+        "/chat/poll/create",
+        data={
+            "conversation_id_str": setup_poll["conv"].conversation_id_str,
+            "question": "",
+            "options[]": ['"><img src=x onerror=alert(1)>', "Pizza"],
+        },
+    )
+    html = response.get_data(as_text=True)
+    assert "<img src=x" not in html
+    assert 'value="&#34;&gt;&lt;img src=x onerror=alert(1)&gt;"' in html
+    assert 'value="Pizza"' in html
+
+
 def test_create_poll_missing_conversation(logged_in_client):
     """Test that creating a poll without a conversation ID fails."""
     response = logged_in_client.post(

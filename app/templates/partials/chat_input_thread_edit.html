@@ -5,8 +5,10 @@
           hx-target="#right-panel-offcanvas #message-{{ message.id }}"
           hx-swap="outerHTML"
           hx-vals='{"is_in_thread_view": "true"}'
-          hx-on::after-request="if(event.detail.successful) htmx.ajax('GET', '/chat/input/thread/{{ message.parent_message.id }}', {target: '#thread-input-container-{{ message.parent_message.id }}', swap: 'outerHTML'})"
+          data-after-save="/chat/input/thread/{{ message.parent_message.id }}"
+          data-after-save-target="#thread-input-container-{{ message.parent_message.id }}"
           id="message-form-thread-{{ message.parent_message.id }}"
+          data-editor="-thread-{{ message.parent_message.id }}"
           autocomplete="off">
         <input type="file"
                id="file-attachment-input-thread-{{ message.parent_message.id }}"
@@ -115,8 +117,3 @@
          hx-trigger="typing-event"
          style="display: none"></div>
 </div>
-<script>
-    document.body.dispatchEvent(new CustomEvent('initializeEditor', {
-        detail: { idSuffix: '-thread-' + {{ message.parent_message.id|tojson }} }
-    }));
-</script>
