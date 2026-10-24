@@ -4,7 +4,6 @@ import os
 import uuid
 from functools import wraps
 
-import emoji
 from flask import (
     Blueprint,
     Response,
@@ -657,12 +656,9 @@ def _last_message_summary(message, with_attachments):
     if message.is_deleted:
         preview = "This message was deleted."
     else:
-        text = emoji.emojize(
-            " ".join((message.content or "").split()), language="alias"
-        )
-        preview = (
-            text if len(text) <= PREVIEW_LENGTH else text[: PREVIEW_LENGTH - 1] + "…"
-        )
+        from app.services.chat_service import plain_text
+
+        preview = plain_text(message.content, limit=PREVIEW_LENGTH)
     return {
         "id": message.id,
         "content_preview": preview,

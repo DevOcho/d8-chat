@@ -254,3 +254,48 @@ describe('scrolling and Jump to Latest', () => {
         expect(scrolled).toBeGreaterThan(0);
     });
 });
+
+describe('date dividers in the viewer\'s timezone', () => {
+    // The suite runs in America/New_York (UTC-4 on these dates); "now" is
+    // 2026-10-17T14:00Z, 10 AM local.
+    it('files an evening message under its local day, not the next UTC day', async () => {
+        const env = await chatEnv();
+        // 02:00 UTC on the 17th is 10 PM on the 16th here. The server labelled
+        // it by UTC day ("Today"); it belongs with yesterday's messages.
+        await env.frame(messageFrame(
+            { id: 300, user: ENGINEER, createdAt: '2026-10-17T02:00:00', content: 'still up?' },
+            { dividerLabel: 'Today' },
+        ));
+        expect(listChildren(env)).toEqual(['divider:Yesterday', 'message-201', 'message-202', 'message-300']);
+    });
+
+    it('relabels server dividers on load and merges the seam of two pages', async () => {
+        const rows = [
+            dateSeparator('October 15th'),
+            message({ id: 101, user: ENGINEER, createdAt: '2026-10-16T01:30:00', content: 'utc 16th, local 15th' }),
+            dateSeparator('October 16th'),
+            message({ id: 102, user: ENGINEER, createdAt: '2026-10-16T03:30:00', content: 'local 15th too' }),
+            dateSeparator('Today'),
+            message({ id: 103, user: ME, createdAt: '2026-10-17T13:00:00', content: 'morning' }),
+        ].join('\n');
+        const env = await createPage({ html: chatPage({ pane: conversationPane({ rows }) }) });
+        await env.openSocket();
+        env.eval("DateDividers.rebuild(document.getElementById('message-list'))");
+        expect(listChildren(env)).toEqual([
+            'divider:October 15th', 'message-101', 'message-102', 'divider:Today', 'message-103',
+        ]);
+    });
+
+    it('keeps the server dividers when no message is stamped', async () => {
+        const env = await chatEnv({ rows: '' });
+        await env.frame(oobToSelector('beforeend', '#message-list', dateSeparator('Today')));
+        expect(listChildren(env)).toEqual(['divider:Today']);
+    });
+
+    it('labels days beyond yesterday with the date, and the year when it differs', async () => {
+        const env = await chatEnv();
+        expect(env.eval("DateDividers.label(new Date('2026-10-03T15:00:00Z'))")).toBe('October 3rd');
+        expect(env.eval("DateDividers.label(new Date('2025-12-22T15:00:00Z'))")).toBe('December 22nd, 2025');
+        expect(env.eval("DateDividers.label(new Date('2026-10-11T15:00:00Z'))")).toBe('October 11th');
+    });
+});

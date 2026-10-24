@@ -32,6 +32,32 @@ PUSH_ACTIVE_MAX_AGE = 300
 
 REPLY_TYPES = ("thread", "quote")
 
+_MD_FENCE = re.compile(r"```[^\n]*\n?|~~~[^\n]*\n?")
+_MD_LINK = re.compile(r"\[([^\]]+)\]\([^)]+\)")
+_MD_MARKS = re.compile(r"(\*\*|__|~~|`|(?<!\w)[*_](?=\S)|(?<=\S)[*_](?!\w))")
+_MD_LINE_PREFIX = re.compile(
+    r"^\s{0,3}(?:#{1,6}\s+|>\s?|[-*+]\s+|\d+\.\s+)", re.MULTILINE
+)
+
+
+def plain_text(content, limit=None):
+    """A message as plain text for places that can't render Markdown: desktop
+    and mobile notifications and the conversation-list preview. Drops fences,
+    emphasis marks, list/quote/heading prefixes and link targets, collapses
+    whitespace, expands :emoji: shortcodes, and truncates to ``limit``."""
+    # pylint: disable=import-outside-toplevel
+    import emoji
+
+    text = content or ""
+    text = _MD_FENCE.sub("", text)
+    text = _MD_LINK.sub(r"\1", text)
+    text = _MD_LINE_PREFIX.sub("", text)
+    text = _MD_MARKS.sub("", text)
+    text = emoji.emojize(" ".join(text.split()), language="alias")
+    if limit and len(text) > limit:
+        text = text[: limit - 1].rstrip() + "…"
+    return text
+
 
 class MessageRefError(ValueError):
     """A client-supplied reference on a new message is invalid or forbidden."""
@@ -576,7 +602,7 @@ def _notify_online_recipients(
             {
                 "type": "notification",
                 "title": title,
-                "body": new_message.content,
+                "body": plain_text(new_message.content, limit=240),
                 # A relative path, not _external=True, so it's always same-origin.
                 "icon": icon,
                 "tag": conv_id_str,
@@ -694,9 +720,7 @@ def _dispatch_push_notifications(new_message, sender_user, conversation, parsed_
     else:
         title = f"{sender_label} mentioned you"
 
-    body = new_message.content or ""
-    if len(body) > 240:
-        body = body[:237] + "..."
+    body = plain_text(new_message.content, limit=240)
 
     payload_data = {
         "conversation_id_str": conversation.conversation_id_str,

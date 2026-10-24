@@ -302,10 +302,14 @@ def test_edit_and_delete_propagate_live(alice, bob, user_b):
     )
     expect(bob_msg).to_contain_text("(edited)")
 
-    # Delete (after the browser's confirm dialog) removes it for bob too.
-    alice.once("dialog", lambda dialog: dialog.accept())
+    # Delete (after confirming in the app's dialog, not the browser's)
+    # removes it for bob too.
+    toolbar_button(alice.locator(f"#message-{msg_id}"), "delete").click()
+    confirm = alice.locator("#confirm-modal-ok")
+    expect(confirm).to_be_visible(timeout=REALTIME_TIMEOUT)
+    expect(confirm).to_have_text("Delete")
     with alice.expect_response(lambda r: r.request.method == "DELETE") as delete:
-        toolbar_button(alice.locator(f"#message-{msg_id}"), "delete").click()
+        confirm.click()
     assert delete.value.ok, f"DELETE failed: HTTP {delete.value.status}"
     expect(bob_msg).to_have_count(0, timeout=REALTIME_TIMEOUT)
 

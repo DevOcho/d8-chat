@@ -88,7 +88,8 @@ form[id^="message-form"] {
   border-radius: 0.25rem;
   padding: 0.25rem;
 }
-.message-container:hover .message-toolbar {
+.message-container:hover .message-toolbar,
+.message-container:focus-within .message-toolbar {
   display: block;
 }
 .quoted-reply {
@@ -208,7 +209,15 @@ html.admin-page, body.admin-page { overflow: auto; }
   border-left: 3px solid #ffd700;
   transition: background-color 0.5s ease-in-out;
 }
-.channel-sidebar a { color: #a9a9a9; transition: color 0.2s ease-in-out; }
+.channel-sidebar a { color: #c9bfca; transition: color 0.2s ease-in-out; }
+/* Read conversations: Bootstrap's grey (#6c757d) was ~3:1 on the purple. */
+.channel-sidebar .text-secondary { color: #c9bfca !important; }
+.channel-sidebar .sidebar-item-link:hover [id^="link-"],
+.channel-sidebar .sidebar-item-link:focus-visible [id^="link-"] { color: #ffffff !important; }
+.channel-sidebar .sidebar-item-link:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: -2px;
+}
 .channel-sidebar a:hover, .channel-sidebar a.fw-bold.text-white { color: #ffffff !important; }
 
 /* --- Custom Pink Button Style --- */
@@ -288,7 +297,13 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     background-color: #40444b;
     color: #dcddde;
 }
-[data-bs-theme="dark"] .wysiwyg-content:focus, textarea:focus { outline: 0 !important; box-shadow: none !important; }
+[data-bs-theme="dark"] .wysiwyg-content:focus,
+[data-bs-theme="dark"] .wysiwyg-editor-container textarea:focus { outline: 0 !important; box-shadow: none !important; }
+/* The composer's inner fields drop their own ring; the box around them shows
+   focus instead. (This used to remove the ring from every textarea.) */
+.wysiwyg-editor-container:focus-within {
+    box-shadow: 0 0 0 0.2rem rgba(168, 85, 247, 0.35);
+}
 
 /* --- Rendered Message Content Styles --- */
 .message-content > * + * { margin-top: 0.6em; }
@@ -1521,4 +1536,44 @@ a.hashtag-link:hover {
    (message.html sets aspect-ratio and width), so the timeline doesn't jump. */
 .attachment-grid[data-count="1"] .attachment-grid-item[style*="aspect-ratio"] img {
     height: 100%;
+}
+
+/* A reaction pill toggled off to zero, until the server's copy removes it. */
+.reaction-pill.reaction-removing {
+    opacity: 0.4;
+}
+
+/* Ctrl/Cmd+K quick switcher */
+.quick-switcher {
+    position: fixed;
+    inset: 0;
+    z-index: 1070;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 12vh;
+    background: rgba(0, 0, 0, 0.35);
+}
+.quick-switcher[hidden] {
+    display: none;
+}
+.quick-switcher-panel {
+    width: min(560px, calc(100vw - 32px));
+    background: var(--bs-body-bg);
+    border-radius: 12px;
+    padding: 12px;
+}
+.quick-switcher-panel .list-group {
+    max-height: 50vh;
+    overflow-y: auto;
+    margin-top: 8px;
+}
+.quick-switcher-item {
+    cursor: pointer;
+    border: 0;
+    border-radius: 6px;
+}
+.quick-switcher-hint {
+    margin-top: 8px;
+    text-align: right;
 }

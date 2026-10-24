@@ -141,3 +141,27 @@ def test_handle_new_message_creates_no_self_mentions(setup_channel_and_users):
     )
 
     assert Mention.select().count() == 0
+
+
+@pytest.mark.parametrize(
+    "content, expected",
+    [
+        ("**Deploy** is _done_ :tada:", "Deploy is done 🎉"),
+        ("```python\nprint('x')\n```", "print('x')"),
+        ("> quoted\n- item one\n- item two", "quoted item one item two"),
+        ("see [the docs](https://example.com) and `code`", "see the docs and code"),
+        ("snake_case_name stays", "snake_case_name stays"),
+        ("2 * 3 = 6", "2 * 3 = 6"),
+    ],
+)
+def test_plain_text_strips_markdown_for_notifications(content, expected):
+    from app.services.chat_service import plain_text
+
+    assert plain_text(content) == expected
+
+
+def test_plain_text_truncates():
+    from app.services.chat_service import plain_text
+
+    text = plain_text("word " * 100, limit=50)
+    assert len(text) <= 50 and text.endswith("…")

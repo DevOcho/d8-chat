@@ -379,6 +379,55 @@
                 </div>
             </div>
         </div>
+        {# Ctrl/Cmd+K: jump to any conversation in the sidebar (chat.js QuickSwitcher). #}
+        <div id="quick-switcher"
+             class="quick-switcher"
+             role="dialog"
+             aria-modal="true"
+             aria-labelledby="quick-switcher-title"
+             hidden>
+            <div class="quick-switcher-panel shadow-lg">
+                <h2 id="quick-switcher-title" class="visually-hidden">Jump to a conversation</h2>
+                <input type="text"
+                       id="quick-switcher-input"
+                       class="form-control form-control-lg"
+                       placeholder="Jump to a channel or person…"
+                       aria-label="Jump to a channel or person"
+                       aria-controls="quick-switcher-results"
+                       aria-autocomplete="list"
+                       role="combobox"
+                       aria-expanded="true"
+                       autocomplete="off">
+                <ul id="quick-switcher-results"
+                    class="list-group list-group-flush"
+                    role="listbox">
+                </ul>
+                <div class="quick-switcher-hint small text-muted">
+                    <kbd>↑</kbd> <kbd>↓</kbd> to move, <kbd>Enter</kbd> to open, <kbd>Esc</kbd> to close
+                </div>
+            </div>
+        </div>
+        {# Asks before destructive actions (hx-confirm), instead of the browser's
+           native dialog (chat.js ConfirmDialog). #}
+        <div class="modal fade"
+             id="confirm-modal"
+             tabindex="-1"
+             aria-labelledby="confirm-modal-title"
+             aria-describedby="confirm-modal-body"
+             aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-sm">
+                <div class="modal-content">
+                    <div class="modal-header border-0 pb-0">
+                        <h2 class="modal-title fs-6 fw-semibold" id="confirm-modal-title">Are you sure?</h2>
+                    </div>
+                    <div class="modal-body" id="confirm-modal-body"></div>
+                    <div class="modal-footer border-0 pt-0">
+                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-danger" id="confirm-modal-ok">Confirm</button>
+                    </div>
+                </div>
+            </div>
+        </div>
         <!-- Generic HTMX Modal -->
         <div class="modal fade"
              id="htmx-modal"

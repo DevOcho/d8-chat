@@ -81,6 +81,7 @@ export function message({ id, user, createdAt, content = 'hello', sameSender = f
          id="message-${id}"
          data-user-id="${user.id}"
          ${clientId ? `data-client-id="${esc(clientId)}"` : ''}
+         ${createdAt ? `data-created-at="${createdAt}Z"` : ''}
          data-raw-content="${esc(content)}"
          data-attachments='[]'>
         ${avatarCol}
@@ -95,8 +96,9 @@ export function message({ id, user, createdAt, content = 'hello', sameSender = f
 }
 
 // partials/message.html, system-announcement branch
-export function systemMessage({ id, content }) {
-    return `<div class="system-message" id="message-${id}">${esc(content)}</div>`;
+export function systemMessage({ id, content, createdAt = null }) {
+    const stamp = createdAt ? ` data-created-at="${createdAt}Z"` : '';
+    return `<div class="system-message" id="message-${id}"${stamp}>${esc(content)}</div>`;
 }
 
 // app/htmx_oob.py oob_to_selector()
@@ -560,6 +562,21 @@ ${dmItems}
         <div id="search-results-overlay" style="display: none; flex-direction: column"></div>
         <div class="offcanvas offcanvas-end" tabindex="-1" id="right-panel-offcanvas">
             <div class="offcanvas-body" id="right-panel-body"></div>
+        </div>
+        <div id="quick-switcher" class="quick-switcher" role="dialog" aria-modal="true" aria-labelledby="quick-switcher-title" hidden>
+            <div class="quick-switcher-panel shadow-lg">
+                <h2 id="quick-switcher-title" class="visually-hidden">Jump to a conversation</h2>
+                <input type="text" id="quick-switcher-input" class="form-control form-control-lg" role="combobox" aria-expanded="true" autocomplete="off">
+                <ul id="quick-switcher-results" class="list-group list-group-flush" role="listbox"></ul>
+            </div>
+        </div>
+        <div class="modal fade" id="confirm-modal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog"><div class="modal-content">
+                <h2 class="modal-title" id="confirm-modal-title">Are you sure?</h2>
+                <div class="modal-body" id="confirm-modal-body"></div>
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-modal-ok">Confirm</button>
+            </div></div>
         </div>
         <div class="modal fade" id="htmx-modal" tabindex="-1" aria-hidden="true">
             <div class="modal-dialog modal-lg"><div class="modal-content" id="htmx-modal-content"></div></div>

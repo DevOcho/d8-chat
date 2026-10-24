@@ -131,6 +131,64 @@ function friendlyErrorText(xhr) {
     return 'Please try again.';
 }
 
+/**
+ * Date dividers in the viewer's own timezone. The server buckets messages by
+ * UTC day (and labels a broadcast as of the sender's clock), so for anyone
+ * west of UTC an evening message sat under the next day's divider. Every
+ * message carries its UTC timestamp (data-created-at); this rebuilds the
+ * dividers from local calendar days whenever the list changes, which also
+ * merges the duplicate divider left where an older page meets the one below.
+ */
+const DateDividers = {
+    label(date, now = new Date()) {
+        const startOf = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+        const days = Math.round((startOf(now) - startOf(date)) / 86400000);
+        if (days === 0) return 'Today';
+        if (days === 1) return 'Yesterday';
+        const n = date.getDate();
+        const suffix = (n % 10 === 1 && n !== 11) ? 'st'
+            : (n % 10 === 2 && n !== 12) ? 'nd'
+            : (n % 10 === 3 && n !== 13) ? 'rd' : 'th';
+        const month = date.toLocaleString('en-US', { month: 'long' });
+        return `${month} ${n}${suffix}${date.getFullYear() === now.getFullYear() ? '' : `, ${date.getFullYear()}`}`;
+    },
+    make(text) {
+        const el = document.createElement('div');
+        el.className = 'date-separator';
+        el.setAttribute('role', 'separator');
+        const span = document.createElement('span');
+        span.textContent = text;
+        el.appendChild(span);
+        return el;
+    },
+    rebuild(list) {
+        if (!list) return;
+        const items = [...list.children].filter((el) => el.matches('.message-container, .system-message'));
+        // Nothing stamped (an empty pane, older markup): keep the server's.
+        if (!items.some((el) => el.dataset.createdAt)) return;
+        const wanted = [];
+        let previousDay = null;
+        items.forEach((el) => {
+            if (!el.dataset.createdAt) return; // an optimistic copy: same day as its neighbours
+            const when = new Date(el.dataset.createdAt);
+            if (Number.isNaN(when.getTime())) return;
+            const day = when.toDateString();
+            if (day !== previousDay) wanted.push({ el, text: this.label(when) });
+            previousDay = day;
+        });
+        list.querySelectorAll(':scope > .date-separator').forEach((el) => el.remove());
+        wanted.forEach(({ el, text }) => {
+            // Above the unread line that may sit right on top of the message.
+            let anchor = el;
+            while (anchor.previousElementSibling && anchor.previousElementSibling.matches('.new-message-separator')) {
+                anchor = anchor.previousElementSibling;
+            }
+            anchor.before(this.make(text));
+        });
+    },
+};
+window.DateDividers = DateDividers;
+
 // A sending tab's id for its optimistic copy of a message; the server echoes
 // it on the rendered message so the copy can be swapped for the real one.
 function newClientId() {
@@ -1413,7 +1471,10 @@ const createEditor = function(idSuffix = '') {
             const currentContent = state.isMarkdownMode ? state.markdownView.value : state.editor.innerText;
             if (idSuffix === '' && e.key === 'ArrowUp' && currentContent.trim() === '') {
                 e.preventDefault();
-                const lastUserMessage = document.querySelector(`.message-container[data-user-id="${currentUserId}"]:last-of-type`);
+                // Your newest message in the open conversation (":last-of-type"
+                // only matched when it was the very last element in the list).
+                const own = document.querySelectorAll(`#message-list .message-container[data-user-id="${currentUserId}"]`);
+                const lastUserMessage = own[own.length - 1];
                 if (lastUserMessage) {
                     const editButton = lastUserMessage.querySelector('.message-toolbar button[data-action="edit"]');
                     if (editButton) htmx.trigger(editButton, 'click');
@@ -1912,13 +1973,210 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    document.body.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && e.key === 'k') {
-            e.preventDefault();
-            if (searchInput) {
-                searchInput.focus();
-                searchInput.select();
+    // --- Keyboard navigation -------------------------------------------------
+    //   Ctrl/Cmd+K          quick switcher (Enter with no match searches messages)
+    //   Alt+Up / Alt+Down   previous / next conversation in the sidebar
+    //   Alt+Shift+Up/Down   previous / next unread conversation
+    const sidebarAnchors = () => [...document.querySelectorAll('#channel-list .sidebar-item-link, #dm-list .sidebar-item-link')];
+    const isUnreadAnchor = (a) => !!a.querySelector('.fw-bold, .badge');
+    const anchorName = (a) => {
+        const label = a.querySelector('[id^="link-"]') || a;
+        return label.textContent.replace(/\s+/g, ' ').trim();
+    };
+    const openAnchor = (a) => {
+        if (!a) return;
+        htmx.trigger(a, 'click');
+        if (window.mainEditor) window.mainEditor.focusActiveInput();
+    };
+    const stepConversation = (direction, unreadOnly) => {
+        const anchors = sidebarAnchors();
+        if (!anchors.length) return;
+        const current = anchors.findIndex((a) => a.classList.contains('active'));
+        for (let step = 1; step <= anchors.length; step++) {
+            const index = ((current + direction * step) % anchors.length + anchors.length) % anchors.length;
+            const candidate = anchors[index];
+            if (!unreadOnly || isUnreadAnchor(candidate)) {
+                openAnchor(candidate);
+                return;
             }
+        }
+    };
+
+    const QuickSwitcher = {
+        el: document.getElementById('quick-switcher'),
+        input: document.getElementById('quick-switcher-input'),
+        results: document.getElementById('quick-switcher-results'),
+        items: [],
+        selected: 0,
+        returnFocus: null,
+        isOpen() { return !!this.el && !this.el.hidden; },
+        toggle() { if (this.isOpen()) this.close(); else this.open(); },
+        open() {
+            if (!this.el) return;
+            this.returnFocus = document.activeElement;
+            this.el.hidden = false;
+            this.input.value = '';
+            this.render();
+            this.input.focus();
+        },
+        close({ restoreFocus = true } = {}) {
+            if (!this.isOpen()) return;
+            this.el.hidden = true;
+            if (restoreFocus && this.returnFocus && typeof this.returnFocus.focus === 'function') this.returnFocus.focus();
+        },
+        render() {
+            const typed = this.input.value.trim();
+            const query = typed.toLowerCase().replace(/^#\s*/, '');
+            let candidates = sidebarAnchors().map((anchor, order) => ({
+                anchor, order, name: anchorName(anchor), unread: isUnreadAnchor(anchor),
+            }));
+            if (query) {
+                candidates = candidates
+                    .map((c) => {
+                        const at = c.name.toLowerCase().replace(/^#\s*/, '').indexOf(query);
+                        return { ...c, score: at === 0 ? 0 : at > 0 ? 1 : -1 };
+                    })
+                    .filter((c) => c.score >= 0)
+                    .sort((a, b) => a.score - b.score || a.order - b.order);
+            } else {
+                // Unread first; otherwise the sidebar's own order.
+                candidates.sort((a, b) => (b.unread - a.unread) || a.order - b.order);
+            }
+            this.items = candidates.slice(0, 12);
+            this.selected = 0;
+            this.results.textContent = '';
+            this.items.forEach((c, i) => {
+                const li = document.createElement('li');
+                li.className = `list-group-item list-group-item-action quick-switcher-item${c.unread ? ' fw-bold' : ''}`;
+                li.id = `quick-switcher-option-${i}`;
+                li.setAttribute('role', 'option');
+                li.textContent = c.name;
+                li.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    this.choose(i);
+                });
+                this.results.appendChild(li);
+            });
+            if (!this.items.length) {
+                const li = document.createElement('li');
+                li.className = 'list-group-item text-muted quick-switcher-empty';
+                li.textContent = typed ? `No conversation matches. Press Enter to search messages for “${typed}”.` : 'No conversations yet.';
+                this.results.appendChild(li);
+            }
+            this.highlight();
+        },
+        highlight() {
+            [...this.results.querySelectorAll('.quick-switcher-item')].forEach((li, i) => {
+                const on = i === this.selected;
+                li.classList.toggle('active', on);
+                li.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            if (this.items.length) this.input.setAttribute('aria-activedescendant', `quick-switcher-option-${this.selected}`);
+            else this.input.removeAttribute('aria-activedescendant');
+        },
+        move(delta) {
+            if (!this.items.length) return;
+            this.selected = (this.selected + delta + this.items.length) % this.items.length;
+            this.highlight();
+        },
+        choose(index) {
+            const item = this.items[index];
+            const typed = this.input.value.trim();
+            this.close({ restoreFocus: false });
+            if (item) {
+                openAnchor(item.anchor);
+            } else if (typed && searchInput) {
+                searchInput.value = typed;
+                searchInput.dispatchEvent(new Event('search', { bubbles: true }));
+            }
+        },
+    };
+    window.QuickSwitcher = QuickSwitcher;
+    if (QuickSwitcher.el) {
+        QuickSwitcher.input.addEventListener('input', () => QuickSwitcher.render());
+        QuickSwitcher.input.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); QuickSwitcher.move(1); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); QuickSwitcher.move(-1); }
+            else if (e.key === 'Enter') { e.preventDefault(); QuickSwitcher.choose(QuickSwitcher.selected); }
+            else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); QuickSwitcher.close(); }
+        });
+        // A click on the dimmed backdrop closes it.
+        QuickSwitcher.el.addEventListener('mousedown', (e) => {
+            if (e.target === QuickSwitcher.el) QuickSwitcher.close();
+        });
+    }
+
+    document.body.addEventListener('keydown', (e) => {
+        const mod = e.ctrlKey || e.metaKey;
+        if (mod && !e.altKey && !e.shiftKey && (e.key === 'k' || e.key === 'K')) {
+            e.preventDefault();
+            QuickSwitcher.toggle();
+            return;
+        }
+        if (e.altKey && !mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+            e.preventDefault();
+            stepConversation(e.key === 'ArrowDown' ? 1 : -1, e.shiftKey);
+        }
+    });
+
+    // --- Confirmations ---------------------------------------------------------
+    // hx-confirm (delete a message, leave a conversation...) asks in a modal
+    // instead of the browser's native dialog, which blocks the page and can't
+    // be styled.
+    const ConfirmDialog = (() => {
+        const el = document.getElementById('confirm-modal');
+        if (!el || typeof bootstrap === 'undefined') return null;
+        const modal = new bootstrap.Modal(el);
+        const body = document.getElementById('confirm-modal-body');
+        const ok = document.getElementById('confirm-modal-ok');
+        let onConfirm = null;
+        ok.addEventListener('click', () => {
+            const proceed = onConfirm;
+            onConfirm = null;
+            modal.hide();
+            if (proceed) proceed();
+        });
+        el.addEventListener('hidden.bs.modal', () => { onConfirm = null; });
+        el.addEventListener('shown.bs.modal', () => ok.focus());
+        return {
+            ask(question, proceed, label = 'Confirm') {
+                body.textContent = question;
+                ok.textContent = label;
+                onConfirm = proceed;
+                modal.show();
+            },
+        };
+    })();
+    window.ConfirmDialog = ConfirmDialog;
+    document.body.addEventListener('htmx:confirm', (evt) => {
+        const question = evt.detail.question;
+        if (!question || !ConfirmDialog) return;
+        evt.preventDefault();
+        const label = /\bdelete\b/i.test(question) ? 'Delete'
+            : /\bleave\b/i.test(question) ? 'Leave'
+            : /\bremove\b/i.test(question) ? 'Remove' : 'Confirm';
+        ConfirmDialog.ask(question, () => evt.detail.issueRequest(true), label);
+    });
+
+    // --- Reactions -----------------------------------------------------------------
+    // Clicking a reaction pill flips it at once; the server's copy of the
+    // reactions (OOB) replaces it a moment later with the real counts.
+    document.body.addEventListener('htmx:beforeRequest', (evt) => {
+        const pill = evt.detail.elt && evt.detail.elt.closest && evt.detail.elt.closest('.reaction-pill');
+        if (!pill) return;
+        const mine = pill.classList.toggle('user-reacted');
+        const count = pill.querySelector('.reaction-count');
+        if (count) {
+            const next = Math.max(0, (parseInt(count.textContent, 10) || 0) + (mine ? 1 : -1));
+            count.textContent = String(next);
+            if (next === 0) pill.classList.add('reaction-removing');
+        }
+    });
+
+    // Cancelling a quote-reply keeps what was typed in it as the draft.
+    document.body.addEventListener('click', (e) => {
+        if (e.target.closest('#chat-input-container .btn-close[aria-label="Cancel Reply"]') && window.mainEditor) {
+            DraftManager.save(activeConversationId(), window.mainEditor.getText());
         }
     });
 
@@ -2267,6 +2525,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!target || target.id !== 'chat-messages-container') return;
         const convId = activeConversationId();
         setActiveSidebarItem(convId);
+        // Local-day dividers before the first paint (and before measuring).
+        DateDividers.rebuild(document.getElementById('message-list'));
         // Scroll now, in the same task as the swap: waiting for settle (and a
         // timer after it) painted a frame at the wrong offset, then jumped.
         const jumpSelector = getJumpSelector(evt.detail.xhr);
@@ -2542,6 +2802,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // (Positioning a freshly opened pane happens in htmx:afterSwap, before
         // the first paint.)
 
+        // A pane opened or a page of history added: local-day dividers.
+        if (target.id === 'chat-messages-container' || target.closest && target.closest('#message-list')
+            || (target.classList && (target.classList.contains('older-message-loader') || target.classList.contains('newer-message-loader')))) {
+            DateDividers.rebuild(document.getElementById('message-list'));
+        }
+
         // Re-initialize dynamic components on the newly swapped content.
         // This prevents things like tooltips and popovers from breaking after a swap.
         if (target) {
@@ -2717,6 +2983,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (label === lastDividerLabel) el.remove();
                 else lastDividerLabel = label;
             });
+            // ...then redraw them from local days (see DateDividers).
+            DateDividers.rebuild(target);
 
             // Localize timestamps on every freshly appended message. The server
             // renders times in UTC as a fallback; without this, live/broadcast
@@ -2877,11 +3145,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
-        rightPanelOffcanvasEl.addEventListener('hidden.bs.offcanvas', event => {
-            const panelBody = rightPanelOffcanvasEl.querySelector('#right-panel-body');
-            if (panelBody) {
-                panelBody.innerHTML = `<div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>`;
-            }
+        // Thread and profile views replace the whole panel (including the
+        // #right-panel-body this used to reset), so the next open showed the
+        // previous thread until its own arrived. Reset the panel itself, on
+        // close and whenever new content is requested for it.
+        const resetRightPanel = () => {
+            rightPanelOffcanvasEl.innerHTML = `<div class="offcanvas-body" id="right-panel-body"><div class="text-center"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div></div>`;
+        };
+        rightPanelOffcanvasEl.addEventListener('hidden.bs.offcanvas', resetRightPanel);
+        document.body.addEventListener('htmx:beforeRequest', (evt) => {
+            if (evt.detail.target === rightPanelOffcanvasEl) resetRightPanel();
         });
     }
     document.body.addEventListener('keydown', (e) => {
@@ -2918,6 +3191,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (openPicker) {
                 e.preventDefault();
                 openPicker.style.display = 'none';
+                return;
+            }
+            // Leave an edit or quote-reply, back to the plain composer.
+            const cancel = document.querySelector('#chat-input-container .btn-close[hx-get="/chat/input/default"]');
+            if (cancel) {
+                e.preventDefault();
+                cancel.click();
                 return;
             }
         }

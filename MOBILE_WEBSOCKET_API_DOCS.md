@@ -103,7 +103,7 @@ Many of the events below utilize a standardized `Message` and `User` object payl
   "mention_count": 1,
   "last_message": {               // null when the channel has no messages
     "id": 812,
-    "content_preview": "Deploy is done 🎉", // whitespace collapsed, emoji shortcodes expanded, ≤140 chars
+    "content_preview": "Deploy is done 🎉", // plain text: Markdown stripped, emoji expanded, ≤140 chars
     "user": { ...User Object... },   // null for a system message
     "created_at": "2026-10-24T15:02:11.123456",
     "has_attachments": false
