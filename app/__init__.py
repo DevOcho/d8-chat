@@ -398,7 +398,7 @@ def _check_valkey_health(app):
 # Which strict directive groups the code is ready to enforce (CSP_PLAN.md).
 # A phase flips its group once nothing in the app needs the loose rule; until
 # then the strict rule is only reported (Content-Security-Policy-Report-Only).
-CSP_ENFORCEABLE = {"scripts": False, "styles": False}
+CSP_ENFORCEABLE = {"scripts": True, "styles": False}
 
 CSP_MODES = ("legacy", "report", "enforce")
 CSP_REPORT_PATH = "/csp-report"

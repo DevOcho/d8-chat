@@ -268,7 +268,7 @@ Copy `example.env` to `.env`. Required variables:
 
 Optional SSO: `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`
 
-Content-Security-Policy: `CSP_MODE` = `report` (default: loose policy enforced, strict one sent as Report-Only), `enforce` (strict for every group in `app.CSP_ENFORCEABLE`), or `legacy` (no reporting). Browsers POST violations to `/csp-report`, logged as `csp_violation` lines; the e2e suite records them too and prints a burn-down summary. See `CSP_PLAN.md`.
+Content-Security-Policy: `CSP_MODE` = `report` (default: loose policy enforced, strict one sent as Report-Only), `enforce` (strict for every group in `app.CSP_ENFORCEABLE`), or `legacy` (no reporting). Scripts are strict-ready, so `enforce` means `script-src 'self'` (no inline scripts, `on*=` handlers, `hx-on` or eval); the local cluster runs `enforce` (`.auto/deployment.yaml`). New behavior goes in a static file bound by data attributes (`ui.js` for shared ones, `htmx.onLoad` set-up in `chat.js` / `admin.js`); `tests/test_csp_guard.py` fails on anything inline. Browsers POST violations to `/csp-report`, logged as `csp_violation` lines; the e2e suite records them, fails on `script-src` ones, and prints a burn-down summary. See `CSP_PLAN.md`.
 
 Optional Authentik account sync: `AUTHENTIK_API_TOKEN` (a service account that can view users); `AUTHENTIK_API_URL` (defaults to the issuer's origin), `AUTHENTIK_SUBJECT_FIELD` (default `uid`), `AUTHENTIK_SYNC_INTERVAL_SECONDS` (60), `AUTHENTIK_SYNC_GROUPS` (`true`)
 

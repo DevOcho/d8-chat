@@ -282,3 +282,23 @@ describe('notification-sound select', () => {
         expect(audio.played).toBe(true);
     });
 });
+
+describe('htmx config (base.html meta)', () => {
+    it('runs no script or hx-on from swapped-in content, and injects no <style>', async () => {
+        const env = await chatEnv({
+            routes: [{
+                match: '/chat/evil',
+                reply: { body: '<div id="evil"><script>window.ranScript = true;</script><button id="evil-btn" hx-on:click="window.ranHxOn = true">x</button></div>' },
+            }],
+            extraMain: '<div id="evil-slot"></div>',
+        });
+        expect(env.window.htmx.config.allowEval).toBe(false);
+        expect(env.window.htmx.config.allowScriptTags).toBe(false);
+        expect(env.$$('head style')).toHaveLength(0);
+
+        await swapIn(env, '/chat/evil', '#evil-slot');
+        env.$('#evil-btn').click();
+        expect(env.window.ranScript).toBeUndefined();
+        expect(env.window.ranHxOn).toBeUndefined();
+    });
+});

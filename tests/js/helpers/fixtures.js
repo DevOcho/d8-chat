@@ -465,6 +465,7 @@ export function chatPage({
     <head>
         <meta charset="utf-8">
         <meta name="csrf-token" content="csrf-test-token">
+        <meta name="htmx-config" content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'>
         <title>D8 - Chat</title>
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png?v=0123abcd">
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png?v=4567ef01">

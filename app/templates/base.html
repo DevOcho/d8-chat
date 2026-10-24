@@ -5,6 +5,12 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="csrf-token" content="{{ csrf_token() }}">
+        {# The page CSP is script-src 'self', so htmx evaluates nothing (no
+           on-event attributes, js: values or trigger filters) and runs no
+           scripts from swapped content. Its indicator styles are in style.css
+           rather than injected into the head. #}
+        <meta name="htmx-config"
+              content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'>
         <!-- CSS & Icons -->
         <link rel="stylesheet"
               href="{{ static_url('css/local/bootstrap.min.css') }}">

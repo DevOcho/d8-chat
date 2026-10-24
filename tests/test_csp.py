@@ -53,6 +53,15 @@ def test_enforce_mode_tightens_only_the_groups_the_code_is_ready_for(monkeypatch
     assert _directives(report_only)["style-src-attr"] == "'none'"
 
 
+def test_enforce_mode_enforces_strict_scripts_today():
+    """Phase 4: no template, partial or script needs inline script or eval."""
+    enforced, report_only = _csp_headers("", "enforce")
+    d = _directives(enforced)
+    assert d["script-src"] == "'self'"
+    assert "'unsafe-inline'" in d["style-src"]
+    assert _directives(report_only)["style-src-attr"] == "'none'"
+
+
 def test_strict_policy_keeps_the_other_directives():
     d = _directives(
         _build_csp("http://minio.local", strict_scripts=True, strict_styles=True)

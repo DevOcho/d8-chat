@@ -47,6 +47,10 @@ spec:
           value: "Dev-secrets-are-not-secure"
         - name: FLASK_ENV
           value: "development"
+        # Enforce the strict script policy here (CSP_PLAN.md); deployed
+        # environments stay on "report" until their soak window is clean.
+        - name: CSP_MODE
+          value: "enforce"
         - name: REQUESTS_CA_BUNDLE
           value: "./root_ca.crt"
         - name: POSTGRES_USER

@@ -13,6 +13,7 @@ import { readSource } from './helpers/env.js';
 const HOOKS = {
     'app/templates/base.html': [
         '<meta name="csrf-token"',
+        `content='{"allowEval": false, "allowScriptTags": false, "includeIndicatorStyles": false}'`,
         'sizes="32x32"',
         'id="app-toast"',
         'id="toast-header"',

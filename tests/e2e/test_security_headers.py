@@ -44,6 +44,19 @@ def test_login_page_has_csp_with_no_third_party_origins(page: Page):
         assert directive in csp, f"CSP missing {directive!r}; got: {csp!r}"
 
 
+def test_local_cluster_enforces_the_strict_script_policy(page: Page, base_url: str):
+    """.auto/deployment.yaml runs CSP_MODE=enforce (CSP_PLAN.md, phase 4):
+    no inline scripts, no eval. Deployed environments may still be on
+    "report" during their soak, so this only holds for the local cluster."""
+    if "d8-chat.local" not in base_url:
+        import pytest
+
+        pytest.skip("only the local cluster is known to run CSP_MODE=enforce")
+    csp = _headers_for(page, "/").get("content-security-policy", "")
+    assert "script-src 'self';" in csp, csp
+    assert "unsafe-eval" not in csp, csp
+
+
 def test_hsts_present_when_request_was_https(page: Page, base_url: str):
     """HSTS is only emitted when ``request.is_secure`` is True. Skip when
     the test is running against an http base URL."""
