@@ -242,3 +242,7 @@ secrets/
 
 # JavaScript unit tests (npm / Vitest)
 node_modules/
+
+# graphify knowledge-graph output (generated; machine-specific paths and a
+# local cache; summarizes untracked notes). Rebuild with /graphify.
+graphify-out/
