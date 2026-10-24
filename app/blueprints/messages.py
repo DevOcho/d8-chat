@@ -43,6 +43,7 @@ from app.routes import (
     handle_inbound_message,
     login_required,
     message_update_oob,
+    prepare_messages_for_render,
 )
 from app.services import chat_service
 
@@ -284,8 +285,7 @@ def view_thread(parent_message_id):
         .order_by(Message.created_at.asc())
     )
     all_thread_messages = [parent_message] + list(thread_replies)
-    reactions_map = get_reactions_for_messages(all_thread_messages)
-    attachments_map = get_attachments_for_messages(all_thread_messages)
+    reactions_map, attachments_map = prepare_messages_for_render(all_thread_messages)
     response = make_response(
         render_template(
             "partials/thread_view.html",
@@ -408,8 +408,7 @@ def get_messages_page(conversation_id):
     annotate_message_grouping(
         messages, prev_message=None if fetching_older else cursor_message
     )
-    reactions_map = get_reactions_for_messages(messages)
-    attachments_map = get_attachments_for_messages(messages)
+    reactions_map, attachments_map = prepare_messages_for_render(messages)
     return render_template(
         template,
         messages=messages,
@@ -467,8 +466,7 @@ def jump_to_message(message_id):
     )
     messages = messages_before + [target_message] + messages_after
     annotate_message_grouping(messages)
-    reactions_map = get_reactions_for_messages(messages)
-    attachments_map = get_attachments_for_messages(messages)
+    reactions_map, attachments_map = prepare_messages_for_render(messages)
     status, created = UserConversationStatus.get_or_create(
         user=g.user, conversation=conversation
     )
@@ -576,7 +574,10 @@ def toggle_reaction(message_id):
     if existing_reaction:
         existing_reaction.delete_instance()
     else:
-        Reaction.create(user=g.user, message=message, emoji=emoji)
+        # A double click races two creates; the second is a no-op, not a 500.
+        Reaction.insert(
+            user=g.user, message=message, emoji=emoji
+        ).on_conflict_ignore().execute()
     reactions_data = get_reactions_for_messages([message])
     grouped_reactions = reactions_data.get(message.id, [])
     reactions_html_content = render_template(

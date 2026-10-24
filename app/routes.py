@@ -21,7 +21,7 @@ from flask import (
 )
 from peewee import JOIN, fn
 
-from . import limiter, sock
+from . import limiter, sock, warm_markdown_lookups
 from .access import (
     accessible_conversations,
     user_can_post,
@@ -103,7 +103,7 @@ def get_reactions_for_messages(messages):
     )
     reactions_by_message = {}
     for r in all_reactions:
-        mid = r.message.id
+        mid = r.message_id
         if mid not in reactions_by_message:
             reactions_by_message[mid] = {}
         if r.emoji not in reactions_by_message[mid]:
@@ -122,6 +122,83 @@ def get_reactions_for_messages(messages):
     return reactions_map
 
 
+def prepare_messages_for_render(messages):
+    """Preload what partials/message.html reads, for a whole page of messages.
+
+    Rendering touched the author, the author's avatar, the conversation, the
+    poll, the thread reply count and any quoted message lazily — about 8
+    queries per message, so opening a 30-message channel ran ~220. This runs a
+    fixed handful, attaches the results to each message, and returns the
+    ``(reactions_map, attachments_map)`` the templates take.
+    """
+    # pylint: disable=import-outside-toplevel
+    from .models import Poll
+
+    messages = [m for m in messages if m is not None]
+    if not messages:
+        return {}, {}
+    ids = [m.id for m in messages]
+
+    ref_ids = {m.quoted_message_id for m in messages if m.quoted_message_id}
+    ref_ids |= {
+        m.parent_message_id
+        for m in messages
+        if m.parent_message_id and m.reply_type == "quote"
+    }
+    refs = (
+        {r.id: r for r in Message.select().where(Message.id.in_(list(ref_ids)))}
+        if ref_ids
+        else {}
+    )
+
+    user_ids = {m.user_id for m in messages if m.user_id}
+    user_ids |= {r.user_id for r in refs.values() if r.user_id}
+    users = {}
+    if user_ids:
+        users = {
+            u.id: u
+            for u in User.select(User, UploadedFile)
+            .join(UploadedFile, JOIN.LEFT_OUTER, on=(User.avatar == UploadedFile.id))
+            .where(User.id.in_(list(user_ids)))
+        }
+    conversations = {
+        c.id: c
+        for c in Conversation.select().where(
+            Conversation.id.in_(list({m.conversation_id for m in messages}))
+        )
+    }
+    polls = {p.message_id: p for p in Poll.select().where(Poll.message.in_(ids))}
+    reply_counts = {
+        row.parent_message_id: row.n
+        for row in Message.select(
+            Message.parent_message, fn.COUNT(Message.id).alias("n")
+        )
+        .where((Message.parent_message.in_(ids)) & (Message.reply_type == "thread"))
+        .group_by(Message.parent_message)
+    }
+
+    warm_markdown_lookups(
+        [m.content for m in messages] + [r.content for r in refs.values()]
+    )
+
+    for ref in refs.values():
+        if ref.user_id in users:
+            ref.user = users[ref.user_id]
+    for m in messages:
+        if m.user_id in users:
+            m.user = users[m.user_id]
+        if m.conversation_id in conversations:
+            m.conversation = conversations[m.conversation_id]
+        if m.quoted_message_id in refs:
+            m.quoted_message = refs[m.quoted_message_id]
+        if m.reply_type == "quote" and m.parent_message_id in refs:
+            m.parent_message = refs[m.parent_message_id]
+        m._poll_cache = polls.get(m.id)  # pylint: disable=protected-access
+        m._thread_reply_count = reply_counts.get(m.id, 0)  # pylint: disable=protected-access
+
+    return get_reactions_for_messages(messages), get_attachments_for_messages(messages)
+
+
 def get_attachments_for_messages(messages):
     """
     Efficiently fetches and groups attachment data for a given list of messages.
@@ -137,7 +214,7 @@ def get_attachments_for_messages(messages):
         .where(MessageAttachment.message.in_(message_ids))
     )
     for link in all_links:
-        mid = link.message.id
+        mid = link.message_id
         if mid not in attachments_map:
             attachments_map[mid] = []
         attachments_map[mid].append(
@@ -432,29 +509,23 @@ def _get_unread_info(all_conversations):
 
 
 def _has_unread_threads(last_view_time):
-    """Checks if the user has any unread thread replies."""
-    user_thread_replies = list(
-        Message.select().where(
-            (Message.user == g.user) & (Message.reply_type == "thread")
-        )
+    """Checks if the user has any unread thread replies: a thread they started
+    or replied in has had a reply since they last opened Threads.
+
+    One EXISTS. It used to load every thread reply the user had ever written,
+    as full rows, on every page load.
+    """
+    replied_in = Message.select(Message.parent_message).where(
+        (Message.user == g.user) & (Message.reply_type == "thread")
     )
-    involved_parent_ids = {r.parent_message_id for r in user_thread_replies}
-    started_threads = list(
-        Message.select(Message.id).where(
-            (Message.user == g.user) & (Message.last_reply_at.is_null(False))
+    return (
+        Message.select()
+        .where(
+            (Message.last_reply_at > last_view_time)
+            & ((Message.user == g.user) | Message.id.in_(replied_in))
         )
+        .exists()
     )
-    involved_parent_ids.update(p.id for p in started_threads)
-    if involved_parent_ids:
-        return (
-            Message.select()
-            .where(
-                (Message.id.in_(list(involved_parent_ids)))
-                & (Message.last_reply_at > last_view_time)
-            )
-            .exists()
-        )
-    return False
 
 
 @main_bp.route("/chat")
@@ -592,8 +663,7 @@ def catch_up_messages(conv_id_str, last_id):
     truncated = len(messages) > CATCHUP_LIMIT
     messages = messages[:CATCHUP_LIMIT]
 
-    reactions_map = get_reactions_for_messages(messages)
-    attachments_map = get_attachments_for_messages(messages)
+    reactions_map, attachments_map = prepare_messages_for_render(messages)
     # Continue grouping from the last message the client already has on screen.
     prev = previous_visible_message(messages[0]) if messages else None
     if messages:
@@ -759,50 +829,67 @@ def healthz():
     return jsonify(status), (200 if ok else 503)
 
 
-def _notify_thread_participant(user_id, conversation, now, conv_id_str):
-    """Sends sound notification for thread replies if needed."""
-    status, _ = UserConversationStatus.get_or_create(
-        user_id=user_id, conversation=conversation
-    )
-    should_notify = status.last_notified_timestamp is None or (
-        now - status.last_notified_timestamp
-    ) > datetime.timedelta(seconds=10)
-    if should_notify:
-        chat_manager.send_to_user(
-            user_id, {"type": "sound"}, exclude_channel=conv_id_str
-        )
-        # Targeted UPDATE: see chat_service._mark_notified.
-        UserConversationStatus.update(last_notified_timestamp=now).where(
-            (UserConversationStatus.user == user_id)
-            & (UserConversationStatus.conversation == conversation)
-        ).execute()
-
-
 def _notify_all_thread_participants(sender, parent_message, conv_id_str):
-    """Gathers all thread participants and sends them unread notifications."""
-    all_participant_ids = {parent_message.user.id}
-    replies = list(
-        Message.select(Message.user).where(Message.parent_message == parent_message)
-    )
-    all_participant_ids.update(r.user.id for r in replies)
+    """Light up the Threads link (and ring, at most every 10s) for everyone in
+    the thread who's online.
 
+    Runs off the send path (``spawn_background``). It used to run inline,
+    loading one User per reply and doing a get_or_create plus a save per
+    participant: ~60 queries before a 5-reply thread's sender got a response.
+    """
+    participant_ids = {parent_message.user_id}
+    participant_ids.update(
+        r.user_id
+        for r in Message.select(Message.user)
+        .where(
+            (Message.parent_message == parent_message)
+            & (Message.reply_type == "thread")
+        )
+        .distinct()
+    )
+    online = chat_manager.online_user_ids()
+    targets = [
+        uid
+        for uid in participant_ids
+        if uid is not None and uid != sender.id and uid in online
+    ]
+    if not targets:
+        return
+
+    conversation = parent_message.conversation
+    statuses = {
+        s.user_id: s
+        for s in UserConversationStatus.select().where(
+            (UserConversationStatus.conversation == conversation)
+            & (UserConversationStatus.user.in_(targets))
+        )
+    }
     unread_link_html = render_template("partials/threads_link_unread.html")
     now = utc_now()
-
-    for user_id in list(all_participant_ids):
-        if user_id == sender.id or not chat_manager.is_user_online_in_cluster(user_id):
-            continue
-        chat_manager.send_to_user(
-            user_id, unread_link_html, exclude_channel=conv_id_str
-        )
+    ring = []
+    for user_id in targets:
         try:
-            _notify_thread_participant(
-                user_id, parent_message.conversation, now, conv_id_str
+            chat_manager.send_to_user(
+                user_id, unread_link_html, exclude_channel=conv_id_str
             )
+            status = statuses.get(user_id)
+            last = status.last_notified_timestamp if status else None
+            if last is None or (now - last) > datetime.timedelta(seconds=10):
+                chat_manager.send_to_user(
+                    user_id, {"type": "sound"}, exclude_channel=conv_id_str
+                )
+                ring.append(user_id)
         except Exception:  # pylint: disable=broad-exception-caught
             current_app.logger.exception(
                 f"Error sending thread notification to user {user_id}"
             )
+    if ring:
+        # Targeted UPDATE (see chat_service._mark_notified). Participants
+        # without a status row get no stamp; they'll ring again next time.
+        UserConversationStatus.update(last_notified_timestamp=now).where(
+            (UserConversationStatus.conversation == conversation)
+            & (UserConversationStatus.user.in_(ring))
+        ).execute()
 
 
 THREAD_PANEL_SELECTOR = "#right-panel-offcanvas"
@@ -948,8 +1035,10 @@ def _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str):
         selector=f"#message-list #message-{parent_message.id}",
     )
 
-    # Delegate the notification loop to our new helper function
-    _notify_all_thread_participants(sender, parent_message, conv_id_str)
+    # Off the hot path, like the rest of the notification fan-out.
+    spawn_background(
+        _notify_all_thread_participants, sender, parent_message, conv_id_str
+    )
 
     api_data = {
         "type": "new_thread_reply",

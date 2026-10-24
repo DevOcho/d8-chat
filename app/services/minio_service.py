@@ -1,5 +1,5 @@
 import os
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 from flask import current_app
@@ -103,20 +103,37 @@ def upload_file(object_name, file_path, content_type):
         return False
 
 
-def get_presigned_url(object_name, response_headers={}):
+# Presigned URLs are signed as of the start of a fixed window rather than
+# "now", so every render inside the window yields the same URL and the browser
+# can cache images and avatars instead of re-downloading them on every
+# conversation switch. A URL is valid for URL_LIFETIME from its window's start,
+# so even one generated at the end of a window has the 15 minutes it always
+# had: short enough that a leaked link is rarely useful by the time it ends up
+# somewhere it shouldn't.
+URL_WINDOW = timedelta(minutes=30)
+URL_LIFETIME = timedelta(minutes=45)
+
+
+def _signing_window_start(now=None):
+    now = now or datetime.now(timezone.utc)
+    window = int(URL_WINDOW.total_seconds())
+    return datetime.fromtimestamp(
+        int(now.timestamp()) // window * window, tz=timezone.utc
+    )
+
+
+def get_presigned_url(object_name, response_headers=None):
     """Generates a temporary, secure URL using the PUBLIC client."""
     if not minio_client_public:
         raise Exception("Public Minio client not initialized.")
 
     try:
-        # 15 minutes is enough time for the page that embeds the URL to load
-        # the asset, but short enough that a leaked link is rarely useful by
-        # the time it ends up somewhere it shouldn't.
         url = minio_client_public.presigned_get_object(
             bucket_name=current_app.config["MINIO_BUCKET_NAME"],
             object_name=object_name,
-            expires=timedelta(minutes=15),
-            response_headers=response_headers,
+            expires=URL_LIFETIME,
+            response_headers=response_headers or {},
+            request_date=_signing_window_start(),
         )
         return url
     except S3Error:

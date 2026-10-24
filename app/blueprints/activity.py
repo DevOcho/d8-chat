@@ -12,11 +12,7 @@ from app.models import (
     UserConversationStatus,
     utc_now,
 )
-from app.routes import (
-    get_attachments_for_messages,
-    get_reactions_for_messages,
-    login_required,
-)
+from app.routes import login_required, prepare_messages_for_render
 
 activity_bp = Blueprint("activity", __name__)
 
@@ -76,8 +72,7 @@ def view_all_threads():
         for tid, parsed in parsed_by_thread.items():
             thread_channel_map[tid] = channels_by_id.get(parsed.channel_id)
 
-    reactions_map = get_reactions_for_messages(threads)
-    attachments_map = get_attachments_for_messages(threads)
+    reactions_map, attachments_map = prepare_messages_for_render(threads)
 
     # 1. Main Content: The list of threads. This will be placed into the hx-target.
     threads_html = render_template(
@@ -240,8 +235,7 @@ def view_all_unreads():
             )
 
     # Fetch reactions and attachments for all the unread messages at once.
-    reactions_map = get_reactions_for_messages(unread_messages)
-    attachments_map = get_attachments_for_messages(unread_messages)
+    reactions_map, attachments_map = prepare_messages_for_render(unread_messages)
 
     # 1. Main Content: The list of unread messages.
     unreads_html = render_template(

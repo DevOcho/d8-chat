@@ -36,10 +36,9 @@ from app.routes import (
     broadcast_conversation_read,
     check_and_get_read_state_oob,
     date_separator_oob,
-    get_attachments_for_messages,
-    get_reactions_for_messages,
     had_unread_messages,
     login_required,
+    prepare_messages_for_render,
     previous_visible_message,
 )
 from app.services import chat_service
@@ -93,8 +92,7 @@ def get_channel_chat(channel_id):
     )
     messages.reverse()
     annotate_message_grouping(messages)
-    reactions_map = get_reactions_for_messages(messages)
-    attachments_map = get_attachments_for_messages(messages)
+    reactions_map, attachments_map = prepare_messages_for_render(messages)
     members_count = (
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
@@ -773,8 +771,7 @@ def leave_channel(channel_id):
     # We need to fetch reactions and attachments for the messages we are about to render.
     messages_self = list(reversed(messages_query))
     annotate_message_grouping(messages_self)
-    reactions_map = get_reactions_for_messages(messages_self)
-    attachments_map = get_attachments_for_messages(messages_self)
+    reactions_map, attachments_map = prepare_messages_for_render(messages_self)
 
     dm_header_html = render_template("partials/dm_header.html", other_user=user_self)
     # Pass the new maps to the template context.

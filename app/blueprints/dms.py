@@ -12,10 +12,9 @@ from app.routes import (
     annotate_message_grouping,
     broadcast_conversation_read,
     check_and_get_read_state_oob,
-    get_attachments_for_messages,
-    get_reactions_for_messages,
     had_unread_messages,
     login_required,
+    prepare_messages_for_render,
 )
 
 # A smaller page size for the user search modal
@@ -175,8 +174,7 @@ def get_dm_chat(other_user_id):
     messages.reverse()
     annotate_message_grouping(messages)
 
-    reactions_map = get_reactions_for_messages(messages)
-    attachments_map = get_attachments_for_messages(messages)
+    reactions_map, attachments_map = prepare_messages_for_render(messages)
 
     header_html_content = render_template(
         "partials/dm_header.html", other_user=other_user

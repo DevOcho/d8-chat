@@ -51,6 +51,14 @@ IS_RUNNING_TESTS = "PYTEST_CURRENT_TEST" in os.environ
 PrimaryKeyField = AutoField if IS_RUNNING_TESTS else IdentityField
 
 
+def lock_for_update(query):
+    """``query.for_update()`` where the database supports row locks (Postgres;
+    SQLite, used by the tests, serializes writers anyway)."""
+    if getattr(db.obj, "for_update", False):
+        return query.for_update()
+    return query
+
+
 def initialize_db(app):
     """
     Initializes the database connection using the URI from the app's config.
@@ -60,7 +68,10 @@ def initialize_db(app):
     if db_url.startswith(("postgresql://", "postgres://")):
         scheme = db_url.split("://")[0]
         pool_url = db_url.replace(f"{scheme}://", f"{scheme}+pool://", 1)
-        database = connect(pool_url, max_connections=15, stale_timeout=300)
+        # timeout: wait up to 10s for a free connection when all 15 are in use.
+        # Without it playhouse raises MaxConnectionsExceeded at once, so a burst
+        # (requests + background fan-out + listener + ticker) became 500s.
+        database = connect(pool_url, max_connections=15, stale_timeout=300, timeout=10)
     else:
         database = connect(db_url)
     db.initialize(database)
@@ -197,6 +208,14 @@ class ChannelMember(BaseModel):
     channel = ForeignKeyField(Channel, backref="members")
     role = CharField(default="member")
 
+    class Meta:
+        """Peewee Meta class."""
+
+        # One membership per user and channel (migration 0010). Check-then-
+        # create on a double click used to add a second row: duplicate badges
+        # and sounds, and an inflated member count.
+        indexes = ((("user", "channel"), True),)
+
 
 # This table will represent a "chat room", which can be a channel or a DM
 class Conversation(BaseModel):
@@ -225,6 +244,15 @@ class Message(BaseModel):
     # "This message was deleted." placeholder so its replies stay reachable.
     is_deleted = BooleanField(default=False)
 
+    class Meta:
+        """Peewee Meta class."""
+
+        # Every conversation page, unread count and "anything new?" check
+        # filters on a conversation and ranges or sorts on created_at
+        # (migration 0010). With only the single-column FK index each of them
+        # scanned and sorted the whole conversation.
+        indexes = ((("conversation", "created_at"), False),)
+
     @classmethod
     def in_timeline(cls):
         """Expression for messages shown in a conversation's main timeline:
@@ -237,6 +265,32 @@ class Message(BaseModel):
         conversation as unread with nothing new to see.
         """
         return cls.reply_type.is_null() | (cls.reply_type != "thread")
+
+    @property
+    def poll_obj(self):
+        """This message's Poll, or None.
+
+        ``routes.prepare_messages_for_render`` preloads it for a whole page;
+        otherwise it costs one query (``{% if message.poll %}`` cost one on
+        every message, since a query object has no truthiness of its own).
+        """
+        if not hasattr(self, "_poll_cache"):
+            self._poll_cache = Poll.get_or_none(Poll.message == self.id)
+        return self._poll_cache
+
+    @property
+    def thread_reply_count(self):
+        """Number of thread replies; preloaded per page like ``poll_obj``."""
+        if not hasattr(self, "_thread_reply_count"):
+            self._thread_reply_count = (
+                Message.select()
+                .where(
+                    (Message.parent_message == self.id)
+                    & (Message.reply_type == "thread")
+                )
+                .count()
+            )
+        return self._thread_reply_count
 
     @property
     def attachments(self):

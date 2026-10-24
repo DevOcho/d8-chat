@@ -91,11 +91,12 @@ def test_channel_mention_sends_badge_notification(app, setup_mention_test, mocke
     # 2. Check that send_to_user was called with the correct arguments
     # We use call objects to check for multiple calls
     expected_calls = list()
+    # The badge and the Unreads link travel in one frame.
     expected_calls.append(
         call(
             recipient.id,
             {
-                "_raw_html": expected_badge_html,
+                "_raw_html": expected_badge_html + expected_unreads_link_html,
                 "api_data": {
                     "type": "unread_updated",
                     "data": {
@@ -105,13 +106,6 @@ def test_channel_mention_sends_badge_notification(app, setup_mention_test, mocke
                     },
                 },
             },
-            exclude_channel=conversation.conversation_id_str,
-        )
-    )
-    expected_calls.append(
-        call(
-            recipient.id,
-            expected_unreads_link_html,
             exclude_channel=conversation.conversation_id_str,
         )
     )

@@ -2,8 +2,9 @@
 {# It accepts a `user` object and a `size` in pixels. #}
 {% set size_px = size ~ 'px' %}
 {% set font_size_rem = (size / 24) * 0.8 ~ 'rem' %} {# Scale font size relative to avatar size #}
-{% if user.avatar_url %}
-    <img src="{{ user.avatar_url }}"
+{% set avatar_url = user.avatar_url %}
+{% if avatar_url %}
+    <img src="{{ avatar_url }}"
          alt="{{ user.username }}'s avatar"
          class="rounded-circle avatar-image"
          data-user-id="{{ user.id }}"

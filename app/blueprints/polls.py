@@ -5,7 +5,15 @@ from app.access import user_can_access_message, user_can_post
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
 from app.htmx_oob import message_list_append_oob
-from app.models import Conversation, Message, Poll, PollOption, Vote, db
+from app.models import (
+    Conversation,
+    Message,
+    Poll,
+    PollOption,
+    Vote,
+    db,
+    lock_for_update,
+)
 from app.routes import (
     date_separator_oob,
     get_attachments_for_messages,
@@ -150,6 +158,9 @@ def vote_on_poll(option_id):
         return "Unauthorized", 403
 
     with db.atomic():
+        # Serialize votes on this poll: two racing clicks on different options
+        # each saw no vote and both inserted, two votes in a single-choice poll.
+        lock_for_update(Poll.select().where(Poll.id == poll.id)).execute()
         # Find if the user has already voted on any option in this poll
         existing_vote = (
             Vote.select()

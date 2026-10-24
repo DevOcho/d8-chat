@@ -290,38 +290,46 @@ def handle_new_message(
             channel = Channel.get_by_id(
                 parse_conversation_id(conversation.conversation_id_str).channel_id
             )
-            target_users_for_mention = set()
+            target_ids = set()
 
             # Handle @channel - all members
             if "@channel" in chat_text:
-                all_members = (
-                    User.select()
-                    .join(ChannelMember)
-                    .where(ChannelMember.channel == channel)
+                target_ids.update(
+                    m.user_id
+                    for m in ChannelMember.select(ChannelMember.user).where(
+                        ChannelMember.channel == channel
+                    )
                 )
-                for member in all_members:
-                    target_users_for_mention.add(member)
 
             # Handle @here - only online members
             if "@here" in chat_text:
-                member_ids_query = ChannelMember.select(ChannelMember.user_id).where(
-                    ChannelMember.channel == channel
-                )
-                member_ids = {m.user_id for m in member_ids_query}
-                online_channel_members_ids = member_ids.intersection(
-                    chat_manager.online_user_ids()
-                )
-                if online_channel_members_ids:
-                    online_users = User.select().where(
-                        User.id.in_(list(online_channel_members_ids))
+                member_ids = {
+                    m.user_id
+                    for m in ChannelMember.select(ChannelMember.user).where(
+                        ChannelMember.channel == channel
                     )
-                    for member in online_users:
-                        target_users_for_mention.add(member)
+                }
+                target_ids.update(member_ids & chat_manager.online_user_ids())
 
-            # 3. Create Mention records for the collected users
-            for user_to_mention in target_users_for_mention:
-                if user_to_mention.id != sender.id:
-                    Mention.get_or_create(user=user_to_mention, message=new_message)
+            # 3. Create Mention records for the collected users in one
+            # statement: a get_or_create per member ran two queries each inside
+            # the send transaction, ~800 for a 200-member channel before the
+            # message was even broadcast. Direct @mentions made above are
+            # skipped by the conflict clause.
+            target_ids.discard(sender.id)
+            if target_ids:
+                now = utc_now()
+                Mention.insert_many(
+                    [
+                        {
+                            "user": uid,
+                            "message": new_message.id,
+                            "created_at": now,
+                            "updated_at": now,
+                        }
+                        for uid in target_ids
+                    ]
+                ).on_conflict_ignore().execute()
 
         # --- Hashtag handling logic ---
         # 1. Find all potential hashtags in the message content.
@@ -349,6 +357,12 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
     """
     Analyzes a new message and sends real-time UI updates (badges, sounds, etc.)
     to all relevant users who are NOT actively viewing the conversation.
+
+    The per-member work is batched: read-state rows, mentions and the channel
+    are loaded once, the common "this new message is unread" case needs no
+    query, and identical fragments are rendered once. It used to run ~7
+    queries, 2-3 renders and 2-4 publishes per online member, holding a pool
+    connection the whole time.
     """
     conversation = new_message.conversation
     conv_id_str = conversation.conversation_id_str
@@ -364,13 +378,14 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
     }
 
     # Determine who the members of the conversation are
+    channel = None
     if conversation.type == "channel":
         channel = Channel.get_by_id(parsed_conv.channel_id)
-        members = (
+        members = list(
             User.select().join(ChannelMember).where(ChannelMember.channel == channel)
         )
     else:  # DM
-        members = User.select().where(User.id.in_(list(parsed_conv.user_ids)))
+        members = list(User.select().where(User.id.in_(list(parsed_conv.user_ids))))
         # Guarantee both participants a status row even when they're offline.
         # The web sidebar and GET /api/v1/dms join through this table, so a
         # missing row hides the conversation entirely — the recipient never
@@ -384,36 +399,85 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 defaults=unread_defaults if member.id != sender_user.id else {},
             )
 
-    # Loop through every member to see if they need a notification
-    for member in members:
-        # Condition 1: Don't notify the sender or any offline users (cluster-aware)
-        if member.id == sender_user.id or not chat_manager.is_user_online_in_cluster(
-            member.id
-        ):
-            continue
-
-        # Condition 2: Check viewing status via 'exclude_channel' in send_to_user payload
-
-        status, _ = UserConversationStatus.get_or_create(
-            user=member, conversation=conversation, defaults=unread_defaults
+    # Condition 1: Don't notify the sender or any offline users (cluster-aware).
+    # Condition 2 (viewing the conversation) is the 'exclude_channel' on each
+    # send_to_user.
+    recipients = [
+        m
+        for m in members
+        if m.id != sender_user.id and chat_manager.is_user_online_in_cluster(m.id)
+    ]
+    if recipients:
+        _notify_online_recipients(
+            new_message, sender_user, conversation, channel, recipients, unread_defaults
         )
+
+    _dispatch_push_notifications(new_message, sender_user, conversation, parsed_conv)
+
+
+def _notify_online_recipients(
+    new_message, sender_user, conversation, channel, recipients, unread_defaults
+):
+    """Badges, sounds and desktop notifications for the online recipients."""
+    conv_id_str = conversation.conversation_id_str
+    statuses = {
+        s.user_id: s
+        for s in UserConversationStatus.select().where(
+            (UserConversationStatus.conversation == conversation)
+            & (UserConversationStatus.user.in_([m.id for m in recipients]))
+        )
+    }
+    mentioned_ids = {
+        m.user_id
+        for m in Mention.select(Mention.user).where(Mention.message == new_message)
+    }
+    in_timeline = new_message.reply_type != "thread"
+    unread_link_html = render_template("partials/unreads_link_unread.html")
+    bold_link_html = None
+    icon = url_for("static", filename="favicon.ico")
+    sender_name = new_message.user.display_name or new_message.user.username
+    now = utc_now()
+
+    missing = [m.id for m in recipients if m.id not in statuses]
+    if missing:
+        # One INSERT for members who never opened the conversation, instead of
+        # a get_or_create (two queries plus a transaction) each.
+        stamp = utc_now()
+        UserConversationStatus.insert_many(
+            [
+                {
+                    "user": uid,
+                    "conversation": conversation,
+                    "created_at": stamp,
+                    "updated_at": stamp,
+                    **unread_defaults,
+                }
+                for uid in missing
+            ]
+        ).on_conflict_ignore().execute()
+        statuses.update(
+            {
+                s.user_id: s
+                for s in UserConversationStatus.select().where(
+                    (UserConversationStatus.conversation == conversation)
+                    & (UserConversationStatus.user.in_(missing))
+                )
+            }
+        )
+
+    for member in recipients:
+        status = statuses.get(member.id)
+        if status is None:
+            continue
+        is_mention = member.id in mentioned_ids
         notification_html = None
+        unread_count = 1
 
-        if conversation.type == "channel":
-            channel_model = Channel.get_by_id(parsed_conv.channel_id)
-            link_text = f"# {channel_model.name}"
-            hx_get_url = url_for(
-                "channels.get_channel_chat", channel_id=channel_model.id
-            )
-
-            is_mention = (
-                Mention.select()
-                .where((Mention.message == new_message) & (Mention.user == member))
-                .exists()
-            )
-
+        if channel is not None:
+            link_text = f"# {channel.name}"
+            hx_get_url = url_for("channels.get_channel_chat", channel_id=channel.id)
             if is_mention:
-                total_unread_mentions = (
+                unread_count = (
                     Mention.select()
                     .join(Message)
                     .where(
@@ -426,30 +490,23 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 notification_html = render_template(
                     "partials/unread_badge.html",
                     conv_id_str=conv_id_str,
-                    count=total_unread_mentions,
+                    count=unread_count,
                     link_text=link_text,
                     hx_get_url=hx_get_url,
                 )
-            elif (
-                Message.select()
-                .where(
-                    (Message.conversation == conversation)
-                    & (Message.created_at > status.last_read_timestamp)
-                    & (Message.user != member)
-                    & Message.in_timeline()
-                )
-                .exists()
+            elif _has_unread_after(
+                new_message, conversation, member, status, in_timeline
             ):
-                notification_html = render_template(
-                    "partials/bold_link.html",
-                    conv_id_str=conv_id_str,
-                    link_text=link_text,
-                    hx_get_url=hx_get_url,
-                )
+                if bold_link_html is None:
+                    bold_link_html = render_template(
+                        "partials/bold_link.html",
+                        conv_id_str=conv_id_str,
+                        link_text=link_text,
+                        hx_get_url=hx_get_url,
+                    )
+                notification_html = bold_link_html
         else:  # DM
-            link_text = sender_user.display_name or sender_user.username
-            hx_get_url = url_for("dms.get_dm_chat", other_user_id=sender_user.id)
-            new_count = (
+            unread_count = (
                 Message.select()
                 .where(
                     (Message.conversation == conversation)
@@ -459,13 +516,13 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 )
                 .count()
             )
-            if new_count > 0:
+            if unread_count > 0:
                 # A sidebar row rides along with the badge: if this DM isn't in
                 # the client's sidebar yet (brand-new conversation, or the
                 # dm_created frame was lost while their socket was down), the
                 # badge's OOB target doesn't exist and the whole notification
-                # would be silently dropped. The client skips the row when it
-                # already has one (htmx:oobBeforeSwap dedupe in chat.js).
+                # would be silently dropped. The client moves the existing row
+                # instead when it has one (htmx:oobBeforeSwap in chat.js).
                 sidebar_row_html = render_template(
                     "partials/dm_list_item_oob.html",
                     user=sender_user,
@@ -476,81 +533,77 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
                 notification_html = sidebar_row_html + render_template(
                     "partials/unread_badge.html",
                     conv_id_str=conv_id_str,
-                    count=new_count,
-                    link_text=link_text,
-                    hx_get_url=hx_get_url,
+                    count=unread_count,
+                    link_text=sender_user.display_name or sender_user.username,
+                    hx_get_url=url_for("dms.get_dm_chat", other_user_id=sender_user.id),
                 )
 
         if notification_html:
-            unread_link_html = render_template("partials/unreads_link_unread.html")
-
-            # Construct the json payload specifically for the mobile app
+            # One frame: the badge plus the Unreads link for web clients, and
+            # the structured payload for the mobile app.
             api_data = {
                 "type": "unread_updated",
                 "data": {
                     "conversation_id_str": conv_id_str,
-                    "unread_count": total_unread_mentions
-                    if conversation.type == "channel" and is_mention
-                    else (new_count if conversation.type == "dm" else 1),
-                    "is_mention": bool(conversation.type == "channel" and is_mention),
+                    "unread_count": unread_count,
+                    "is_mention": bool(channel is not None and is_mention),
                 },
             }
-
             chat_manager.send_to_user(
                 member.id,
-                {"_raw_html": notification_html, "api_data": api_data},
+                {
+                    "_raw_html": notification_html + unread_link_html,
+                    "api_data": api_data,
+                },
                 exclude_channel=conv_id_str,
             )
-            chat_manager.send_to_user(
-                member.id, unread_link_html, exclude_channel=conv_id_str
-            )
 
-        # Sound and Desktop Notification Logic (remains the same)
-        now = utc_now()
-        is_a_mention = (
-            Mention.select()
-            .where((Mention.message == new_message) & (Mention.user == member))
-            .exists()
+        # Sound and desktop notification
+        if is_mention:
+            title = f"New mention from {sender_name}"
+        elif channel is None and (
+            status.last_notified_timestamp is None
+            or (now - status.last_notified_timestamp) > datetime.timedelta(seconds=10)
+        ):
+            title = f"New message from {sender_name}"
+        else:
+            continue
+        chat_manager.send_to_user(
+            member.id, {"type": "sound"}, exclude_channel=conv_id_str
         )
-
-        if is_a_mention:
-            chat_manager.send_to_user(
-                member.id, {"type": "sound"}, exclude_channel=conv_id_str
-            )
-            notification_payload = {
+        chat_manager.send_to_user(
+            member.id,
+            {
                 "type": "notification",
-                "title": f"New mention from {new_message.user.display_name or new_message.user.username}",
+                "title": title,
                 "body": new_message.content,
-                # Remove _external=True to use a safe relative path
-                "icon": url_for("static", filename="favicon.ico"),
+                # A relative path, not _external=True, so it's always same-origin.
+                "icon": icon,
                 "tag": conv_id_str,
-            }
-            chat_manager.send_to_user(
-                member.id, notification_payload, exclude_channel=conv_id_str
-            )
-            _mark_notified(member, conversation, now)
-        elif conversation.type == "dm":
-            should_notify = status.last_notified_timestamp is None or (
-                now - status.last_notified_timestamp
-            ) > datetime.timedelta(seconds=10)
-            if should_notify:
-                chat_manager.send_to_user(
-                    member.id, {"type": "sound"}, exclude_channel=conv_id_str
-                )
-                notification_payload = {
-                    "type": "notification",
-                    "title": f"New message from {new_message.user.display_name or new_message.user.username}",
-                    "body": new_message.content,
-                    # Remove _external=True to use a safe relative path
-                    "icon": url_for("static", filename="favicon.ico"),
-                    "tag": conv_id_str,
-                }
-                chat_manager.send_to_user(
-                    member.id, notification_payload, exclude_channel=conv_id_str
-                )
-                _mark_notified(member, conversation, now)
+            },
+            exclude_channel=conv_id_str,
+        )
+        _mark_notified(member, conversation, now)
 
-    _dispatch_push_notifications(new_message, sender_user, conversation, parsed_conv)
+
+def _has_unread_after(new_message, conversation, member, status, in_timeline):
+    """Whether ``member`` has an unread timeline message here from someone else.
+
+    The new message itself answers it in the common case (it's in the
+    timeline and newer than their last read), with no query.
+    """
+    if in_timeline and new_message.created_at > status.last_read_timestamp:
+        return True
+    return (
+        Message.select()
+        .where(
+            (Message.conversation == conversation)
+            & (Message.created_at > status.last_read_timestamp)
+            & (Message.user != member)
+            & Message.in_timeline()
+        )
+        .exists()
+    )
 
 
 def _mark_notified(user, conversation, now):

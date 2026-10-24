@@ -2,17 +2,13 @@
     {# Copy button #}
     <button class="btn btn-sm btn-light"
             data-message-id="{{ message.id }}"
-            hx-on:click="
-                const hiddenInput = this.querySelector('.copy-source');
-                navigator.clipboard.writeText(hiddenInput.value);
-                const icon = this.querySelector('i');
-                icon.className = 'bi bi-check2';
-                setTimeout(() => icon.className = 'bi bi-clipboard', 2000);
-            "
+            hx-on:click=" const hiddenInput = this.querySelector('.copy-source'); navigator.clipboard.writeText(hiddenInput.value); const icon = this.querySelector('i'); icon.className = 'bi bi-check2'; setTimeout(() => icon.className = 'bi bi-clipboard', 2000); "
             title="Copy to clipboard">
         <i class="bi bi-clipboard"></i>
         <!-- Hidden input holds the pure, unescaped raw string safely via Jinja -->
-        <input type="hidden" class="copy-source" value="{{ message.content | markdown_clean }}">
+        <input type="hidden"
+               class="copy-source"
+               value="{{ message.content | markdown_clean }}">
     </button>
     {# Emoji Reaction button #}
     <button class="btn btn-sm btn-light"
@@ -35,7 +31,7 @@
         {# Inside a thread, target the thread's input container with a new route #}
         <button class="btn btn-sm btn-light"
                 hx-get="/chat/message/{{ message.id }}/load_for_thread_reply"
-                hx-target="#thread-input-container-{{ message.parent_message.id }}"
+                hx-target="#thread-input-container-{{ message.parent_message_id }}"
                 hx-swap="outerHTML"
                 title="Quote Reply">
             <i class="bi bi-reply"></i>
@@ -66,7 +62,7 @@
         {# When in a thread, target the thread's input container #}
         <button class="btn btn-sm btn-light author-only-action"
                 hx-get="/chat/message/{{ message.id }}/load_for_thread_edit"
-                hx-target="#thread-input-container-{{ message.parent_message.id }}"
+                hx-target="#thread-input-container-{{ message.parent_message_id }}"
                 hx-swap="outerHTML"
                 data-action="edit"
                 title="Edit">

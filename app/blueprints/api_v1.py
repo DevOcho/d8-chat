@@ -46,12 +46,14 @@ from app.models import (
     Workspace,
     WorkspaceMember,
     db,
+    lock_for_update,
     utc_now,
 )
 from app.routes import (
     broadcast_conversation_read,
     get_attachments_for_messages,
     get_reactions_for_messages,
+    prepare_messages_for_render,
 )
 from app.services import minio_service
 from app.services.image_processing import reencode_avatar
@@ -165,9 +167,8 @@ def serialize_message(message, reactions_map, attachments_map):
 
     # let's start with Polls since they can be a bit complex
     poll_data = None
-    if hasattr(message, "poll") and message.poll.count() > 0:
-        poll = message.poll.get()
-
+    poll = message.poll_obj
+    if poll is not None:
         # Fetch current API user's vote if authenticated
         user_vote = None
         if hasattr(g, "api_user") and g.api_user:
@@ -221,9 +222,7 @@ def serialize_message(message, reactions_map, attachments_map):
         "quoted_message": quoted_message_data,
         "reactions": reactions_map.get(message.id, list()),
         "attachments": attachments_map.get(message.id, list()),
-        "thread_reply_count": message.replies.where(
-            Message.reply_type == "thread"
-        ).count(),
+        "thread_reply_count": message.thread_reply_count,
         "last_reply_at": message.last_reply_at.isoformat()
         if message.last_reply_at
         else None,
@@ -848,8 +847,7 @@ def get_messages(conv_id_str):
         messages.extend(fetched_msgs)
 
     # Efficiently fetch reactions and attachments in bulk
-    reactions_map = get_reactions_for_messages(messages)
-    attachments_map = get_attachments_for_messages(messages)
+    reactions_map, attachments_map = prepare_messages_for_render(messages)
 
     results = list(
         (serialize_message(msg, reactions_map, attachments_map) for msg in messages)
@@ -939,8 +937,7 @@ def get_thread(parent_message_id):
     )
 
     all_messages = [parent_msg] + replies
-    reactions_map = get_reactions_for_messages(all_messages)
-    attachments_map = get_attachments_for_messages(all_messages)
+    reactions_map, attachments_map = prepare_messages_for_render(all_messages)
 
     return jsonify(
         {
@@ -981,7 +978,10 @@ def toggle_reaction(message_id):
     if existing:
         existing.delete_instance()
     else:
-        Reaction.create(user=g.api_user, message=message, emoji=emoji)
+        # A double tap races two creates; the second is a no-op, not a 500.
+        Reaction.insert(
+            user=g.api_user, message=message, emoji=emoji
+        ).on_conflict_ignore().execute()
 
     reactions_map = get_reactions_for_messages([message])
     grouped_reactions = reactions_map.get(message.id, [])
@@ -1237,6 +1237,8 @@ def api_vote_on_poll(poll_id):
     conv_id_str = message.conversation.conversation_id_str
 
     with db.atomic():
+        # Serialize votes on this poll (see polls.vote_on_poll).
+        lock_for_update(Poll.select().where(Poll.id == poll.id)).execute()
         existing_vote = (
             Vote.select()
             .join(PollOption)

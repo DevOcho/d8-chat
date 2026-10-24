@@ -118,9 +118,9 @@
             {# A deleted message that starts a thread stays as a placeholder so
                its replies are still reachable (chat_service.delete_message_and_files). #}
             <div class="message-content message-deleted text-muted fst-italic">This message was deleted.</div>
-        {% elif message.poll %}
+        {% elif message.poll_obj %}
             {# The message has a poll, so we render our special partial. #}
-            {% set poll_context = get_poll_context(message.poll.get(), g.user) %}
+            {% set poll_context = get_poll_context(message.poll_obj, g.user) %}
             {% include 'partials/message_poll.html' %}
         {% else %}
             {# This is a regular message. Text sits below the attachments, so add a
@@ -136,8 +136,7 @@
         {% endif %}
         {# Thread reply indicator #}
         {% if not is_in_thread_view %}
-            {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}
-            {% set thread_reply_count = threaded_replies.count() %}
+            {% set thread_reply_count = message.thread_reply_count %}
             {% if thread_reply_count > 0 %}
                 <div id="thread-indicator-{{ message.id }}"
                      class="d-flex align-items-center mt-2">

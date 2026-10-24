@@ -19,8 +19,7 @@
             {{ message.content | emojize | truncate(150) }}
         </div>
         {# Thread reply indicator #}
-        {% set threaded_replies = message.replies.where(Message.reply_type == 'thread') %}
-        {% set thread_reply_count = threaded_replies.count() %}
+        {% set thread_reply_count = message.thread_reply_count %}
         {% if thread_reply_count > 0 %}
             <div class="d-flex align-items-center mt-2">
                 <div class="thread-participant-avatars">

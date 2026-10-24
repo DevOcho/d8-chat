@@ -7,12 +7,22 @@ import hashlib
 import os
 import re
 import threading
+import time
 from urllib.parse import urlparse
 
 import bleach
 import emoji
 import markdown
-from flask import Flask, current_app, jsonify, render_template, request, url_for
+from flask import (
+    Flask,
+    current_app,
+    g,
+    has_app_context,
+    jsonify,
+    render_template,
+    request,
+    url_for,
+)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
@@ -82,16 +92,58 @@ def load_user(user_id):
     return User.get_active_by_id(user_id)
 
 
+_NAME_CACHE_TTL = 5.0
+
+
+def _lookup_by_name(model, field, names, cache_key):
+    """``{name: row}`` for ``names``, memoized briefly on ``g``.
+
+    The markdown filter runs once per rendered message, so a page of 30
+    messages mentioning the same people ran 30 identical lookups; this runs one
+    per name not seen in the last few seconds (misses are remembered too).
+    Entries expire after _NAME_CACHE_TTL because a WebSocket's request context
+    — and its ``g`` — lives as long as the socket.
+    """
+    names = set(names)
+    if not names:
+        return {}
+    cache = g.setdefault(cache_key, {}) if has_app_context() else {}
+    now = time.monotonic()
+    missing = [
+        n for n in names if n not in cache or now - cache[n][1] > _NAME_CACHE_TTL
+    ]
+    if missing:
+        found = {
+            getattr(r, field.name): r for r in model.select().where(field.in_(missing))
+        }
+        for name in missing:
+            cache[name] = (found.get(name), now)
+    return {n: cache[n][0] for n in names if cache[n][0] is not None}
+
+
+_MENTION_PATTERN = r"(?<![^\s(\['\"])@(\w+)"
+_CHANNEL_PATTERN = r"(?<![^\s(\['\"])#([a-zA-Z0-9_-]+)"
+
+
+def warm_markdown_lookups(texts):
+    """Look up every @name and #channel a page of messages mentions in two
+    queries, so the markdown filter's per-message lookups hit the cache."""
+    usernames, channel_names = set(), set()
+    for text in texts:
+        if text:
+            usernames.update(re.findall(_MENTION_PATTERN, text))
+            channel_names.update(re.findall(_CHANNEL_PATTERN, text))
+    _lookup_by_name(User, User.username, usernames - {"here", "channel"}, "_md_users")
+    _lookup_by_name(Channel, Channel.name, channel_names, "_md_channels")
+
+
 def _process_mentions(text, mention_links):
     """Extracts @mentions, generates HTML, and replaces with placeholders."""
-    mention_pattern = r"(?<![^\s(\['\"])@(\w+)"
+    mention_pattern = _MENTION_PATTERN
     usernames = set(re.findall(mention_pattern, text))
     special_mentions = {"here", "channel"}
     user_mentions_to_find = list(usernames - special_mentions)
-    user_map = {}
-    if user_mentions_to_find:
-        users = list(User.select().where(User.username.in_(user_mentions_to_find)))
-        user_map = {u.username: u for u in users}
+    user_map = _lookup_by_name(User, User.username, user_mentions_to_find, "_md_users")
 
     def extract_mention(match):
         username = match.group(1)
@@ -127,14 +179,11 @@ def _escape_h1_headers(text):
 
 def _process_channels(text, channel_links):
     """Extracts #channels/hashtags, generates HTML, and replaces with placeholders."""
-    channel_pattern = r"(?<![^\s(\['\"])#([a-zA-Z0-9_-]+)"
+    channel_pattern = _CHANNEL_PATTERN
     potential_channel_names = set(re.findall(channel_pattern, text))
-    channel_map = {}
-    if potential_channel_names:
-        channels = list(
-            Channel.select().where(Channel.name.in_(list(potential_channel_names)))
-        )
-        channel_map = {c.name: c for c in channels}
+    channel_map = _lookup_by_name(
+        Channel, Channel.name, potential_channel_names, "_md_channels"
+    )
 
     def extract_channel_tag(match):
         tag_name = match.group(1)
