@@ -495,6 +495,12 @@ def _build_csp(
         # playback for notification sounds (chat.js:1100ish).
         "media-src 'self' data:",
         "connect-src 'self'",
+        # Nothing is framed and no workers run; the manifest is our own.
+        # (default-src 'self' already covers these; the explicit values
+        # forbid same-origin frames too and document the intent.)
+        "frame-src 'none'",
+        "worker-src 'self'",
+        "manifest-src 'self'",
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "form-action 'self'",

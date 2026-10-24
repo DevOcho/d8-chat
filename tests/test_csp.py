@@ -110,6 +110,9 @@ def test_strict_policy_keeps_the_other_directives():
     assert d["object-src"] == "'none'"
     assert d["base-uri"] == "'self'"
     assert d["frame-ancestors"] == "'none'"
+    assert d["frame-src"] == "'none'"
+    assert d["worker-src"] == "'self'"
+    assert d["manifest-src"] == "'self'"
     assert "http://minio.local" in d["img-src"]
 
 

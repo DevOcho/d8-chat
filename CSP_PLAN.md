@@ -17,7 +17,8 @@ inventory of the templates and scripts plus the graphify map in `graphify-out/`
 | 3 Admin pages | 5680b05 |
 | 4 htmx hardening + enforce scripts | e55db1e |
 | 5 `<style>` elements | 8e68c69 |
-| 6 `style` attributes | (this commit) |
+| 6 `style` attributes | fd160ef |
+| 7 Extras (frame/worker/manifest) | (this commit) |
 
 ---
 
@@ -234,10 +235,11 @@ emoji-picker (its shadow `<style>`, Phase 5's hash), 6 `inline`, and 2 from
 
 ### Phase 7 — Optional extras (each its own small decision)
 
-- `frame-src 'none'`, `worker-src 'self'`, `manifest-src 'self'`.
-- `upgrade-insecure-requests` — blocked until the dev object store is served
-  over HTTPS (dev MinIO is `http://`).
-- `require-trusted-types-for 'script'` — not now: htmx swaps via `innerHTML`
+- Done: `frame-src 'none'`, `worker-src 'self'`, `manifest-src 'self'` (in
+  every mode; nothing is framed, no workers run).
+- Not done: `upgrade-insecure-requests` — blocked until the dev object store
+  is served over HTTPS (dev MinIO is `http://`).
+- Not done: `require-trusted-types-for 'script'` — htmx swaps via `innerHTML`
   and would need a Trusted Types policy of its own.
 
 ---
