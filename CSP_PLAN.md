@@ -1,9 +1,9 @@
 # CSP_PLAN.md — dropping `'unsafe-inline'` (and `'unsafe-eval'`)
 
-Status (2026-10-24): **Phases 0–6 done**: the full target policy (no
-`'unsafe-inline'`, no `'unsafe-eval'`, no style attributes) is enforced on the
-local cluster and report-only elsewhere until each environment's soak is clean
-(see "Enforcing in a deployed environment"). One phase per
+Status (2026-10-24): **all phases done** (7: the low-risk extras only). The
+full target policy (no `'unsafe-inline'`, no `'unsafe-eval'`, no style
+attributes) is enforced on the local cluster and report-only elsewhere until
+each environment's soak is clean (see "Enforcing in a deployed environment"). One phase per
 commit, each one test-gated, each one shippable on its own. Built from a full
 inventory of the templates and scripts plus the graphify map in `graphify-out/`
 (see "What the graph showed"; `graphify-out/` is gitignored, rebuild it with
@@ -18,7 +18,7 @@ inventory of the templates and scripts plus the graphify map in `graphify-out/`
 | 4 htmx hardening + enforce scripts | e55db1e |
 | 5 `<style>` elements | 8e68c69 |
 | 6 `style` attributes | fd160ef |
-| 7 Extras (frame/worker/manifest) | (this commit) |
+| 7 Extras (frame/worker/manifest) | 5478113 |
 
 ---
 
