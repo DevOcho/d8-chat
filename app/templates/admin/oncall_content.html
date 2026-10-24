@@ -70,7 +70,10 @@
                class="form-control form-control-sm"
                placeholder="New policy name"
                required>
-        <select name="channel_id" class="form-select form-select-sm" required>
+        <select name="channel_id"
+                class="form-select form-select-sm"
+                required
+                aria-label="Channel">
             <option value="" selected disabled>Channel…</option>
             {% for channel in channels %}<option value="{{ channel.id }}">#{{ channel.name }}</option>{% endfor %}
         </select>
@@ -123,7 +126,7 @@
       class="d-flex gap-2"
       style="max-width: 480px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <select name="user_id" class="form-select" required>
+    <select name="user_id" class="form-select" required aria-label="User">
         <option value="" selected disabled>Choose a user…</option>
         {% for user in users %}
             <option value="{{ user.id }}">{{ oncall_display_name(user) }} ({{ user.username }})</option>

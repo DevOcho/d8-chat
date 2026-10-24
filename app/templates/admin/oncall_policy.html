@@ -3,6 +3,7 @@
     {% set current_type = level.target_type if level else 'group' %}
     <select class="form-select form-select-sm level-target-type"
             name="target_type"
+            aria-label="Who this level pages"
             data-prefix="{{ prefix }}">
         <option value="schedule"
                 {% if current_type == 'schedule' %}selected{% endif %}>On call in rotation</option>
@@ -10,7 +11,8 @@
         <option value="user" {% if current_type == 'user' %}selected{% endif %}>User</option>
     </select>
     <select class="form-select form-select-sm mt-1 level-target {{ prefix }}-schedule"
-            name="target_schedule_id">
+            name="target_schedule_id"
+            aria-label="Rotation">
         {% for schedule in schedules %}
             <option value="{{ schedule.id }}"
                     {% if level and level.target_schedule_id == schedule.id %}selected{% endif %}>

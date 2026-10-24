@@ -103,9 +103,9 @@
                             <div class="card-body p-2 text-center d-flex flex-column align-items-center justify-content-center">
                                 <div class="file-icon-wrapper">
                                     {% if attachment.mime_type == "application/pdf" %}
-                                        <img src="icons/pdf-icon.svg" class="file-icon-img" />
+                                        <img src="/icons/pdf-icon.svg" class="file-icon-img" alt="" />
                                     {% else %}
-                                        <img src="icons/generic-file-icon.svg" class="file-icon-img" />
+                                        <img src="/icons/generic-file-icon.svg" class="file-icon-img" alt="" />
                                     {% endif %}
                                 </div>
                                 <p class="card-text small mb-0 text-truncate w-100" />{{ attachment.original_filename }}</p>
@@ -123,6 +123,7 @@
                         <a href="{{ attachment.url|safe_url }}"
                            download="{{ attachment.original_filename }}"
                            rel="noopener noreferrer"
+                           aria-label="Download {{ attachment.original_filename }}"
                            class="stretched-link"></a>
                     </div>
                 {% endfor %}

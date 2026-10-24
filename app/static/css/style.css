@@ -115,7 +115,7 @@ form[id^="message-form"] {
    but turn brand-pink with a soft glow when there are matches, so results in
    Channels/People catch the eye even while the Messages tab is empty. */
 .badge.search-count-hit {
-  background-color: #e35a8b !important; /* app's brand pink */
+  background-color: #c2185b !important; /* brand pink, 5.9:1 under white */
   color: #fff !important;
   box-shadow: 0 0 0 0.15rem rgba(227, 90, 139, 0.25);
 }
@@ -221,18 +221,20 @@ html.admin-page, body.admin-page { overflow: auto; }
 .channel-sidebar a:hover, .channel-sidebar a.fw-bold.text-white { color: #ffffff !important; }
 
 /* --- Custom Pink Button Style --- */
+/* A deeper pink than the old #ec729c, which was 2.8:1 under white text
+   (WCAG AA wants 4.5:1); this is 5.9:1. */
 .btn-pink {
     --bs-btn-color: #fff;
-    --bs-btn-bg: #ec729c;
-    --bs-btn-border-color: #db618b;
+    --bs-btn-bg: #c2185b;
+    --bs-btn-border-color: #b0154f;
     --bs-btn-hover-color: #fff;
-    --bs-btn-hover-bg: #e35a8b;
-    --bs-btn-hover-border-color: #e35a8b;
+    --bs-btn-hover-bg: #ad1457;
+    --bs-btn-hover-border-color: #ad1457;
     --bs-btn-active-color: #fff;
-    --bs-btn-active-bg: #d8487b;
-    --bs-btn-active-border-color: #d8487b;
-    --bs-btn-disabled-bg: #ec729c;
-    --bs-btn-disabled-border-color: #ec729c;
+    --bs-btn-active-bg: #880e4f;
+    --bs-btn-active-border-color: #880e4f;
+    --bs-btn-disabled-bg: #c2185b;
+    --bs-btn-disabled-border-color: #c2185b;
 }
 
 #typing-indicator {
@@ -967,6 +969,10 @@ body.admin-page {
 .admin-sidebar .nav-link.active {
     background-color: #343a40 !important; /* A dark color for active state */
 }
+/* Bootstrap's link blue is 4.3:1 on the light sidebar; this is 5.9:1. */
+.admin-sidebar .nav-link:not(.active) {
+    color: #0a58ca;
+}
 
 /* ... (keep all existing CSS above this) ... */
 
@@ -1029,7 +1035,7 @@ body.admin-page {
 
 /* --- Mention Styles --- */
 a.mention-link {
-    color: #ec729c; /* Theme pink */
+    color: #c2185b; /* Theme pink, dark enough for 4.5:1 on white */
     text-decoration: none;
     padding: 2px 4px;
     border-radius: 4px;
@@ -1038,7 +1044,7 @@ a.mention-link {
 
 a.mention-link:hover {
     background-color: #fbe4ed; /* A slightly darker pink on hover */
-    color: #d8487b;
+    color: #ad1457;
 }
 
 .mention-special {
@@ -1060,7 +1066,7 @@ a.mention-link:hover {
 
 /* Dark Mode Overrides for Mentions */
 [data-bs-theme="dark"] a.mention-link {
-    color: #ec729c; /* Use the theme pink for the text color */
+    color: #f48fb1; /* A lighter pink, for contrast on the dark background */
     background-color: transparent; /* Remove the background */
     padding: 0; /* Remove padding when there's no background */
 }
@@ -1083,7 +1089,7 @@ a.mention-link:hover {
 
 /* --- Channel mentions --- */
 a.channel-link {
-    color: #ec729c;
+    color: #c2185b;
     text-decoration: none;
     font-weight: 500;
     transition: text-decoration 0.2s ease-in-out;
@@ -1094,7 +1100,7 @@ a.channel-link:hover {
 }
 
 [data-bs-theme="dark"] a.channel-link {
-    color: #ec729c;
+    color: #f48fb1;
 }
 
 [data-bs-theme="dark"] a.channel-link:hover {
@@ -1577,3 +1583,37 @@ a.hashtag-link:hover {
     margin-top: 8px;
     text-align: right;
 }
+
+/* --- Accessibility (axe, WCAG 2.1 AA) --- */
+
+/* Mentions and #channel links must stand out without relying on color
+   (link-in-text-block): a subtle underline, in both themes. */
+a.mention-link,
+a.channel-link,
+a.hashtag-link {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+}
+
+/* Bootstrap's secondary grey is 4.4:1 on the light-grey admin pages. */
+:root:not([data-bs-theme="dark"]) .btn-outline-secondary {
+    --bs-btn-color: #565e64;
+    --bs-btn-border-color: #565e64;
+}
+
+/* Bootstrap's info/warning/orange text is far below 4.5:1 on white. */
+:root:not([data-bs-theme="dark"]) .admin-main-content .text-info { color: #087990 !important; }
+:root:not([data-bs-theme="dark"]) .admin-main-content .text-primary { color: #0a58ca !important; }
+:root:not([data-bs-theme="dark"]) .admin-main-content .text-warning { color: #8a6604 !important; }
+:root:not([data-bs-theme="dark"]) .admin-main-content .text-orange { color: #a14a04 !important; }
+
+/* Poll options (btn-outline-secondary) were Bootstrap's grey on the dark
+   card (2.3:1). */
+[data-bs-theme="dark"] .message-content .btn-outline-secondary,
+[data-bs-theme="dark"] .btn-outline-secondary .poll-content {
+    --bs-btn-color: #d3d7db;
+    color: #d3d7db;
+}
+[data-bs-theme="dark"] .poll-content .text-muted { color: #c2c7cc !important; }

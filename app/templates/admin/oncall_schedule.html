@@ -217,7 +217,10 @@
           style="max-width: 480px">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="input-group">
-            <select class="form-select" name="user_id" required>
+            <select class="form-select"
+                    name="user_id"
+                    required
+                    aria-label="Engineer to add">
                 <option value="" selected disabled>Add an engineer…</option>
                 {% for user in users_to_add %}
                     <option value="{{ user.id }}">{{ oncall_display_name(user) }} ({{ user.username }})</option>

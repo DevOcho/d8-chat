@@ -24,6 +24,7 @@ Valkey, MinIO).
 | `test_search.py` | Global search finds a message and jumps to it in its channel; another user's private (notes-to-self) message never shows up in your results |
 | `test_pager.py` | On-call pager: profile → Notifications → "Test my pager" raises the full-screen alert over the WebSocket; "Stop test" clears it |
 | `test_presence.py` | The web activity heartbeat (`POST /profile/activity`) is accepted |
+| `test_accessibility.py` | axe-core (WCAG 2.1 A + AA) finds no violations on login, forgot-password, a channel (light and dark), the quick switcher, the new-message modal, the profile panel, Unreads, Threads, search results and the admin pages. Needs `npm install` (axe-core is a dev dependency); skipped without it |
 
 The audit specifically flagged image/code-block/attachment paths as
 historically brittle, so those get extra coverage. Realtime multi-user

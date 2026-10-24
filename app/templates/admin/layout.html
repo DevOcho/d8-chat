@@ -44,7 +44,10 @@
                 Return to App <i class="bi bi-box-arrow-up-right"></i>
             </a>
         </nav>
-        <main class="admin-main-content" id="admin-content">
+        <main class="admin-main-content"
+              id="admin-content"
+              tabindex="0"
+              aria-label="Admin">
             {% block content %}{% endblock %}
         </main>
     </div>
