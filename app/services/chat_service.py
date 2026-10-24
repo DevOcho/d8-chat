@@ -302,6 +302,15 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
     conversation = new_message.conversation
     conv_id_str = conversation.conversation_id_str
     parsed_conv = parse_conversation_id(conv_id_str)
+    # A status row created now — the recipient never opened the conversation,
+    # or "left" the DM, which deletes theirs — must start out with this
+    # message unread. The default (now) is later than the message, so it read
+    # as already seen: no badge, no sidebar row, only the sound, and the DM
+    # surfaced on the next page load.
+    unread_defaults = {
+        "last_read_timestamp": new_message.created_at
+        - datetime.timedelta(microseconds=1)
+    }
 
     # Determine who the members of the conversation are
     if conversation.type == "channel":
@@ -318,7 +327,11 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
         # themselves. (The loop below get_or_creates too, but only after
         # skipping offline members.)
         for member in members:
-            UserConversationStatus.get_or_create(user=member, conversation=conversation)
+            UserConversationStatus.get_or_create(
+                user=member,
+                conversation=conversation,
+                defaults=unread_defaults if member.id != sender_user.id else {},
+            )
 
     # Loop through every member to see if they need a notification
     for member in members:
@@ -331,7 +344,7 @@ def send_notifications_for_new_message(new_message: Message, sender_user: User):
         # Condition 2: Check viewing status via 'exclude_channel' in send_to_user payload
 
         status, _ = UserConversationStatus.get_or_create(
-            user=member, conversation=conversation
+            user=member, conversation=conversation, defaults=unread_defaults
         )
         notification_html = None
 

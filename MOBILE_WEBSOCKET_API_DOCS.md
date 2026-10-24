@@ -56,7 +56,10 @@ val ws = client.newWebSocket(request, listener)
 * **Server pings.** The server sends a WebSocket PING control frame every ~25s.
   Keep your client library's automatic PONG enabled (it is by default) — an idle
   socket that stops answering pings is torn down so a dead connection doesn't
-  linger half-open. You do **not** need to send application-level pings.
+  linger half-open. Application-level pings are optional: protocol PONGs are
+  invisible to most app code, so if you want to detect a half-open socket
+  yourself (e.g. after the app resumes), send `{"type":"ping"}` and expect
+  `{"type":"pong"}` back (see *Heartbeat*).
 * **Reconnect.** On an unexpected close, reconnect with jittered exponential
   backoff (e.g. capped at ~30s). Do **not** reconnect on close code **1008**
   (auth rejected) — refresh the token first. After reconnecting you must
@@ -563,6 +566,16 @@ Broadcasts to other users that the current user is typing. Debounce this on the 
 {
   "type": "typing_stop",
   "conversation_id": "channel_5"
+}
+```
+
+### Heartbeat
+Optional. The server answers on the same socket with `{"type": "pong"}`. Any
+frame arriving after your ping proves the socket is alive; if nothing arrives
+within ~10s, close it and reconnect (then re-subscribe and fill the gap).
+```json
+{
+  "type": "ping"
 }
 ```
 

@@ -26,7 +26,7 @@ from .access import user_can_post, user_has_conversation_access
 from .background import spawn_background
 from .chat_manager import chat_manager
 from .conversation_id import parse_conversation_id
-from .htmx_oob import oob_to_selector
+from .htmx_oob import message_list_append_oob, oob_to_selector
 from .models import (
     Channel,
     ChannelMember,
@@ -204,7 +204,7 @@ def previous_visible_message(new_message):
     )
 
 
-def date_separator_oob(message, prev_message):
+def date_separator_oob(message, prev_message, conv_id_str):
     """
     OOB append of a date divider above ``message`` when it opens a new day.
 
@@ -223,9 +223,8 @@ def date_separator_oob(message, prev_message):
         and prev_message.created_at.date() == message.created_at.date()
     ):
         return ""
-    return oob_to_selector(
-        "beforeend",
-        "#message-list",
+    return message_list_append_oob(
+        conv_id_str,
         render_template("partials/date_separator.html", date_obj=message.created_at),
     )
 
@@ -591,7 +590,7 @@ def catch_up_messages(conv_id_str, last_id):
     for m in messages:
         # Same day-change check the page render does, carried across the gap the
         # client is backfilling.
-        parts.append(date_separator_oob(m, prev))
+        parts.append(date_separator_oob(m, prev, conv_id_str))
         msg_html = render_template(
             "partials/message.html",
             message=m,
@@ -599,7 +598,7 @@ def catch_up_messages(conv_id_str, last_id):
             attachments_map=attachments_map,
             Message=Message,
         )
-        parts.append(oob_to_selector("beforeend", "#message-list", msg_html))
+        parts.append(message_list_append_oob(conv_id_str, msg_html))
         if m.reply_type != "thread":
             prev = m
 
@@ -925,8 +924,8 @@ def _broadcast_regular_message(sender, new_message, conv_id_str):
         Message=Message,
     )
     message_to_broadcast = date_separator_oob(
-        new_message, prev_message
-    ) + oob_to_selector("beforeend", "#message-list", new_message_html)
+        new_message, prev_message, conv_id_str
+    ) + message_list_append_oob(conv_id_str, new_message_html)
 
     api_data = {
         "type": "new_message",
@@ -1031,6 +1030,14 @@ def _process_ws_event(ws, data):
     event_type = data.get("type")
     conv_id_str = data.get("conversation_id") or getattr(ws, "channel_id", None)
 
+    # Application-level heartbeat. Protocol pings are invisible to browser JS,
+    # so a client can't tell a healthy idle socket from a half-open one (a
+    # laptop that slept, a NAT that dropped the flow) without a reply it can
+    # see. The web client pings every ~25s and reconnects when no pong comes.
+    if event_type == "ping":
+        chat_manager.send_direct(ws, {"type": "pong"})
+        return
+
     if event_type == "subscribe":
         if not conv_id_str:
             return
@@ -1050,6 +1057,14 @@ def _process_ws_event(ws, data):
             )
             return
         chat_manager.subscribe(conv_id_str, ws)
+        # Tell the web client its socket now follows this conversation. Until
+        # this lands, broadcasts for it go nowhere, so the client backfills
+        # (GET .../messages/since/<id>) on the ack to close the gap between
+        # the page render and the subscribe. Mobile clients don't need it.
+        if not getattr(ws, "is_api_client", False):
+            chat_manager.send_direct(
+                ws, {"type": "subscribed", "conversation_id": conv_id_str}
+            )
         return
 
     if event_type in ("typing_start", "typing_stop"):

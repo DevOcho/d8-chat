@@ -1684,10 +1684,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-    // After a reconnect, backfill anything broadcast while the socket was down.
-    // pub/sub is at-most-once, so a disconnected client receives none of it;
-    // without this, missed messages stay invisible until a full page refresh.
-    function backfillAfterReconnect(convId) {
+    // Fetch anything newer than what's on screen for the open conversation.
+    // Called after a reconnect (pub/sub is at-most-once, so a socket that was
+    // down received none of it) and whenever the server acknowledges a
+    // subscribe (broadcasts between the pane's render and the subscribe went
+    // nowhere). Skipped while the pane shows an older page with a newer-page
+    // loader below it: appending the newest messages there would leave a gap.
+    function backfillMessages(convId) {
+        if (!convId || document.querySelector('#message-list .newer-message-loader')) return;
         let lastId = 0;
         document
             .querySelectorAll('#message-list .message-container[id^="message-"]')
@@ -1701,10 +1705,62 @@ document.addEventListener('DOMContentLoaded', () => {
             `/chat/conversations/${encodeURIComponent(convId)}/messages/since/${lastId}`,
             { source: document.body, swap: 'none' }
         ).catch(() => {});
+    }
+
+    // Re-emit sidebar rows and badges for anything that changed while the
+    // socket was down, including DMs started in the meantime.
+    function catchUpSidebar() {
         htmx.ajax('GET', '/chat/sidebar/unreads',
             { source: document.body, swap: 'none' }
         ).catch(() => {});
     }
+
+    const activeConversationId = () => {
+        const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+        return activeConv ? activeConv.dataset.conversationId : null;
+    };
+
+    // Application-level heartbeat. A socket can die without the browser
+    // noticing (laptop sleep, Wi-Fi change, a NAT dropping an idle flow): it
+    // stays OPEN, nothing arrives, and the page looks fine until a refresh. So
+    // ping every 25s and, if no frame at all comes back within 10s, treat the
+    // socket as dead and replace it. Judged by "has anything arrived since the
+    // ping" rather than a frame's age, so a throttled background tab (timers
+    // firing once a minute) doesn't mistake its own slowness for a dead
+    // socket.
+    const HEARTBEAT_INTERVAL_MS = 25000;
+    const PONG_TIMEOUT_MS = 10000;
+    const WAKE_PONG_TIMEOUT_MS = 5000;
+    let liveSocket = null;
+    let framesSincePing = 0;
+    let pongTimer = null;
+
+    function sendPing(timeoutMs = PONG_TIMEOUT_MS) {
+        if (!liveSocket) return;
+        try {
+            liveSocket.send(JSON.stringify({ type: 'ping' }));
+        } catch (e) {
+            return;
+        }
+        framesSincePing = 0;
+        clearTimeout(pongTimer);
+        pongTimer = setTimeout(checkPong, timeoutMs);
+    }
+
+    function checkPong() {
+        if (!liveSocket || framesSincePing > 0) return;
+        console.warn('No reply to the WebSocket heartbeat; reconnecting.');
+        liveSocket = null;
+        isReconnecting = true;
+        if (connectionStatusBar) connectionStatusBar.style.display = 'block';
+        if (typeof window.d8WsReconnectNow === 'function') window.d8WsReconnectNow(true);
+    }
+
+    setInterval(() => sendPing(), HEARTBEAT_INTERVAL_MS);
+
+    document.body.addEventListener('htmx:wsBeforeMessage', function() {
+        framesSincePing++;
+    });
 
     // If too many messages were missed to append safely, the catch-up endpoint
     // sets X-D8-Catchup: truncated — reload the pane instead of a partial gap.
@@ -1733,8 +1789,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 connectionStatusBar.innerHTML = `<div class="spinner-border spinner-border-sm me-2"></div> Connection lost. Attempting to reconnect...`;
             }, 2000);
         }
-        const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-        const convId = activeConv && activeConv.dataset.conversationId;
+        liveSocket = evt.detail && evt.detail.socketWrapper;
+        clearTimeout(pongTimer);
+        const convId = activeConversationId();
         const typingSender = document.getElementById('typing-sender');
         if (convId && typingSender) {
             const subscribeMsg = {
@@ -1744,8 +1801,11 @@ document.addEventListener('DOMContentLoaded', () => {
             typingSender.setAttribute('hx-vals', JSON.stringify(subscribeMsg));
             htmx.trigger(typingSender, 'typing-event');
         }
-        if (wasReconnecting && convId) {
-            backfillAfterReconnect(convId);
+        if (wasReconnecting) {
+            // The subscribe's ack backfills too; this covers a server that
+            // predates the ack. Duplicates are dropped on arrival.
+            backfillMessages(convId);
+            catchUpSidebar();
         }
         isReconnecting = false;
     });
@@ -1764,6 +1824,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         // Clean closes (normal / going-away) and auth rejects don't reconnect,
         // so don't nag the user with the reconnect bar for them.
+        liveSocket = null;
         if (code === 1000 || code === 1001 || code === 1008) return;
         if (!isReconnecting) {
             isReconnecting = true;
@@ -1776,10 +1837,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const reconnectIfNeeded = () => {
         if (typeof window.d8WsReconnectNow === 'function') window.d8WsReconnectNow();
     };
+    // A socket that still looks OPEN after the laptop wakes is probably dead:
+    // check it with a ping on a short fuse instead of waiting for the next one.
     document.addEventListener('visibilitychange', () => {
-        if (!document.hidden) reconnectIfNeeded();
+        if (document.hidden) return;
+        reconnectIfNeeded();
+        sendPing(WAKE_PONG_TIMEOUT_MS);
     });
-    window.addEventListener('online', reconnectIfNeeded);
+    window.addEventListener('online', () => {
+        reconnectIfNeeded();
+        sendPing(WAKE_PONG_TIMEOUT_MS);
+    });
 
     const messagesContainer = document.getElementById('chat-messages-container');
     const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
@@ -2062,21 +2130,68 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // The DM list is most-recent first, under the user's own row, like the
+    // server's initial render.
+    function moveDmRowToTop(row) {
+        if (!row || !row.parentNode) return;
+        const selfRow = document.getElementById('dm-self-item');
+        if (selfRow && selfRow.parentNode === row.parentNode) {
+            if (selfRow.nextElementSibling !== row) selfRow.after(row);
+        } else if (row.parentNode.firstElementChild !== row) {
+            row.parentNode.prepend(row);
+        }
+    }
+
     document.body.addEventListener('htmx:oobBeforeSwap', function(evt) {
-        // DM notifications and the reconnect sidebar catch-up ride a sidebar
-        // row along with the unread badge, so a client whose sidebar predates
-        // the conversation can materialize it. Skip the append when the row
-        // is already present.
         const frag = evt.detail.fragment;
         if (!frag || !frag.querySelector) return;
+
+        // An append tagged for another conversation than the one on screen:
+        // the socket was still subscribed to the previous pane, or a backfill
+        // came back after the user switched. Drop it.
+        const target = evt.detail.target;
+        if (target && target.id === 'message-list' && frag.getAttribute) {
+            const fragConv = frag.getAttribute('data-conversation-id');
+            const pane = target.closest('[data-conversation-id]');
+            if (fragConv && pane && pane.dataset.conversationId !== fragConv) {
+                evt.preventDefault();
+                return;
+            }
+        }
+
+        // DM notifications and the reconnect sidebar catch-up ride a sidebar
+        // row along with the unread badge, so a client whose sidebar predates
+        // the conversation can materialize it. When the row is already there,
+        // move it to the top instead of appending a second one; a new row is
+        // moved up once it lands (htmx:oobAfterSwap).
         const row = frag.matches && frag.matches('li[id^="dm-item-"]')
             ? frag
             : frag.querySelector('li[id^="dm-item-"]');
-        if (row && document.getElementById(row.id)) evt.preventDefault();
+        if (!row) return;
+        const existing = document.getElementById(row.id);
+        if (existing) {
+            moveDmRowToTop(existing);
+            evt.preventDefault();
+        } else {
+            evt.detail.d8NewDmRowId = row.id;
+        }
     });
 
     document.body.addEventListener('htmx:oobAfterSwap', function(evt) {
         const target = evt.detail.target; // The element that was swapped.
+
+        if (evt.detail.d8NewDmRowId) {
+            moveDmRowToTop(document.getElementById(evt.detail.d8NewDmRowId));
+        }
+        // A message just landed in the open DM (sent or received): it is now
+        // the most recent conversation.
+        if (target && target.id === 'message-list') {
+            const pane = target.closest('[data-conversation-id]');
+            const convId = pane && pane.dataset.conversationId;
+            if (convId && convId.startsWith('dm_')) {
+                moveDmRowToTop(document.getElementById(`dm-item-${convId}`));
+            }
+        }
 
         // --- Re-initialize components for edited messages received via WebSocket ---
         if (target && target.classList && target.classList.contains('message-container')) {
@@ -2200,6 +2315,17 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = JSON.parse(event.detail.message);
             if (typeof data === 'object' && data.type) {
                 if (data.type === 'typing_update') { updateTypingIndicator(data.typists); return; }
+
+                if (data.type === 'pong') return;
+
+                // The socket now follows this conversation: fetch whatever was
+                // posted between the pane's render and the subscribe.
+                if (data.type === 'subscribed') {
+                    if (data.conversation_id === activeConversationId()) {
+                        backfillMessages(data.conversation_id);
+                    }
+                    return;
+                }
 
                 if (data.type === 'presence_update') {
                     const { user_id, status_class } = data;

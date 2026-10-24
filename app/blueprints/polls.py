@@ -4,7 +4,7 @@ from flask import Blueprint, g, make_response, render_template, request
 from app.access import user_can_access_message, user_can_post
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
-from app.htmx_oob import oob_to_selector
+from app.htmx_oob import message_list_append_oob
 from app.models import Conversation, Message, Poll, PollOption, Vote, db
 from app.routes import (
     date_separator_oob,
@@ -114,8 +114,8 @@ def create_poll():
         Message=Message,
     )
     broadcast_html = date_separator_oob(
-        poll_message, previous_visible_message(poll_message)
-    ) + oob_to_selector("beforeend", "#message-list", new_message_html)
+        poll_message, previous_visible_message(poll_message), conv_id_str
+    ) + message_list_append_oob(conv_id_str, new_message_html)
 
     # Broadcast the new poll to everyone in the channel. Include api_data so
     # mobile clients receive the poll as a structured new_message instead of raw

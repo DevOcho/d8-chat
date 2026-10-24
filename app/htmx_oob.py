@@ -59,3 +59,21 @@ def oob_to_selector(swap, target_selector, inner_html=""):
     _check_swap(swap)
     safe_sel = str(escape(str(target_selector)))
     return f'<div hx-swap-oob="{swap}:{safe_sel}">{inner_html}</div>'
+
+
+def message_list_append_oob(conv_id_str, inner_html):
+    """Append inner_html to the open conversation's #message-list — but only
+    if that conversation is ``conv_id_str``.
+
+    The wrapper carries the conversation id, and the client drops the append
+    (htmx:oobBeforeSwap in chat.js) when the pane on screen is a different
+    conversation: a socket stays subscribed to the previous conversation until
+    its next subscribe frame lands, and a reconnect backfill can come back
+    after the user moved on, so an unchecked append could drop one
+    conversation's message into another's pane.
+    """
+    safe_conv = str(escape(str(conv_id_str)))
+    return (
+        f'<div hx-swap-oob="beforeend:#message-list" '
+        f'data-conversation-id="{safe_conv}">{inner_html}</div>'
+    )

@@ -38,6 +38,7 @@ const HOOKS = {
         'id="link-{{ conv_id_str }}"',
         'id="unread-badge-{{ conv_id_str }}"',
         'id="dm-item-{{ conv_id_str }}"',
+        'id="dm-self-item"',
         'id="status-dot-{{ g.user.id }}"',
         'id="status-dot-{{ user.id }}"',
         'class="incident-time"',
@@ -56,11 +57,13 @@ const HOOKS = {
         'id="message-list"',
         'id="message-list-bottom"',
         "partials/date_separator.html",
+        'newer-message-loader',
     ],
     'app/templates/partials/dm_messages.html': [
         'data-conversation-id=',
         'id="message-list"',
         'id="message-list-bottom"',
+        'newer-message-loader',
     ],
     'app/templates/partials/message.html': [
         'message-container',
@@ -124,12 +127,20 @@ const HOOKS = {
     ],
     'app/templates/partials/mention_results.html': ['mention-suggestion-item', 'data-username="{{ user.username }}"'],
     'app/templates/partials/incident_card.html': ['id="incident-card-{{ incident.id }}"', 'incident-time'],
-    'app/htmx_oob.py': ['f\'<div hx-swap-oob="{swap}:{safe_sel}">{inner_html}</div>\''],
+    'app/htmx_oob.py': [
+        'f\'<div hx-swap-oob="{swap}:{safe_sel}">{inner_html}</div>\'',
+        'f\'<div hx-swap-oob="beforeend:#message-list" \'',
+        'f\'data-conversation-id="{safe_conv}">{inner_html}</div>\'',
+    ],
     // Endpoints the scripts call by literal path.
     'app/routes.py': [
         '"/chat/conversations/<conv_id_str>/messages/since/<int:last_id>"',
         '"/chat/sidebar/unreads"',
         '"X-D8-Catchup"',
+        // WS replies chat.js handles: the heartbeat and the subscribe ack.
+        'if event_type == "ping":',
+        '{"type": "pong"}',
+        '{"type": "subscribed", "conversation_id": conv_id_str}',
     ],
     'app/blueprints/messages.py': [
         '"/chat/conversations/<conv_id_str>/messages", methods=["POST"]',

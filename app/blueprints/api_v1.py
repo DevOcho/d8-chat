@@ -20,9 +20,13 @@ from playhouse.shortcuts import model_to_dict
 from werkzeug.utils import secure_filename
 
 from app import limiter, login_username_key
-from app.access import user_can_access_message, user_has_conversation_access
+from app.access import (
+    user_can_access_message,
+    user_can_post,
+    user_has_conversation_access,
+)
 from app.conversation_id import parse_conversation_id
-from app.htmx_oob import oob_to_selector
+from app.htmx_oob import message_list_append_oob
 from app.models import (
     Channel,
     ChannelMember,
@@ -1167,6 +1171,8 @@ def create_poll(conv_id_str):
 
     if not user_has_conversation_access(g.api_user, parsed):
         return jsonify({"error": "Access denied"}), 403
+    if not user_can_post(g.api_user, parsed):
+        return jsonify({"error": "You can't post to this conversation"}), 403
 
     data = request.get_json() or {}
     question = data.get("question", "").strip()
@@ -1196,7 +1202,7 @@ def create_poll(conv_id_str):
         attachments_map=attachments_map,
         Message=Message,
     )
-    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
+    broadcast_html = message_list_append_oob(conv_id_str, new_message_html)
 
     api_data = {"type": "new_message", "data": message_data}
     chat_manager.broadcast(
@@ -1576,7 +1582,7 @@ def internal_notify():
         attachments_map=attachments_map,
         Message=Message,
     )
-    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
+    broadcast_html = message_list_append_oob(conv_id_str, new_message_html)
     api_data = {"type": "new_message", "data": message_data}
     chat_manager.broadcast(
         conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}

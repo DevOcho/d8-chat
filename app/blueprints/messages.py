@@ -701,9 +701,9 @@ def forward_message(message_id):
     )
 
     from app.blueprints.api_v1 import serialize_message
-    from app.htmx_oob import oob_to_selector
+    from app.htmx_oob import message_list_append_oob
 
-    broadcast_html = oob_to_selector("beforeend", "#message-list", new_message_html)
+    broadcast_html = message_list_append_oob(target_conv_id_str, new_message_html)
     api_data = {
         "type": "new_message",
         "data": serialize_message(new_message, reactions_map, attachments_map),

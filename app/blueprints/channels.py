@@ -15,7 +15,7 @@ from peewee import JOIN, IntegrityError
 from app import external_url_for
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
-from app.htmx_oob import oob_by_id, oob_to_selector
+from app.htmx_oob import message_list_append_oob, oob_by_id
 from app.models import (
     Channel,
     ChannelMember,
@@ -389,8 +389,8 @@ def add_channel_member(channel_id):
     # Render and broadcast the new system message
     message_html = render_template("partials/message.html", message=join_message)
     broadcast_html = date_separator_oob(
-        join_message, previous_visible_message(join_message)
-    ) + oob_to_selector("beforeend", "#message-list", message_html)
+        join_message, previous_visible_message(join_message), f"channel_{channel.id}"
+    ) + message_list_append_oob(f"channel_{channel.id}", message_html)
     chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     UserConversationStatus.get_or_create(
@@ -527,8 +527,10 @@ def remove_channel_member(channel_id, user_id_to_remove):
         # Render and broadcast the new system message
         message_html = render_template("partials/message.html", message=removed_message)
         broadcast_html = date_separator_oob(
-            removed_message, previous_visible_message(removed_message)
-        ) + oob_to_selector("beforeend", "#message-list", message_html)
+            removed_message,
+            previous_visible_message(removed_message),
+            f"channel_{channel.id}",
+        ) + message_list_append_oob(f"channel_{channel.id}", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
         if chat_manager.local_sockets(user_id_to_remove):
@@ -746,8 +748,10 @@ def leave_channel(channel_id):
         # Render and broadcast the new system message
         message_html = render_template("partials/message.html", message=leave_message)
         broadcast_html = date_separator_oob(
-            leave_message, previous_visible_message(leave_message)
-        ) + oob_to_selector("beforeend", "#message-list", message_html)
+            leave_message,
+            previous_visible_message(leave_message),
+            f"channel_{channel.id}",
+        ) + message_list_append_oob(f"channel_{channel.id}", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     remove_from_list_html = oob_by_id(f"channel-item-{int(channel_id)}", "delete")
@@ -1001,8 +1005,10 @@ def join_channel(channel_id):
         # Render and broadcast the new system message
         message_html = render_template("partials/message.html", message=join_message)
         broadcast_html = date_separator_oob(
-            join_message, previous_visible_message(join_message)
-        ) + oob_to_selector("beforeend", "#message-list", message_html)
+            join_message,
+            previous_visible_message(join_message),
+            f"channel_{channel.id}",
+        ) + message_list_append_oob(f"channel_{channel.id}", message_html)
         chat_manager.broadcast(f"channel_{channel.id}", broadcast_html)
 
     new_sidebar_item_html = render_template(

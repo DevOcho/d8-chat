@@ -1,6 +1,8 @@
 <div hx-swap-oob="beforeend:#dm-list">
-    {# The id lets the client (htmx:oobBeforeSwap in chat.js) drop this append
-       when the row is already in its sidebar. #}
+    {# The id lets the client (htmx:oobBeforeSwap in chat.js) move an existing
+       row to the top instead of adding a second one, and move a new row up
+       under the user's own row once it lands: the sidebar is most-recent
+       first. #}
     <li class="mt-1" id="dm-item-{{ conv_id_str }}">
         <a href="#"
            class="sidebar-item-link"

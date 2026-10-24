@@ -102,14 +102,21 @@ export function oobToSelector(swap, selector, inner) {
     return `<div hx-swap-oob="${swap}:${esc(selector)}">${inner}</div>`;
 }
 
+// app/htmx_oob.py message_list_append_oob(); convIdStr null = an untagged
+// append from a server that predates the tag.
+export function messageListAppend(convIdStr, inner) {
+    if (convIdStr === null) return oobToSelector('beforeend', '#message-list', inner);
+    return `<div hx-swap-oob="beforeend:#message-list" data-conversation-id="${esc(convIdStr)}">${inner}</div>`;
+}
+
 /**
  * The realtime frame routes._broadcast_regular_message sends a web client:
  * date_separator_oob() (only when the message opens a new day) followed by the
- * message appended to #message-list.
+ * message appended to #message-list, both tagged with their conversation.
  */
-export function messageFrame(m, { dividerLabel = null } = {}) {
-    const divider = dividerLabel ? oobToSelector('beforeend', '#message-list', dateSeparator(dividerLabel)) : '';
-    return divider + oobToSelector('beforeend', '#message-list', message(m));
+export function messageFrame(m, { dividerLabel = null, convIdStr = 'channel_1' } = {}) {
+    const divider = dividerLabel ? messageListAppend(convIdStr, dateSeparator(dividerLabel)) : '';
+    return divider + messageListAppend(convIdStr, message(m));
 }
 
 /**
@@ -482,7 +489,7 @@ export function chatPage({
 ${channelItems}
         </ul>
         <ul id="dm-list" class="list-unstyled">
-            <li class="mt-1">
+            <li class="mt-1" id="dm-self-item">
                 <a href="#" class="sidebar-item-link" hx-get="/chat/dm/${user.id}" hx-target="#chat-messages-container">
                     <div class="d-flex justify-content-between align-items-center">
                         <div class="d-flex align-items-center">

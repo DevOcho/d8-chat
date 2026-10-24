@@ -148,7 +148,7 @@
         <ul id="dm-list" class="list-unstyled">
             <!-- Current User (Self DM) -->
             {% set self_conv_id_str = "dm_" ~ g.user.id ~ "_" ~ g.user.id %}
-            <li class="mt-1">
+            <li class="mt-1" id="dm-self-item">
                 <a href="#"
                    class="sidebar-item-link"
                    hx-get="{{ url_for('dms.get_dm_chat', other_user_id=g.user.id) }}"

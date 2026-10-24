@@ -418,6 +418,14 @@ class ChatManager:
             except Exception:  # pylint: disable=broad-exception-caught
                 pass
 
+    def send_direct(self, ws, message):
+        """Reply on one socket (no pub/sub): heartbeats and subscribe acks.
+
+        Routed through _send_message so the per-connection send lock and the
+        disconnect handling apply.
+        """
+        self._send_message(ws, message)
+
     def send_local(self, user_id, message):
         """Send to all of a user's sockets on THIS worker (no pub/sub).
 

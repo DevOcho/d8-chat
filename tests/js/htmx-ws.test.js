@@ -2,7 +2,8 @@
 // its D8-PATCHes:
 //   1. reconnect on any abnormal close code, never on 1000/1001/1008;
 //   2. reset the backoff only after a socket has stayed open for 10s;
-//   3. window.d8WsReconnectNow() resets the backoff and reconnects unless OPEN.
+//   3. window.d8WsReconnectNow() resets the backoff and reconnects unless OPEN
+//      (or OPEN too, when forced by chat.js's heartbeat).
 //
 // Loaded with htmx alone (no chat.js) so only the extension's behaviour is
 // under test. Math.random is pinned to 0.5, so the full-jitter reconnect delay
@@ -186,6 +187,27 @@ describe('htmx-ws: window.d8WsReconnectNow (D8-PATCH 3)', () => {
         const env = await wsPage();
         await env.openSocket();
         env.window.d8WsReconnectNow();
+        expect(env.sockets).toHaveLength(1);
+        expect(env.socket.clientClose).toBeNull();
+    });
+
+    it('forced, replaces an OPEN socket (a half-open one the heartbeat caught)', async () => {
+        const env = await wsPage();
+        await env.openSocket();
+        const stale = env.socket;
+        env.window.d8WsReconnectNow(true);
+        expect(stale.clientClose).not.toBeNull();
+        expect(env.sockets).toHaveLength(2);
+        expect(env.socket.readyState).toBe(0);
+        // The replaced socket finishing its close doesn't schedule another one.
+        stale.completeClose(1006);
+        await env.tick(70000);
+        expect(env.sockets).toHaveLength(2);
+    });
+
+    it('forced, still leaves a CONNECTING socket alone', async () => {
+        const env = await wsPage();
+        env.window.d8WsReconnectNow(true);
         expect(env.sockets).toHaveLength(1);
         expect(env.socket.clientClose).toBeNull();
     });

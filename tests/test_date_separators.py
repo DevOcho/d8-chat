@@ -38,16 +38,17 @@ class TestDateSeparatorOob:
         with app.app_context():
             prev = _sep_msg(self.BASE)
             msg = _sep_msg(self.BASE + datetime.timedelta(hours=6))
-            assert date_separator_oob(msg, prev) == ""
+            assert date_separator_oob(msg, prev, "channel_1") == ""
 
     def test_new_day_emits_separator(self, app):
         with app.app_context():
             # 30/31 days back so the label is a real date, not Today/Yesterday.
             older = utc_now() - datetime.timedelta(days=31)
             newer = utc_now() - datetime.timedelta(days=30)
-            html = date_separator_oob(_sep_msg(newer), _sep_msg(older))
+            html = date_separator_oob(_sep_msg(newer), _sep_msg(older), "channel_1")
             assert "date-separator" in html
             assert 'hx-swap-oob="beforeend:#message-list"' in html
+            assert 'data-conversation-id="channel_1"' in html
             assert newer.strftime("%B") in html
             assert str(newer.day) in html
 
@@ -55,22 +56,24 @@ class TestDateSeparatorOob:
         with app.app_context():
             prev = _sep_msg(datetime.datetime(2026, 7, 16, 23, 59, 30))
             msg = _sep_msg(datetime.datetime(2026, 7, 17, 0, 0, 10))
-            assert "date-separator" in date_separator_oob(msg, prev)
+            assert "date-separator" in date_separator_oob(msg, prev, "channel_1")
 
     def test_no_previous_message_emits_separator(self, app):
         with app.app_context():
-            assert "date-separator" in date_separator_oob(_sep_msg(self.BASE), None)
+            assert "date-separator" in date_separator_oob(
+                _sep_msg(self.BASE), None, "channel_1"
+            )
 
     def test_thread_reply_emits_nothing(self, app):
         with app.app_context():
             msg = _sep_msg(self.BASE, reply_type="thread")
             # Not rendered inline, so it must not drag a divider into the list.
-            assert date_separator_oob(msg, None) == ""
+            assert date_separator_oob(msg, None, "channel_1") == ""
 
     def test_today_label_for_a_message_sent_today(self, app):
         with app.app_context():
             prev = _sep_msg(utc_now() - datetime.timedelta(days=9))
-            assert "Today" in date_separator_oob(_sep_msg(utc_now()), prev)
+            assert "Today" in date_separator_oob(_sep_msg(utc_now()), prev, "channel_1")
 
 
 @pytest.fixture
