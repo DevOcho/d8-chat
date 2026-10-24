@@ -20,7 +20,7 @@ from PIL import Image, ImageOps
 from playhouse.shortcuts import model_to_dict
 from werkzeug.utils import secure_filename
 
-from app import limiter, login_username_key
+from app import limiter, login_rate_limit, login_username_key, login_username_rate_limit
 from app.access import (
     user_can_access_message,
     user_can_post,
@@ -453,8 +453,8 @@ def get_app_config():
 
 
 @api_v1_bp.route("/auth/login", methods=["POST"])
-@limiter.limit("5 per minute; 50 per hour")
-@limiter.limit("10 per minute; 50 per hour", key_func=login_username_key)
+@limiter.limit(login_rate_limit)
+@limiter.limit(login_username_rate_limit, key_func=login_username_key)
 def api_login():
     """Standard username/password login for the API."""
     data = request.get_json() or {}

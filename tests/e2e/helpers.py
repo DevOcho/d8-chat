@@ -76,7 +76,8 @@ MAX_LOGIN_BACKOFF_S = 65
 def submit_login_form(page: Page, username: str, password: str):
     """Fill and submit the login form on ``/``; returns the POST response.
 
-    ``POST /login`` is rate limited to 5/min and 50/hour per client IP. The
+    ``POST /login`` is rate limited per client IP (5/min and 50/hour by
+    default; the local cluster sets more, see ``LOGIN_RATE_LIMIT``). The
     fixtures log each account in once per session to stay under that, but
     back-to-back runs (or someone logging in by hand) can still trip the
     per-minute window. Then we wait out the server's ``Retry-After`` once —
@@ -104,8 +105,10 @@ def submit_login_form(page: Page, username: str, password: str):
         )
         page.wait_for_timeout((retry_after + 1) * 1000)
     raise AssertionError(
-        f"Login was rate-limited (HTTP 429, Retry-After {retry_after}s). /login "
-        "allows 5/min and 50/hour per IP; wait for the window to reset and re-run."
+        f"Login was rate-limited (HTTP 429, Retry-After {retry_after}s). Wait for "
+        "the window to reset and re-run, or raise LOGIN_RATE_LIMIT / "
+        "LOGIN_USERNAME_RATE_LIMIT for this environment (the local cluster's "
+        "are in .auto/deployment.yaml; apply with `auto restart d8-chat`)."
     )
 
 

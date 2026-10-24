@@ -28,6 +28,7 @@ from flask_limiter.util import get_remote_address
 from flask_login import LoginManager
 from flask_sock import Sock
 from flask_wtf.csrf import CSRFProtect
+from limits import parse_many
 from markupsafe import Markup, escape
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -84,6 +85,16 @@ def login_username_key():
     if username:
         return f"login_user:{username.strip().lower()}"
     return get_remote_address()
+
+
+def login_rate_limit():
+    """Per-IP limit on password logins (config LOGIN_RATE_LIMIT)."""
+    return current_app.config["LOGIN_RATE_LIMIT"]
+
+
+def login_username_rate_limit():
+    """Per-username limit on password logins (LOGIN_USERNAME_RATE_LIMIT)."""
+    return current_app.config["LOGIN_USERNAME_RATE_LIMIT"]
 
 
 @login_manager.user_loader
@@ -302,6 +313,14 @@ def _validate_config(app):
         raise RuntimeError(
             f"CSP_MODE must be one of {', '.join(CSP_MODES)}, not {cfg.get('CSP_MODE')!r}."
         )
+    for key in ("LOGIN_RATE_LIMIT", "LOGIN_USERNAME_RATE_LIMIT"):
+        try:
+            parse_many(cfg[key])
+        except (KeyError, ValueError) as exc:
+            raise RuntimeError(
+                f"{key} must be a rate limit like '5 per minute; 50 per hour', "
+                f"not {cfg.get(key)!r}."
+            ) from exc
 
     # SECRET_KEY length is enforced in config.py at import time, but we double-
     # check here in case a caller passed a custom config_class.

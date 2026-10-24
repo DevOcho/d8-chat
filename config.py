@@ -90,6 +90,15 @@ class Config:
     # off. Switching back to "report" is the rollback for a bad enforcement.
     CSP_MODE = os.environ.get("CSP_MODE", "report").strip().lower()
 
+    # Password-login rate limits (web /login and /api/v1/auth/login), per
+    # client IP and per submitted username. Flask-Limiter syntax. Loosen them
+    # only where brute force isn't a concern: the local cluster sets higher
+    # ones so e2e runs, which all log in from one IP, don't lock it out.
+    LOGIN_RATE_LIMIT = os.environ.get("LOGIN_RATE_LIMIT", "5 per minute; 50 per hour")
+    LOGIN_USERNAME_RATE_LIMIT = os.environ.get(
+        "LOGIN_USERNAME_RATE_LIMIT", "10 per minute; 50 per hour"
+    )
+
     # Valkey Config for message broker
     VALKEY_URL = os.environ.get("VALKEY_URL")
 

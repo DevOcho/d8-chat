@@ -13,7 +13,13 @@ from flask import (
 )
 from flask_login import login_user, logout_user
 
-from app import external_url_for, limiter, login_username_key
+from app import (
+    external_url_for,
+    limiter,
+    login_rate_limit,
+    login_username_key,
+    login_username_rate_limit,
+)
 from app.auth_tokens import make_password_reset_token, verify_password_reset_token
 from app.models import User
 from app.password_policy import validate_password
@@ -34,8 +40,8 @@ def login_page():
 
 
 @auth_bp.route("/login", methods=["POST"])
-@limiter.limit("5 per minute; 50 per hour")
-@limiter.limit("10 per minute; 50 per hour", key_func=login_username_key)
+@limiter.limit(login_rate_limit)
+@limiter.limit(login_username_rate_limit, key_func=login_username_key)
 def login():
     """Handles username/password login form submission."""
     username = request.form.get("username")

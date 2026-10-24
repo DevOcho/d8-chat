@@ -51,6 +51,13 @@ spec:
         # environments stay on "report" until their soak window is clean.
         - name: CSP_MODE
           value: "enforce"
+        # Every e2e run logs in from this machine's one IP (and as "admin"),
+        # so the production login limits (5/min, 50/hour) lock the suite out
+        # after a few runs. Local cluster only; nothing else sets these.
+        - name: LOGIN_RATE_LIMIT
+          value: "60 per minute; 1000 per hour"
+        - name: LOGIN_USERNAME_RATE_LIMIT
+          value: "60 per minute; 1000 per hour"
         - name: REQUESTS_CA_BUNDLE
           value: "./root_ca.crt"
         - name: POSTGRES_USER

@@ -117,8 +117,12 @@ On a DB seeded with `auto seed`, the admin password is `d8_admin`.
 
 ### Logins are rationed (rate limit)
 
-`POST /login` is rate limited to **5/min and 50/hour per client IP** — and
-every browser on your machine shares that IP through the ingress. So the
+`POST /login` is rate limited per client IP and per username — **5/min and
+50/hour** by default, and every browser on your machine shares that IP through
+the ingress. The local cluster loosens both to 60/min and 1000/hour
+(`LOGIN_RATE_LIMIT` / `LOGIN_USERNAME_RATE_LIMIT` in `.auto/deployment.yaml`),
+so repeated local runs don't lock you out; any other target keeps the
+defaults. Either way the
 suite logs in through the form only **5 times per run**: the admin and two
 throwaway users (`e2e_alice_<hex>`, `e2e_bob_<hex>`, created once per session
 through the admin endpoint) each log in once, and every later browser context
