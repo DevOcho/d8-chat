@@ -260,27 +260,33 @@ describe('sending', () => {
         expect(messagePosts(env)).toEqual([]);
     });
 
-    it('clears the composer after the server accepts the message', async () => {
+    it('clears the composer as soon as the message is sent', async () => {
         const env = await composerEnv();
         await typeRich(env, 'hello');
         key(env, env.editor, 'Enter');
         await env.flush();
-        messagePosts(env)[0].respond(204, '');
-        await env.tick(50);
+        // Before the server has answered.
         expect(env.editor.innerHTML).toBe('');
         expect(env.hidden.value).toBe('');
+        messagePosts(env)[0].respond(200, '');
+        await env.tick(50);
+        expect(env.editor.innerHTML).toBe('');
         expect(env.toasts).toEqual([]);
     });
 
-    it('keeps the draft and warns when the send fails', async () => {
+    it('keeps a failed message on screen with Retry instead of losing it', async () => {
         const env = await composerEnv();
         await typeRich(env, 'important');
         key(env, env.editor, 'Enter');
         await env.flush();
         messagePosts(env)[0].respond(500, 'boom');
         await env.tick(50);
-        expect(env.editor.textContent).toBe('important');
-        expect(env.toasts.map((t) => t.title)).toContain('Message not sent');
+        const pending = env.$('#message-list .pending-message');
+        expect(pending.classList.contains('failed')).toBe(true);
+        expect(pending.querySelector('.pending-text').textContent).toBe('important');
+        expect(env.$$('[data-pending-action]').map((b) => b.textContent)).toEqual(['Retry', 'Edit', 'Discard']);
+        // No raw "boom" toast on top of the inline state.
+        expect(env.toasts).toEqual([]);
     });
 
     it('refuses to send when no conversation is open', async () => {

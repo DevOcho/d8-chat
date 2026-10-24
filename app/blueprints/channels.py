@@ -15,7 +15,7 @@ from peewee import JOIN, IntegrityError
 from app import external_url_for
 from app.chat_manager import chat_manager
 from app.conversation_id import parse_conversation_id
-from app.htmx_oob import message_list_append_oob, oob_by_id
+from app.htmx_oob import message_list_append_oob, oob_by_id, oob_self
 from app.models import (
     Channel,
     ChannelMember,
@@ -119,7 +119,9 @@ def get_channel_chat(channel_id):
         members_count=members_count,
         current_user_membership=current_user_membership,
     )
-    header_html = oob_by_id("chat-header-container", "true", header_html_content)
+    # The header partial swaps itself (hx-swap-oob on its root); wrapping it
+    # nested a second #chat-header-container inside the first.
+    header_html = header_html_content
 
     messages_html = render_template(
         "partials/channel_messages.html",
@@ -141,11 +143,10 @@ def get_channel_chat(channel_id):
         link_text=f"# {channel.name}",
     )
 
-    # Also render the default chat input to ensure it's present.
-    chat_input_html = render_template("partials/chat_input_default.html")
-    # Wrap it in a container with the correct ID for the OOB swap.
-    chat_input_oob_html = oob_by_id(
-        "chat-input-container", "outerHTML", chat_input_html
+    # Also render the default chat input to ensure it's present. (The client
+    # keeps its own composer when it's already the default one.)
+    chat_input_oob_html = oob_self(
+        "chat-input-container", render_template("partials/chat_input_default.html")
     )
 
     # Check for other unreads and add the result to the response
@@ -679,7 +680,7 @@ def create_channel():
         PAGE_SIZE=PAGE_SIZE,
     )
 
-    header_swap_html = oob_by_id("chat-header-container", "innerHTML", header_html)
+    header_swap_html = header_html  # swaps itself, see get_channel_chat
     messages_swap_html = oob_by_id(
         "chat-messages-container", "innerHTML", messages_html
     )

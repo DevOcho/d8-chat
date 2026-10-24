@@ -219,7 +219,7 @@ def test_web_send_accepts_own_upload_and_local_quote(logged_in_client, world):
             "attachment_file_ids": str(mine.id),
         },
     )
-    assert res.status_code == 204
+    assert res.status_code == 200
     sent = _my_latest()
     assert sent.quoted_message_id == local.id
     assert [f.id for f in sent.attachments] == [mine.id]
@@ -244,7 +244,7 @@ def test_thread_reply_to_a_reply_joins_the_thread(logged_in_client, world):
             "reply_type": "thread",
         },
     )
-    assert res.status_code == 204
+    assert res.status_code == 200
     assert _my_latest().parent_message_id == top.id
 
 

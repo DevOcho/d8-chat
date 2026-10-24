@@ -172,7 +172,7 @@ def test_live_broadcast_and_catch_up_are_tagged(app, logged_in_client, mocker):
     res = logged_in_client.post(
         f"/chat/conversations/{conv_id}/messages", data={"chat_message": "hi"}
     )
-    assert res.status_code == 204
+    assert res.status_code == 200
     payload = broadcast.call_args.args[1]
     assert f'data-conversation-id="{conv_id}"' in payload["_raw_html"]
 

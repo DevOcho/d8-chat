@@ -117,11 +117,10 @@ describe('page frame', () => {
         const env = await pagerEnv();
         await env.openSocket();
         await env.frame(pageFrame(incident()));
-        expect(env.document.title).toBe('D8 - Chat');
         await env.tick(1000);
         expect(env.document.title).toBe('🚨 PAGE: api.devocho.com');
         await env.tick(1000);
-        expect(env.document.title).toBe('D8 - Chat');
+        expect(env.document.title).toBe(env.eval('TitleManager.current()'));
         await env.tick(1000);
         expect(env.document.title).toBe('🚨 PAGE: api.devocho.com');
     });
@@ -197,10 +196,10 @@ describe('page_cleared frame', () => {
         expect(sirenOn(env)).toBe(false);
         const [ctx] = env.state.audioContexts;
         expect(ctx.oscillators.every((o) => o.stopped && o.disconnect.mock.calls.length === 1)).toBe(true);
-        expect(env.document.title).toBe('D8 - Chat');
+        expect(env.document.title).toBe(env.eval('TitleManager.current()'));
         expect(env.notifications[0].closed).toBe(true);
         await env.tick(5000);
-        expect(env.document.title).toBe('D8 - Chat');
+        expect(env.document.title).toBe(env.eval('TitleManager.current()'));
     });
 
     it('ignores a page_cleared for an incident that is not ringing', async () => {

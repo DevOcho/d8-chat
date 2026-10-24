@@ -77,3 +77,17 @@ def message_list_append_oob(conv_id_str, inner_html):
         f'<div hx-swap-oob="beforeend:#message-list" '
         f'data-conversation-id="{safe_conv}">{inner_html}</div>'
     )
+
+
+def oob_self(element_id, html):
+    """Mark the root of ``html`` (the element with ``element_id``) as an OOB
+    swap of itself.
+
+    For partials whose root already carries the id they replace, such as the
+    composer. Wrapping them with ``oob_by_id`` instead left a second element
+    with the same id nested inside the first after every swap.
+    """
+    marker = f'id="{escape(str(element_id))}"'
+    if marker not in html:
+        raise ValueError(f"No element with id {element_id!r} in the fragment")
+    return html.replace(marker, f'{marker} hx-swap-oob="true"', 1)

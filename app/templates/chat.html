@@ -59,7 +59,10 @@
         {% endif %}
         <hr class="text-secondary">
         <!-- Activity panel -->
-        <ul id="activity-links" class="list-unstyled mb-4">
+        <ul id="activity-links"
+            class="list-unstyled mb-4"
+            hx-sync="#chat-messages-container:replace"
+            hx-indicator="#pane-progress">
             <!-- Unread messages -->
             <li>
                 <a href="#"
@@ -109,7 +112,10 @@
                 </button>
             </div>
         </div>
-        <ul id="channel-list" class="list-unstyled">
+        <ul id="channel-list"
+            class="list-unstyled"
+            hx-sync="#chat-messages-container:replace"
+            hx-indicator="#pane-progress">
             {% for channel in channels %}
                 {% set conv_id_str = "channel_" ~ channel.id %}
                 {% set info = unread_info.get(conv_id_str, {'mentions': 0, 'has_unread': False}) %}
@@ -145,7 +151,10 @@
                 <i class="bi bi-plus-square"></i>
             </button>
         </div>
-        <ul id="dm-list" class="list-unstyled">
+        <ul id="dm-list"
+            class="list-unstyled"
+            hx-sync="#chat-messages-container:replace"
+            hx-indicator="#pane-progress">
             <!-- Current User (Self DM) -->
             {% set self_conv_id_str = "dm_" ~ g.user.id ~ "_" ~ g.user.id %}
             <li class="mt-1" id="dm-self-item">
@@ -235,6 +244,7 @@
           data-send-on-enter="{{ 'true' if g.user.send_on_enter else 'false' }}"
           data-current-user-id="{{ g.user.id }}"
           data-current-user-username="{{ g.user.username }}"
+          data-current-user-display-name="{{ g.user.display_name or g.user.username }}"
           data-current-user-status="{{ g.user.presence_status }}"
           data-activity-url="{{ url_for('profile.update_activity') }}">
         <!-- Global Search Bar -->
@@ -259,6 +269,9 @@
                 </form>
             </div>
         </div>
+        {# A thin bar that appears only if opening a conversation takes more
+           than a moment (hx-indicator on the sidebar lists). #}
+        <div id="pane-progress" class="pane-progress" aria-hidden="true"></div>
         <!-- Connection Status Bar -->
         <div id="connection-status-bar"
              class="p-2 bg-warning text-dark text-center"
@@ -291,12 +304,15 @@
                     <span class="visually-hidden">Loading your space...</span>
                 </div>
             </div>
-            <!-- "Jump to Bottom" button is now correctly associated with the messages container -->
+        </div>
+        {# Outside the scroller: its contents are replaced on every pane load,
+           which used to take this button with them. #}
+        <div class="jump-to-latest-anchor">
             <button id="jump-to-bottom-btn"
-                    class="btn btn-primary btn-sm rounded-pill position-absolute bottom-0 start-50 translate-middle-x mb-3"
-                    style="display: none;
-                           z-index: 10">
-                <i class="bi bi-arrow-down"></i> Jump to Latest
+                    type="button"
+                    class="btn btn-primary btn-sm rounded-pill shadow"
+                    style="display: none">
+                <span class="jump-label">New messages</span> <i class="bi bi-arrow-down" aria-hidden="true"></i>
             </button>
         </div>
         <!-- Message input form -->

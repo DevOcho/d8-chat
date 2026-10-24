@@ -108,6 +108,8 @@
          ws-send
          hx-trigger="typing-event"
          style="display: none"></div>
+    {# Inside the root, so it travels with the composer: when a conversation
+       switch keeps the current composer (chat.js drops the OOB swap), it must
+       not run and bind a second editor to the form on screen. #}
+    <script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
 </div>
-{# This script triggers our main Editor object in chat.js to initialize these new elements #}
-<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>

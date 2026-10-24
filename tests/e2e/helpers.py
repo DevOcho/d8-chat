@@ -160,8 +160,9 @@ def wait_for_chat_ready(page: Page, user_id: int | None = None) -> None:
     expect(
         page.locator("#chat-messages-container > div[data-conversation-id]")
     ).to_be_attached(timeout=REALTIME_TIMEOUT)
-    # On load the composer arrives twice — its own placeholder's hx-get and the
-    # first conversation's OOB swap — so wait for both before using it.
+    # On load the composer comes from its placeholder's hx-get (the first
+    # conversation's OOB copy is dropped when one is already there, or finds
+    # no target before it), so wait for the placeholder to go.
     expect(page.locator("main div[hx-get='/chat/input/default']")).to_have_count(
         0, timeout=REALTIME_TIMEOUT
     )
@@ -213,24 +214,25 @@ def unread_badge(page: Page, conv_id: str) -> Locator:
 BOLD = re.compile(r"\bfw-bold\b")
 
 
-# Attribute put on the current conversation pane and composer before a
-# navigation, so waits can tell the incoming ones from what's already there
-# (re-opening the conversation that's open re-renders both).
+# Attribute put on the current conversation pane before a navigation, so
+# waits can tell the incoming one from what's already there (re-opening the
+# conversation that's open re-renders it). The composer isn't tagged: chat.js
+# keeps the default composer across conversation switches.
 STALE = "data-e2e-stale"
 
 
 def mark_view_stale(page: Page) -> None:
-    """Tag the open conversation pane and composer as about to be replaced."""
+    """Tag the open conversation pane as about to be replaced."""
     page.evaluate(
         """(attr) => document.querySelectorAll(
-            '#chat-messages-container > div[data-conversation-id], #chat-input-container'
+            '#chat-messages-container > div[data-conversation-id]'
         ).forEach((el) => el.setAttribute(attr, ''))""",
         STALE,
     )
 
 
 def wait_for_conversation(page: Page, conv_id: str) -> None:
-    """Wait for ``conv_id`` to be (re)loaded in the main pane, with a fresh,
+    """Wait for ``conv_id`` to be (re)loaded in the main pane, with an
     initialized composer. Call :func:`mark_view_stale` before navigating."""
     expect(
         page.locator(

@@ -115,7 +115,7 @@ def test_first_message_of_a_new_day_broadcasts_a_separator(
         data={"chat_message": "morning"},
     )
 
-    assert res.status_code == 204
+    assert res.status_code == 200
     html = _broadcast_html(broadcast)
     assert "date-separator" in html
     assert "Today" in html

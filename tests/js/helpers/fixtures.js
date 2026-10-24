@@ -66,8 +66,9 @@ function messageToolbar(id) {
  * @param {string} [m.content]
  * @param {boolean} [m.sameSender]   grouped under the previous message
  * @param {boolean} [m.mentioned]    message.id in mention_message_ids
+ * @param {string} [m.clientId]      the sending tab's id, echoed for its optimistic copy
  */
-export function message({ id, user, createdAt, content = 'hello', sameSender = false, mentioned = false }) {
+export function message({ id, user, createdAt, content = 'hello', sameSender = false, mentioned = false, clientId = null }) {
     const header = sameSender ? '' : `
             <div>
                 <strong class="me-2">${esc(name(user))}</strong>
@@ -79,6 +80,7 @@ export function message({ id, user, createdAt, content = 'hello', sameSender = f
     return `<div class="d-flex mb-1 message-container ${sameSender ? 'grouped-message' : ''} ${mentioned ? 'mentioned-message' : ''}"
          id="message-${id}"
          data-user-id="${user.id}"
+         ${clientId ? `data-client-id="${esc(clientId)}"` : ''}
          data-raw-content="${esc(content)}"
          data-attachments='[]'>
         ${avatarCol}
@@ -356,8 +358,8 @@ export function chatInputDefault({ wysiwyg = true } = {}) {
          ws-send
          hx-trigger="typing-event"
          style="display: none"></div>
-</div>
-<script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>`;
+    <script>document.body.dispatchEvent(new CustomEvent('initializeEditor', { detail: { idSuffix: '' } }));</script>
+</div>`;
 }
 
 // partials/mention_results.html (user rows only)
@@ -477,7 +479,7 @@ export function chatPage({
         <h5 class="text-white">DevOcho</h5>
         ${oncallBadge}
         <hr class="text-secondary">
-        <ul id="activity-links" class="list-unstyled mb-4">
+        <ul id="activity-links" class="list-unstyled mb-4" hx-sync="#chat-messages-container:replace" hx-indicator="#pane-progress">
             <li>
                 <a href="#" id="unreads-link" class="text-decoration-none text-light text-opacity-75" hx-get="/chat/unreads" hx-target="#chat-messages-container" hx-swap="innerHTML">Unreads</a>
             </li>
@@ -485,10 +487,10 @@ export function chatPage({
                 <a href="#" id="threads-link" class="text-decoration-none text-light text-opacity-75" hx-get="/chat/threads" hx-target="#chat-messages-container" hx-swap="innerHTML">Threads</a>
             </li>
         </ul>
-        <ul id="channel-list" class="list-unstyled">
+        <ul id="channel-list" class="list-unstyled" hx-sync="#chat-messages-container:replace" hx-indicator="#pane-progress">
 ${channelItems}
         </ul>
-        <ul id="dm-list" class="list-unstyled">
+        <ul id="dm-list" class="list-unstyled" hx-sync="#chat-messages-container:replace" hx-indicator="#pane-progress">
             <li class="mt-1" id="dm-self-item">
                 <a href="#" class="sidebar-item-link" hx-get="/chat/dm/${user.id}" hx-target="#chat-messages-container">
                     <div class="d-flex justify-content-between align-items-center">
@@ -513,6 +515,7 @@ ${dmItems}
           data-send-on-enter="${user.sendOnEnter ? 'true' : 'false'}"
           data-current-user-id="${user.id}"
           data-current-user-username="${user.username}"
+          data-current-user-display-name="${esc(name(user))}"
           data-current-user-status="${user.presence}"
           data-activity-url="/profile/activity">
         <div id="global-search-container" class="p-2 border-bottom">
@@ -524,6 +527,7 @@ ${dmItems}
                 </form>
             </div>
         </div>
+        <div id="pane-progress" class="pane-progress" aria-hidden="true"></div>
         <div id="connection-status-bar"
              class="p-2 bg-warning text-dark text-center"
              style="display: none; flex-shrink: 0">
@@ -538,9 +542,11 @@ ${dmItems}
              style="flex-grow: 1; overflow-y: auto"
              ${containerAttrs}>
             ${paneContent}
-            <button id="jump-to-bottom-btn"
-                    class="btn btn-primary btn-sm rounded-pill position-absolute bottom-0 start-50 translate-middle-x mb-3"
-                    style="display: none; z-index: 10">Jump to Latest</button>
+        </div>
+        <div class="jump-to-latest-anchor">
+            <button id="jump-to-bottom-btn" type="button" class="btn btn-primary btn-sm rounded-pill shadow" style="display: none">
+                <span class="jump-label">New messages</span> <i class="bi bi-arrow-down" aria-hidden="true"></i>
+            </button>
         </div>
         ${composer}
         <div id="pager-overlay" class="pager-overlay" role="alertdialog" aria-modal="true" aria-labelledby="pager-heading" hidden>

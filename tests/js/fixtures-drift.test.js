@@ -32,6 +32,10 @@ const HOOKS = {
         'id="connection-status-bar"',
         'id="chat-messages-container"',
         'id="jump-to-bottom-btn"',
+        'class="jump-label"',
+        'id="pane-progress"',
+        'hx-sync="#chat-messages-container:replace"',
+        'data-current-user-display-name=',
         'id="channel-list"',
         'id="dm-list"',
         'id="unreads-link"',
@@ -67,6 +71,7 @@ const HOOKS = {
     ],
     'app/templates/partials/message.html': [
         'message-container',
+        '{% if client_id %}data-client-id="{{ client_id }}"{% endif %}',
         'id="message-{{ message.id }}"',
         'data-user-id="{{ message.user.id }}"',
         'local-time',

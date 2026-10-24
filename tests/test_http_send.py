@@ -63,7 +63,7 @@ def dm_conv(app):
 
 def test_member_can_post_message(logged_in_client, app, channel_member_conv, mocker):
     # Don't require a live pub/sub or notification fan-out for this test.
-    mocker.patch("app.routes._broadcast_regular_message")
+    mocker.patch("app.routes._broadcast_regular_message", return_value="")
     mocker.patch("app.routes.chat_service.send_notifications_for_new_message")
 
     res = logged_in_client.post(
@@ -71,7 +71,7 @@ def test_member_can_post_message(logged_in_client, app, channel_member_conv, moc
         data={"chat_message": "hello over http"},
     )
 
-    assert res.status_code == 204
+    assert res.status_code == 200
     with app.app_context():
         assert Message.select().where(Message.content == "hello over http").count() == 1
 
@@ -91,7 +91,7 @@ def test_non_member_post_is_forbidden(
 
 
 def test_dm_participant_can_post(logged_in_client, app, dm_conv, mocker):
-    mocker.patch("app.routes._broadcast_regular_message")
+    mocker.patch("app.routes._broadcast_regular_message", return_value="")
     mocker.patch("app.routes.chat_service.send_notifications_for_new_message")
 
     res = logged_in_client.post(
@@ -99,7 +99,7 @@ def test_dm_participant_can_post(logged_in_client, app, dm_conv, mocker):
         data={"chat_message": "hi partner"},
     )
 
-    assert res.status_code == 204
+    assert res.status_code == 200
 
 
 def test_dm_outsider_post_is_forbidden(logged_in_client, app, dm_conv, mocker):
@@ -166,3 +166,46 @@ def test_restricted_channel_blocks_non_admin(
     )
     assert res.status_code == 403
     handle.assert_not_called()
+
+
+def test_send_returns_the_rendered_message_tagged_with_client_id(
+    logged_in_client, app, channel_member_conv, mocker
+):
+    """The sending tab swaps its optimistic copy for this response, so the
+    message shows even when the WebSocket echo is slow or lost."""
+    mocker.patch("app.routes.chat_service.send_notifications_for_new_message")
+    res = logged_in_client.post(
+        f"/chat/conversations/{channel_member_conv}/messages",
+        data={
+            "chat_message": "tagged",
+            "client_id": "3f0c2a1e-9b7d-4c55-8e2a-1d2b3c4d5e6f",
+        },
+    )
+    assert res.status_code == 200
+    body = res.get_data(as_text=True)
+    assert 'data-client-id="3f0c2a1e-9b7d-4c55-8e2a-1d2b3c4d5e6f"' in body
+    assert f'data-conversation-id="{channel_member_conv}"' in body
+    assert "tagged" in body
+
+
+def test_send_ignores_a_malformed_client_id(
+    logged_in_client, app, channel_member_conv, mocker
+):
+    mocker.patch("app.routes.chat_service.send_notifications_for_new_message")
+    res = logged_in_client.post(
+        f"/chat/conversations/{channel_member_conv}/messages",
+        data={"chat_message": "x", "client_id": '"><script>alert(1)</script>'},
+    )
+    assert res.status_code == 200
+    assert "data-client-id" not in res.get_data(as_text=True)
+    assert "<script>alert(1)" not in res.get_data(as_text=True)
+
+
+def test_opening_a_conversation_does_not_nest_the_header_or_composer(
+    logged_in_client, app, channel_member_conv
+):
+    channel_id = int(channel_member_conv.split("_")[1])
+    html = logged_in_client.get(f"/chat/channel/{channel_id}").get_data(as_text=True)
+    assert html.count('id="chat-header-container"') == 1
+    assert html.count('id="chat-input-container"') == 1
+    assert 'id="chat-input-container" hx-swap-oob="true"' in html

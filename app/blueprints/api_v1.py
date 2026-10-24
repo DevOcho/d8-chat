@@ -1003,7 +1003,7 @@ def create_message(conv_id_str):
     if not content or not isinstance(content, str):
         return jsonify({"error": "Message content is required"}), 400
 
-    status, new_message = handle_inbound_message(
+    status, new_message, _ = handle_inbound_message(
         sender=g.api_user,
         conv_id_str=conv_id_str,
         chat_text=content,

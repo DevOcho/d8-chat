@@ -13,6 +13,7 @@
     <div class="d-flex mb-1 message-container {% if message.same_sender %}grouped-message{% endif %} {% if message.id in mention_message_ids %}mentioned-message{% endif %}"
          id="message-{{ message.id }}"
          data-user-id="{{ message.user.id }}"
+         {% if client_id %}data-client-id="{{ client_id }}"{% endif %}
          data-raw-content="{{ message.content | e }}"
          data-attachments='[ {%- for att in image_attachments -%} { "url": "{{ att.url }}", "filename": "{{ att.original_filename | e }}" } {{- ", " if not loop.last else "" -}} {%- endfor -%} ]'>
         {% if not message.same_sender %}
@@ -68,13 +69,25 @@
                 {% set grid_count = '4+' if image_count >= 4 else image_count|string %}
                 <div class="attachment-grid mt-2" data-count="{{ grid_count }}">
                     {% for attachment in image_attachments[:4] %}
-                        <div class="attachment-grid-item">
+                        {# A single image with known dimensions reserves its box
+                           (at most 380x300) so the timeline doesn't jump as it loads. #}
+                        {% set box_style = "" %}
+                        {% if image_count == 1 and attachment.width and attachment.height %}
+                            {% set display_width = [380, attachment.width, (300 * attachment.width / attachment.height)|int]|min %}
+                            {% set box_style = "aspect-ratio: " ~ attachment.width ~ " / " ~ attachment.height ~ "; width: " ~ display_width ~ "px; max-width: 100%" %}
+                        {% endif %}
+                        <div class="attachment-grid-item"
+                             {% if box_style %}style="{{ box_style }}"{% endif %}>
                             <a href="#"
                                data-bs-toggle="modal"
                                data-bs-target="#image-carousel-modal"
                                data-message-id="{{ message.id }}"
                                data-start-index="{{ loop.index0 }}">
-                                <img src="{{ attachment.url }}" alt="{{ attachment.original_filename }}">
+                                <img src="{{ attachment.url }}"
+                                     alt="{{ attachment.original_filename }}"
+                                     loading="lazy"
+                                     decoding="async"
+                                     {% if attachment.width and attachment.height %}width="{{ attachment.width }}" height="{{ attachment.height }}"{% endif %}>
                                 {% if loop.index == 4 and image_count > 4 %}<div class="attachment-overlay">+{{ image_count - 4 }}</div>{% endif %}
                             </a>
                         </div>

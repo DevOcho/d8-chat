@@ -71,6 +71,10 @@ const NotificationManager = {
             notification.onclick = () => {
                 window.focus();
                 notification.close();
+                // The tag is the conversation id: open it.
+                const link = data.tag && document.getElementById(`link-${data.tag}`);
+                const anchor = link && link.closest('a[hx-get]');
+                if (anchor) htmx.trigger(anchor, 'click');
             };
         }
     }
@@ -103,6 +107,232 @@ const ToastManager = {
     }
 };
 
+
+// A short, human message for a failed request: the server's own text when it
+// sent a short plain one, a JSON body's "error", otherwise one by status. Raw
+// bodies (an HTML error page, a stack of JSON) used to land in the toast.
+function friendlyErrorText(xhr) {
+    if (!xhr) return 'Please try again.';
+    const body = (xhr.responseText || '').trim();
+    const type = (xhr.getResponseHeader && xhr.getResponseHeader('Content-Type')) || '';
+    if (type.includes('application/json')) {
+        try {
+            const data = JSON.parse(body);
+            if (data && typeof data.error === 'string') return data.error;
+        } catch (e) { /* fall through to the status */ }
+    } else if (body && body.length <= 160 && !body.startsWith('<')) {
+        return body;
+    }
+    if (xhr.status === 403) return "You don't have access to that.";
+    if (xhr.status === 404) return 'That no longer exists.';
+    if (xhr.status === 413) return 'That file is too large.';
+    if (xhr.status === 429) return 'Too many requests. Wait a moment and try again.';
+    if (xhr.status >= 500) return 'The server had a problem. Please try again.';
+    return 'Please try again.';
+}
+
+// A sending tab's id for its optimistic copy of a message; the server echoes
+// it on the rendered message so the copy can be swapped for the real one.
+function newClientId() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+    return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const activeConversationId = () => {
+    const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
+    return activeConv ? activeConv.dataset.conversationId : null;
+};
+
+// The name the sidebar shows for a conversation ("# general", "Robert").
+const conversationName = (convId) => {
+    const link = convId && document.getElementById(`link-${convId}`);
+    return link ? link.textContent.replace(/\s+/g, ' ').replace(/\(you\)$/, '').trim() : '';
+};
+
+/**
+ * Unsent composer text per conversation, so switching away and back (or
+ * reloading) doesn't lose what you were writing. Kept in memory and mirrored to
+ * localStorage, which can be unavailable (private windows), so every access is
+ * guarded. The sidebar marks conversations that hold a draft.
+ */
+const DraftManager = {
+    drafts: new Map(),
+    storageKey: (convId) => `d8-draft:${convId}`,
+    get(convId) {
+        if (!convId) return '';
+        if (this.drafts.has(convId)) return this.drafts.get(convId);
+        try {
+            return window.localStorage.getItem(this.storageKey(convId)) || '';
+        } catch (e) {
+            return '';
+        }
+    },
+    save(convId, text) {
+        if (!convId) return;
+        const value = (text || '').trim() ? text : '';
+        this.drafts.set(convId, value);
+        try {
+            if (value) window.localStorage.setItem(this.storageKey(convId), value);
+            else window.localStorage.removeItem(this.storageKey(convId));
+        } catch (e) { /* storage unavailable: the in-memory copy still works */ }
+        this.mark(convId, !!value);
+    },
+    clear(convId) {
+        this.save(convId, '');
+    },
+    mark(convId, hasDraft) {
+        const link = document.getElementById(`link-${convId}`);
+        if (link) link.classList.toggle('has-draft', hasDraft);
+    },
+    markAll() {
+        document.querySelectorAll('[id^="link-"]').forEach((link) => {
+            const convId = link.id.slice('link-'.length);
+            link.classList.toggle('has-draft', !!this.get(convId));
+        });
+    },
+};
+
+/** "(3) # general · D8 Chat": the open conversation plus the unread count. */
+const TitleManager = {
+    base: 'D8 Chat',
+    current() {
+        const count = FaviconManager.calculateUnreadCount();
+        const name = conversationName(activeConversationId());
+        return `${count > 0 ? `(${count}) ` : ''}${name ? `${name} · ` : ''}${this.base}`;
+    },
+    update() {
+        // The pager flashes the title while paging; it restores current() when done.
+        if (window.PagerManager && window.PagerManager.titleTimer) return;
+        const title = this.current();
+        if (document.title !== title) document.title = title;
+    },
+};
+window.TitleManager = TitleManager;
+
+/** "Message # general" in the empty main composer. */
+const ComposerPlaceholder = {
+    update() {
+        const name = conversationName(activeConversationId());
+        const text = name ? `Message ${name}` : 'Message';
+        const editor = document.getElementById('wysiwyg-editor');
+        const markdown = document.getElementById('markdown-toggle-view');
+        if (editor) {
+            editor.dataset.placeholder = text;
+            editor.setAttribute('aria-label', text);
+        }
+        if (markdown) {
+            markdown.placeholder = text;
+            markdown.setAttribute('aria-label', text);
+        }
+    },
+};
+
+/**
+ * Optimistic sends. A message shows up the moment it's sent, dimmed, and is
+ * swapped for the server's rendering when that arrives (in the POST response
+ * or over the WebSocket, whichever is first, matched by client_id). A send
+ * that fails stays put with Retry / Edit / Discard instead of vanishing.
+ */
+const PendingMessages = {
+    sends: new Map(),
+    add({ clientId, text, attachments, listSelector, path, values }) {
+        const list = document.querySelector(listSelector);
+        this.sends.set(clientId, { path, values, text, listSelector });
+        if (!list) return;
+        const main = document.querySelector('main.main-content');
+        const me = main ? main.dataset.currentUserId : null;
+        const visible = list.querySelectorAll('.message-container[data-user-id], .message-container.pending-message');
+        const last = visible[visible.length - 1];
+        const grouped = !!last && (last.classList.contains('pending-message') || last.dataset.userId === me);
+
+        const el = document.createElement('div');
+        el.className = `d-flex mb-1 message-container pending-message${grouped ? ' grouped-message' : ''}`;
+        el.id = `pending-${clientId}`;
+        el.dataset.clientId = clientId;
+        el.innerHTML = `
+            <div class="flex-shrink-0 pending-avatar" style="width: 40px;"></div>
+            <div class="flex-grow-1 ms-3">
+                <div class="pending-header"><strong class="me-2"></strong></div>
+                <div class="message-content pending-text"></div>
+                <div class="pending-attachments small text-muted"></div>
+                <div class="pending-status small text-muted" role="status">Sending…</div>
+            </div>`;
+        if (grouped) {
+            el.querySelector('.pending-header').remove();
+        } else {
+            el.querySelector('.pending-header strong').textContent = main ? (main.dataset.currentUserDisplayName || main.dataset.currentUserUsername || '') : '';
+            const avatar = document.querySelector('#sidebar-profile-button .avatar-image');
+            if (avatar) {
+                const copy = avatar.cloneNode(true);
+                copy.removeAttribute('id');
+                copy.style.width = '40px';
+                copy.style.height = '40px';
+                el.querySelector('.pending-avatar').appendChild(copy);
+            }
+        }
+        el.querySelector('.pending-text').textContent = text;
+        if (attachments > 0) {
+            el.querySelector('.pending-attachments').textContent = `📎 ${attachments} ${attachments === 1 ? 'attachment' : 'attachments'}`;
+        }
+        list.appendChild(el);
+        this.scrollIntoView(list);
+    },
+    scrollIntoView(list) {
+        const scroller = list.closest('#chat-messages-container')
+            || list.closest('.flex-grow-1[style*="overflow-y: auto"]');
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    },
+    // The real message arrived: drop its stand-in.
+    resolve(clientId) {
+        const el = document.getElementById(`pending-${clientId}`);
+        if (el) el.remove();
+        this.sends.delete(clientId);
+    },
+    fail(clientId, reason) {
+        const el = document.getElementById(`pending-${clientId}`);
+        if (!el) return;
+        el.classList.add('failed');
+        const status = el.querySelector('.pending-status');
+        status.textContent = '';
+        const label = document.createElement('span');
+        label.className = 'text-danger me-2';
+        label.textContent = reason || 'Not sent.';
+        status.appendChild(label);
+        [['retry', 'Retry'], ['edit', 'Edit'], ['discard', 'Discard']].forEach(([action, text]) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-link btn-sm p-0 me-2 pending-action';
+            btn.dataset.pendingAction = action;
+            btn.textContent = text;
+            status.appendChild(btn);
+        });
+    },
+    retry(clientId) {
+        const send = this.sends.get(clientId);
+        const el = document.getElementById(`pending-${clientId}`);
+        if (!send || !el) return;
+        el.classList.remove('failed');
+        el.querySelector('.pending-status').textContent = 'Sending…';
+        htmx.ajax('POST', send.path, { values: send.values, source: document.body, swap: 'none' }).catch(() => {});
+    },
+    discard(clientId) {
+        this.resolve(clientId);
+    },
+    // Put the text back in the composer (if it's empty) and drop the copy.
+    edit(clientId) {
+        const send = this.sends.get(clientId);
+        if (send && window.mainEditor && !window.mainEditor.getText().trim()) {
+            window.mainEditor.setText(send.text);
+        }
+        this.resolve(clientId);
+        if (window.mainEditor) window.mainEditor.focusActiveInput();
+    },
+    // Keep unconfirmed messages below everything that has arrived since.
+    keepAtBottom(list) {
+        list.querySelectorAll(':scope > .pending-message').forEach((el) => list.appendChild(el));
+    },
+};
+window.PendingMessages = PendingMessages;
 
 const FaviconManager = {
     faviconLink: null,
@@ -187,6 +417,7 @@ const FaviconManager = {
     },
 
     updateFavicon: function() {
+        TitleManager.update();
         if (!this.isInitialized) return;
 
         // Instead of a boolean, we now get the actual count
@@ -1081,25 +1312,45 @@ const createEditor = function(idSuffix = '') {
             updateStateAndButtons();
         });
     };
+    // Typing indicators: one typing_start when typing begins (refreshed every
+    // few seconds while it continues) and a typing_stop after a pause. A frame
+    // per keystroke cost a DB check and a publish each, and fast typing drained
+    // the socket's rate limit so the subscribe that followed could be dropped.
+    const TYPING_REFRESH_MS = 3000;
+    const noteTyping = function() {
+        const now = Date.now();
+        if (!state.typingSince || now - state.typingSince > TYPING_REFRESH_MS) {
+            state.typingSince = now;
+            sendTypingStatus(true);
+        }
+        clearTimeout(state.typingTimer);
+        state.typingTimer = setTimeout(() => {
+            state.typingSince = 0;
+            sendTypingStatus(false);
+        }, 1500);
+    };
+    const noteDraft = function() {
+        if (idSuffix !== '') return;
+        clearTimeout(state.draftTimer);
+        state.draftTimer = setTimeout(() => DraftManager.save(activeConversationId(), getText()), 400);
+    };
     const setupInputListeners = function() {
         state.editor.addEventListener('input', () => {
             updateStateAndButtons();
             resizeActiveInput();
-            clearTimeout(state.typingTimer);
-            sendTypingStatus(true);
-            state.typingTimer = setTimeout(() => sendTypingStatus(false), 1500);
+            noteTyping();
+            noteDraft();
         });
         state.markdownView.addEventListener('input', () => {
             resizeActiveInput();
-            clearTimeout(state.typingTimer);
-            sendTypingStatus(true);
-            state.typingTimer = setTimeout(() => sendTypingStatus(false), 1500);
+            noteTyping();
+            noteDraft();
         });
-        document.addEventListener('selectionchange', () => {
-            if (document.activeElement === state.editor) {
-                updateStateAndButtons();
-            }
-        });
+        // One document listener for every editor, following the focused one:
+        // each editor used to add its own and never remove it, so they piled
+        // up with every composer swap.
+        selectionEditor = state.editor;
+        selectionEditorUpdate = updateStateAndButtons;
     };
     // If the caret is in a list item, start the next item (or, from an empty
     // item, end the list) and return true; otherwise return false.
@@ -1254,47 +1505,90 @@ const createEditor = function(idSuffix = '') {
             e.detail.path = '/chat/conversations/' + encodeURIComponent(convId) + '/messages';
             e.detail.parameters['chat_message'] = text;
             clearTimeout(state.typingTimer);
+            state.typingSince = 0;
             sendTypingStatus(false);
+
+            // Show it now, and clear the composer now: text typed while the
+            // request is in flight is the next message, not something the
+            // response gets to wipe.
+            const clientId = newClientId();
+            e.detail.parameters['client_id'] = clientId;
+            const values = { chat_message: text, client_id: clientId };
+            ['attachment_file_ids', 'parent_message_id', 'reply_type', 'quoted_message_id'].forEach((name) => {
+                const value = e.detail.parameters[name];
+                if (value) values[name] = value;
+            });
+            const isThread = idSuffix.startsWith('-thread-');
+            const attachmentIds = state.hiddenAttachmentIds ? state.hiddenAttachmentIds.value : '';
+            PendingMessages.add({
+                clientId,
+                text,
+                attachments: attachmentIds ? attachmentIds.split(',').filter(Boolean).length : 0,
+                listSelector: isThread ? `#thread-replies-list-${idSuffix.split('-').pop()}` : '#message-list',
+                path: e.detail.path,
+                values,
+            });
+            if (idSuffix === '') DraftManager.clear(convId);
+            clearDraftInput();
         });
         state.messageForm.addEventListener('htmx:afterRequest', (e) => {
             const cfg = e.detail.requestConfig;
             // Only react to this form's own message POST, not the bubbling
-            // hx-get requests from toolbar buttons inside the form.
+            // hx-get requests from toolbar buttons inside the form. (The
+            // optimistic copy's outcome is handled document-wide, so a Retry
+            // goes through the same path.)
             if (!cfg || cfg.verb !== 'post' || !String(cfg.path).includes('/messages')) return;
-            if (!e.detail.successful) {
-                // Keep the draft so the user can retry instead of losing it.
-                ToastManager.show('Message not sent', 'Your message could not be delivered and has been kept so you can try again.', 'danger');
-                return;
-            }
-            const isThread = idSuffix.startsWith('-thread-');
-
-            if (isThread) {
-                const parentMessageId = idSuffix.split('-').pop();
-                htmx.ajax('GET', `/chat/input/thread/${parentMessageId}`, {
-                    target: `#thread-input-container-${parentMessageId}`,
+            if (!e.detail.successful) return;
+            const replyType = state.messageForm.querySelector('input[name="reply_type"]');
+            const isQuoteReply = replyType && replyType.value === 'quote';
+            if (idSuffix === '' && isQuoteReply) {
+                // Back to the plain composer, carrying anything typed since.
+                DraftManager.save(activeConversationId(), getText());
+                htmx.ajax('GET', '/chat/input/default', {
+                    target: '#chat-input-container',
                     swap: 'outerHTML'
                 });
-            } else {
-                const isQuoteReply = state.messageForm.querySelector('input[name="reply_type"]') && state.messageForm.querySelector('input[name="reply_type"]').value === 'quote';
-                if (isQuoteReply) {
-                    htmx.ajax('GET', '/chat/input/default', {
-                        target: '#chat-input-container',
-                        swap: 'outerHTML'
-                    });
-                } else {
-                    const { editor, markdownView, hiddenInput } = state;
-                    editor.innerHTML = '';
-                    markdownView.value = '';
-                    hiddenInput.value = '';
-                    if (attachmentManager && typeof attachmentManager.reset === 'function') {
-                        attachmentManager.reset();
-                    }
-                    resizeActiveInput();
-                    focusActiveInput();
-                }
             }
         });
     };
+    // The composer's content as Markdown (what would be sent).
+    const getText = function() {
+        if (state.isMarkdownMode) return state.markdownView.value;
+        updateStateAndButtons();
+        return state.hiddenInput.value;
+    };
+    // Replace the composer's content with Markdown text.
+    const setText = function(text) {
+        const { editor, markdownView, hiddenInput } = state;
+        markdownView.value = text || '';
+        hiddenInput.value = text || '';
+        if (state.isMarkdownMode || !text) {
+            if (!text) editor.innerHTML = '';
+            resizeActiveInput();
+            return Promise.resolve();
+        }
+        // Rendered (and sanitized) server-side, as when the composer loads.
+        return htmx.ajax('POST', '/chat/utility/markdown-to-html', {
+            values: { text },
+            target: editor,
+            swap: 'innerHTML'
+        }).then(() => {
+            updateStateAndButtons();
+            resizeActiveInput();
+        });
+    };
+    // Empty the composer, attachments included.
+    const clearDraftInput = function() {
+        const { editor, markdownView, hiddenInput } = state;
+        editor.innerHTML = '';
+        markdownView.value = '';
+        hiddenInput.value = '';
+        if (attachmentManager && typeof attachmentManager.reset === 'function') {
+            attachmentManager.reset();
+        }
+        resizeActiveInput();
+    };
+
     const setupToggleButtonListener = function() {
         state.formatToggleButton.addEventListener('click', () => {
             const {
@@ -1346,9 +1640,21 @@ const createEditor = function(idSuffix = '') {
         focusActiveInput,
         state,
         updateStateAndButtons,
-        attachmentManager
+        get attachmentManager() { return attachmentManager; },
+        getText,
+        setText,
+        clear: clearDraftInput,
     };
 };
+
+// See setupInputListeners: the one selectionchange listener all editors share.
+let selectionEditor = null;
+let selectionEditorUpdate = null;
+document.addEventListener('selectionchange', () => {
+    if (selectionEditor && document.activeElement === selectionEditor && selectionEditorUpdate) {
+        selectionEditorUpdate();
+    }
+});
 
 
 // --- Event Listeners to initialize editors ---
@@ -1393,12 +1699,27 @@ new MutationObserver((mutations) => {
 document.body.addEventListener('initializeEditor', (event) => {
     emojiPickerReady.then(() => {
         const { idSuffix } = event.detail;
+        // One editor per form: a second set of listeners on the same form
+        // (each clearing the composer on send) made the second one find it
+        // empty and cancel the request.
+        const form = document.getElementById(`message-form${idSuffix}`);
+        if (!form || form.dataset.editorReady) return;
+        form.dataset.editorReady = '1';
         const editorInstance = createEditor(idSuffix);
         editorInstance.initialize();
 
         // If this is the main chat input, store its manager and set up drag/drop listeners.
         if (idSuffix === '') {
+            window.mainEditor = editorInstance;
             window.mainAttachmentManager = editorInstance.state.attachmentManager;
+            // A fresh composer (page load, or back from a reply/edit) picks up
+            // the open conversation's draft, unless it arrived with text of
+            // its own (a quote-reply carrying the previous draft).
+            const draft = DraftManager.get(activeConversationId());
+            if (draft && editorInstance.state.markdownView && !editorInstance.getText().trim()) {
+                editorInstance.setText(draft);
+            }
+            ComposerPlaceholder.update();
 
             // Attach drag-drop listeners only AFTER the main editor is ready.
             // Use a guard to ensure this only runs once.
@@ -1657,21 +1978,47 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // If the server sent back an error with a message, show it in the toast.
-        if (evt.detail.xhr.responseText) {
-            ToastManager.show('An Error Occurred', evt.detail.xhr.responseText, 'danger');
+        // A failed send is shown on the message itself (Retry / Edit / Discard).
+        const cfg = evt.detail.requestConfig;
+        if (cfg && cfg.formData && cfg.formData.get && cfg.formData.get('client_id')) return;
+
+        ToastManager.show('Something went wrong', friendlyErrorText(evt.detail.xhr), 'danger');
+    });
+
+    // Every message POST carrying a client_id (the composer's, or a Retry)
+    // settles its optimistic copy here.
+    document.body.addEventListener('htmx:afterRequest', (evt) => {
+        const cfg = evt.detail.requestConfig;
+        if (!cfg || cfg.verb !== 'post' || !cfg.formData || !cfg.formData.get) return;
+        const clientId = cfg.formData.get('client_id');
+        if (!clientId) return;
+        if (evt.detail.successful) {
+            // The response's OOB swap normally replaced it already.
+            PendingMessages.resolve(clientId);
+        } else {
+            const xhr = evt.detail.xhr;
+            const offline = !xhr || !xhr.status;
+            PendingMessages.fail(clientId, offline ? 'Not sent: no connection.' : `Not sent: ${friendlyErrorText(xhr)}`);
         }
     });
 
-    document.body.addEventListener('htmx:oobErrorNoTarget', function(evt) {
-        const targetSelector = evt.detail.target;
-        if (!targetSelector) {
-            console.log("Ignoring OOB update for an undefined target.");
-            return;
-        }
-        const errorMessage = `A UI update failed because the target '${targetSelector}' could not be found.`;
-        ToastManager.show('UI Sync Error', errorMessage, 'warning');
+    document.body.addEventListener('click', (evt) => {
+        const btn = evt.target.closest('[data-pending-action]');
+        if (!btn) return;
+        const pending = btn.closest('.pending-message');
+        if (!pending) return;
+        const { clientId } = pending.dataset;
+        const action = btn.dataset.pendingAction;
+        if (action === 'retry') PendingMessages.retry(clientId);
+        else if (action === 'edit') PendingMessages.edit(clientId);
+        else if (action === 'discard') PendingMessages.discard(clientId);
     });
+
+    // An OOB fragment with no target is normal here: a thread reply for a
+    // panel that isn't open, a badge for a conversation not in the sidebar,
+    // an append dropped because another conversation is on screen. Nothing to
+    // report. (This used to aim a "UI Sync Error" toast at evt.detail.target,
+    // which htmx 2 doesn't set, so it only logged on every such frame.)
 
     const connectionStatusBar = document.getElementById('connection-status-bar');
     let isReconnecting = false;
@@ -1714,11 +2061,6 @@ document.addEventListener('DOMContentLoaded', () => {
             { source: document.body, swap: 'none' }
         ).catch(() => {});
     }
-
-    const activeConversationId = () => {
-        const activeConv = document.querySelector('#chat-messages-container > div[data-conversation-id]');
-        return activeConv ? activeConv.dataset.conversationId : null;
-    };
 
     // Application-level heartbeat. A socket can die without the browser
     // noticing (laptop sleep, Wi-Fi change, a NAT dropping an idle flow): it
@@ -1864,30 +2206,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
     };
-    const scrollChatToPosition = () => {
-        // Use a tiny timeout to allow the browser's rendering engine to catch up
-        // with the new content from HTMX before we try to scroll.
-        setTimeout(() => {
-            const messagesContainer = document.getElementById('chat-messages-container');
-            if (!messagesContainer) return;
-
-            const separator = messagesContainer.querySelector('.new-message-separator');
-            if (separator) {
-                // Scroll to the "New Messages" line if it exists.
-                separator.scrollIntoView({
-                    behavior: 'auto',
-                    block: 'center'
-                });
-            } else {
-                // Otherwise, find our anchor and scroll to it. This is the most reliable way.
-                const bottomAnchor = messagesContainer.querySelector('#message-list-bottom');
-                if (bottomAnchor) {
-                    bottomAnchor.scrollIntoView({ behavior: 'auto', block: 'end' });
-                }
-            }
-        }, 1); // A 1ms delay is enough to push this to the next browser task.
-    };
-
     // Scroll a specific message into view and briefly highlight it.
     const scrollToMessage = (selector) => {
         const targetMessage = document.querySelector(selector);
@@ -1906,6 +2224,124 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             return null;
         }
+    };
+
+    // --- Conversation switching ---------------------------------------------
+    // Feedback the moment a conversation is picked: the sidebar highlight moves
+    // on click (not when the response lands), the composer is kept and gets
+    // that conversation's draft, and the pane is scrolled into place before
+    // the browser paints it.
+    const setActiveSidebarItem = (convId) => {
+        document.querySelectorAll('.sidebar-item-link.active').forEach((a) => {
+            a.classList.remove('active');
+            a.removeAttribute('aria-current');
+        });
+        const link = convId && document.getElementById(`link-${convId}`);
+        const anchor = link && link.closest('.sidebar-item-link');
+        if (anchor) {
+            anchor.classList.add('active');
+            anchor.setAttribute('aria-current', 'page');
+        }
+    };
+    const convIdForLink = (anchor) => {
+        const label = anchor && anchor.querySelector('[id^="link-"]');
+        return label ? label.id.slice('link-'.length) : null;
+    };
+
+    document.body.addEventListener('htmx:beforeRequest', (evt) => {
+        const target = evt.detail.target;
+        if (!target || target.id !== 'chat-messages-container') return;
+        const leaving = activeConversationId();
+        const editor = window.mainEditor;
+        if (editor && leaving && editor.state.editor && editor.state.editor.isConnected) {
+            DraftManager.save(leaving, editor.getText());
+            editor.clear();
+        }
+        const anchor = evt.detail.elt && evt.detail.elt.closest && evt.detail.elt.closest('.sidebar-item-link');
+        if (anchor) setActiveSidebarItem(convIdForLink(anchor));
+        NewMessagesPill.reset();
+    });
+
+    document.body.addEventListener('htmx:afterSwap', (evt) => {
+        const target = evt.detail.target;
+        if (!target || target.id !== 'chat-messages-container') return;
+        const convId = activeConversationId();
+        setActiveSidebarItem(convId);
+        // Scroll now, in the same task as the swap: waiting for settle (and a
+        // timer after it) painted a frame at the wrong offset, then jumped.
+        const jumpSelector = getJumpSelector(evt.detail.xhr);
+        if (jumpSelector) scrollToMessage(jumpSelector);
+        else positionPane();
+        StickToBottom.watch();
+        // A composer that was replaced restores its draft when it initializes.
+        const editor = window.mainEditor;
+        if (editor && editor.state.editor && editor.state.editor.isConnected && convId
+            && !editor.getText().trim()) {
+            const draft = DraftManager.get(convId);
+            if (draft) editor.setText(draft);
+        }
+        ComposerPlaceholder.update();
+        TitleManager.update();
+    });
+
+    // A pane opens at its "new messages" line, or at the bottom.
+    const positionPane = () => {
+        const container = document.getElementById('chat-messages-container');
+        if (!container) return;
+        const separator = container.querySelector('.new-message-separator');
+        if (separator) {
+            separator.scrollIntoView({ behavior: 'auto', block: 'center' });
+        } else {
+            container.scrollTop = container.scrollHeight;
+        }
+    };
+
+    // Keep the view pinned to the newest message while content above it
+    // grows (images decoding, code blocks collapsing), if the user was at the
+    // bottom. Replaces a load listener per image.
+    const StickToBottom = {
+        pinned: true,
+        observer: null,
+        watch() {
+            const container = document.getElementById('chat-messages-container');
+            const list = document.getElementById('message-list');
+            if (!container || !list || typeof ResizeObserver === 'undefined') return;
+            if (this.observer) this.observer.disconnect();
+            this.pinned = !container.querySelector('.new-message-separator');
+            this.observer = new ResizeObserver(() => {
+                if (this.pinned) container.scrollTop = container.scrollHeight;
+            });
+            this.observer.observe(list);
+        },
+    };
+    if (messagesContainer) {
+        messagesContainer.addEventListener('scroll', () => {
+            StickToBottom.pinned = isUserNearBottom();
+        }, { passive: true });
+    }
+
+    // "N new messages ↓" while scrolled up; clears on reaching the bottom.
+    const NewMessagesPill = {
+        count: 0,
+        render() {
+            if (!jumpToBottomBtn) return;
+            if (this.count <= 0) {
+                jumpToBottomBtn.style.display = 'none';
+                return;
+            }
+            const label = jumpToBottomBtn.querySelector('.jump-label');
+            const text = `${this.count} new ${this.count === 1 ? 'message' : 'messages'}`;
+            if (label) label.textContent = text;
+            jumpToBottomBtn.style.display = 'block';
+        },
+        add(n = 1) {
+            this.count += n;
+            this.render();
+        },
+        reset() {
+            this.count = 0;
+            this.render();
+        },
     };
 
     // --- Click a quoted reply → go to the original message ---
@@ -2094,20 +2530,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (indicator.textContent !== message) indicator.textContent = message;
         });
     };
-    let userWasNearBottom = false;
+    // Measured before a frame's content lands, so its own height doesn't
+    // count against "was the user at the bottom?".
     document.body.addEventListener('htmx:wsBeforeMessage', function() {
-        userWasNearBottom = isUserNearBottom();
+        if (activeConversationId()) StickToBottom.pinned = isUserNearBottom();
     });
 
     document.body.addEventListener('htmx:afterSettle', (event) => {
         const target = event.detail.target;
 
-        // --- Scrolling logic for new chat history ---
-        // This is the main fix for the issue.
-        if (target.id === 'chat-messages-container') {
-            const jumpSelector = getJumpSelector(event.detail.xhr);
-            jumpSelector ? scrollToMessage(jumpSelector) : scrollChatToPosition();
-        }
+        // (Positioning a freshly opened pane happens in htmx:afterSwap, before
+        // the first paint.)
 
         // Re-initialize dynamic components on the newly swapped content.
         // This prevents things like tooltips and popovers from breaking after a swap.
@@ -2146,10 +2579,24 @@ document.addEventListener('DOMContentLoaded', () => {
         const frag = evt.detail.fragment;
         if (!frag || !frag.querySelector) return;
 
+        const target = evt.detail.target;
+
+        // Opening a conversation sends a fresh default composer. Keep the one
+        // on screen when it's already the default: replacing it rebuilt the
+        // editor and its emoji picker on every switch and dropped focus. (Its
+        // draft is swapped per conversation in htmx:beforeRequest/afterSwap.)
+        if (target && target.id === 'chat-input-container') {
+            const isDefault = (form) => !!form && form.hasAttribute('hx-post')
+                && !form.querySelector('input[name="reply_type"]');
+            if (isDefault(frag.querySelector('#message-form')) && isDefault(target.querySelector('#message-form'))) {
+                evt.preventDefault();
+            }
+            return;
+        }
+
         // An append tagged for another conversation than the one on screen:
         // the socket was still subscribed to the previous pane, or a backfill
         // came back after the user switched. Drop it.
-        const target = evt.detail.target;
         if (target && target.id === 'message-list' && frag.getAttribute) {
             const fragConv = frag.getAttribute('data-conversation-id');
             const pane = target.closest('[data-conversation-id]');
@@ -2221,6 +2668,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Localize the appended reply's timestamp (see note in the
             // message-list branch); otherwise live thread replies show UTC.
             formatLocalTimes(target);
+            target.querySelectorAll('.message-container[data-client-id]:not(.pending-message)').forEach((el) => {
+                PendingMessages.resolve(el.dataset.clientId);
+            });
+            PendingMessages.keepAtBottom(target);
 
             const scrollableContainer = target.closest('.flex-grow-1[style*="overflow-y: auto"]');
             if (scrollableContainer) {
@@ -2275,26 +2726,29 @@ document.addEventListener('DOMContentLoaded', () => {
             // last one.
             formatLocalTimes(target);
 
+            // A real message replaces its optimistic copy; copies still in
+            // flight stay below everything that arrived meanwhile.
+            target.querySelectorAll('.message-container[data-client-id]:not(.pending-message)').forEach((el) => {
+                PendingMessages.resolve(el.dataset.clientId);
+            });
+            PendingMessages.keepAtBottom(target);
+
             const messagesContainer = document.getElementById('chat-messages-container');
             const mainContent = document.querySelector('main.main-content');
-            const jumpToBottomBtn = document.getElementById('jump-to-bottom-btn');
             const currentUserId = mainContent.dataset.currentUserId;
-            const lastMessage = target.querySelector('.message-container:last-child, .system-message:last-child');
+            const arrived = target.querySelectorAll('.message-container:not(.pending-message), .system-message');
+            const lastMessage = arrived[arrived.length - 1];
 
-            if (lastMessage && messagesContainer) {
-                const messageAuthorId = lastMessage.dataset.userId;
-
-                if (messageAuthorId === currentUserId || userWasNearBottom) {
-                    setTimeout(scrollLastMessageIntoView, 0);
-
-                    // Wait for images to load, then scroll again (we don't know how tall it will be)
-                    const images = lastMessage.querySelectorAll('img:not(.avatar-image)');
-                    images.forEach(img => {
-                        img.addEventListener('load', scrollLastMessageIntoView);
-                    });
+            if (lastMessage && messagesContainer && !lastMessage.dataset.d8Seen) {
+                lastMessage.dataset.d8Seen = '1';
+                const mine = lastMessage.dataset.userId === currentUserId;
+                if (mine || StickToBottom.pinned) {
+                    scrollLastMessageIntoView();
                 } else {
-                    if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block';
+                    NewMessagesPill.add();
                 }
+                lastMessage.classList.add('just-arrived');
+                setTimeout(() => lastMessage.classList.remove('just-arrived'), 400);
 
                 // Since a new message was added, initialize its dynamic elements.
                 if (lastMessage.matches('.message-container')) {
@@ -2374,60 +2828,20 @@ document.addEventListener('DOMContentLoaded', () => {
             // Not a JSON message, so it's HTML. Proceed below.
         }
 
-        // 2. If it's HTML, check if it's an OOB swap.
-        // If it is, we do nothing and let HTMX handle it automatically.
-        if (event.detail.message.includes('hx-swap-oob')) {
-             // HTMX will process this automatically. We just need to update the favicon.
-             FaviconManager.updateFavicon();
-             return;
-        }
-
-        // 3. If it's not JSON and not OOB, it must be a new message for the main chat window.
-        const messagesContainer = document.getElementById('chat-messages-container');
-        const mainContent = document.querySelector('main.main-content');
-        const currentUserId = mainContent.dataset.currentUserId;
-        const lastMessage = document.querySelector('#message-list > .message-container:last-child');
-
-        if (lastMessage && messagesContainer) {
-            const messageAuthorId = lastMessage.dataset.userId;
-
-            if (messageAuthorId === currentUserId || userWasNearBottom) {
-                setTimeout(scrollLastMessageIntoView, 0);
-
-                // Wait for images to load, then scroll again
-                const images = lastMessage.querySelectorAll('img:not(.avatar-image)');
-                images.forEach(img => {
-                    img.addEventListener('load', scrollLastMessageIntoView);
-                });
-            } else {
-                if (jumpToBottomBtn) jumpToBottomBtn.style.display = 'block'; // Show the button if we were scrolled up
-            }
-            // Process new elements in the message list
-            initializeReactionPopovers(messagesContainer);
-            processCodeBlocks(messagesContainer);
-            formatLocalTimes(messagesContainer);
-
-            const conversationDiv = messagesContainer.querySelector('[data-conversation-db-id]');
-            if (conversationDiv) {
-                const conversationId = conversationDiv.dataset.conversationDbId;
-                handleMentionHighlights(messagesContainer, conversationId);
-            }
-        }
-        // A new message might affect the unread count if it contains a mention
+        // 2. Otherwise it's HTML: every frame the server sends is OOB swaps,
+        // which htmx applies itself. The unread count may have changed.
         FaviconManager.updateFavicon();
     });
 
     if (messagesContainer) {
         messagesContainer.addEventListener('scroll', () => {
-            if (isUserNearBottom() && jumpToBottomBtn) {
-                jumpToBottomBtn.style.display = 'none';
-            }
-        });
+            if (isUserNearBottom()) NewMessagesPill.reset();
+        }, { passive: true });
     }
     if (jumpToBottomBtn) {
         jumpToBottomBtn.addEventListener('click', () => {
-            setTimeout(scrollLastMessageIntoView, 50);
-            jumpToBottomBtn.style.display = 'none';
+            scrollLastMessageIntoView();
+            NewMessagesPill.reset();
         });
     }
     const htmxModalEl = document.getElementById('htmx-modal');
@@ -2508,6 +2922,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+    DraftManager.markAll();
     processCodeBlocks(document.body);
     initializeReactionPopovers(document.body);
     updateReactionHighlights(document.body);

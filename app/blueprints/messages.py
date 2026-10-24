@@ -187,11 +187,16 @@ def post_message(conv_id_str):
     The browser's socket is push-only now: an HTTP POST gives the sender a
     definitive success/failure instead of a fire-and-forget WS frame that a
     half-dead socket could silently swallow (the root of the "messages
-    disappear" reports). The rendered message still lands in the sender's DOM
-    via the WS broadcast echo, so on success the UX is unchanged. Returns 204;
-    the client clears the composer on 2xx and preserves the draft on error.
+    disappear" reports).
+
+    The client shows its message right away, tagged with ``client_id``. On
+    success this returns 200 with the same OOB HTML the broadcast carries (the
+    rendered message with that ``client_id``), which replaces the optimistic
+    copy even when the WebSocket echo is slow or lost; a copy arriving both
+    ways is deduplicated in the browser. On an error the client keeps the
+    message with a Retry.
     """
-    status, _ = handle_inbound_message(
+    status, _, html = handle_inbound_message(
         sender=g.user,
         conv_id_str=conv_id_str,
         chat_text=request.form.get("chat_message"),
@@ -199,9 +204,12 @@ def post_message(conv_id_str):
         reply_type=request.form.get("reply_type") or None,
         attachment_file_ids=request.form.get("attachment_file_ids") or None,
         quoted_message_id=_opt_int(request.form.get("quoted_message_id")),
+        client_id=request.form.get("client_id") or None,
     )
     if status == "ok":
-        return "", 204
+        response = make_response(html)
+        response.headers["Content-Type"] = "text/html; charset=utf-8"
+        return response
     if status == "empty":
         return "Message is empty.", 400
     if status == "bad_request":
@@ -550,7 +558,9 @@ def jump_to_message(message_id):
                 is_active=chat_manager.is_user_active(other_user.id),
             )
 
-    header_html = oob_by_id("chat-header-container", "true", header_html_content)
+    # The header partial swaps itself (hx-swap-oob on its root); wrapping it
+    # nested a second #chat-header-container inside the first.
+    header_html = header_html_content
 
     full_response = messages_html + header_html + clear_badge_html + add_to_sidebar_html
     response = make_response(full_response)

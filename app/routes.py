@@ -5,6 +5,7 @@
 import datetime
 import functools
 import json
+import re
 import time
 
 from flask import (
@@ -1006,8 +1007,10 @@ def message_update_oob(message, reactions_map, attachments_map):
     return "".join(parts)
 
 
-def _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str):
-    """Broadcasts a thread reply to relevant users."""
+def _broadcast_thread_reply(
+    sender, new_message, parent_id, conv_id_str, client_id=None
+):
+    """Broadcasts a thread reply to relevant users; returns the web HTML."""
     from app.blueprints.api_v1 import serialize_message
 
     reactions_map_for_reply = get_reactions_for_messages(list((new_message,)))
@@ -1019,6 +1022,7 @@ def _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str):
         attachments_map=attachments_map_for_reply,
         Message=Message,
         is_in_thread_view=True,
+        client_id=client_id,
     )
     broadcast_html = oob_to_selector(
         "beforeend", f"#thread-replies-list-{int(parent_id)}", new_reply_html
@@ -1060,10 +1064,11 @@ def _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str):
     chat_manager.broadcast(
         conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
     )
+    return broadcast_html
 
 
-def _broadcast_regular_message(sender, new_message, conv_id_str):
-    """Broadcasts a regular message or quoted reply."""
+def _broadcast_regular_message(sender, new_message, conv_id_str, client_id=None):
+    """Broadcasts a regular message or quoted reply; returns the web HTML."""
     from app.blueprints.api_v1 import serialize_message
 
     reactions_map = get_reactions_for_messages(list((new_message,)))
@@ -1078,6 +1083,7 @@ def _broadcast_regular_message(sender, new_message, conv_id_str):
         reactions_map=reactions_map,
         attachments_map=attachments_map,
         Message=Message,
+        client_id=client_id,
     )
     message_to_broadcast = date_separator_oob(
         new_message, prev_message, conv_id_str
@@ -1092,9 +1098,7 @@ def _broadcast_regular_message(sender, new_message, conv_id_str):
         conv_id_str,
         {"_raw_html": message_to_broadcast, "api_data": api_data},
     )
-    # The web client resets its own composer on the POST's htmx:afterRequest
-    # (including reverting a quote-reply input to the default), so there's no
-    # server-pushed input reset here anymore.
+    return message_to_broadcast
 
 
 # Token-bucket parameters for per-connection WS event rate limiting: a 60-event
@@ -1253,13 +1257,17 @@ def handle_inbound_message(
     reply_type=None,
     attachment_file_ids=None,
     quoted_message_id=None,
+    client_id=None,
 ):
     """Create, broadcast, and notify for one new message from ``sender``.
 
     Shared by the WebSocket path (``_process_ws_event``), the web HTTP POST
     endpoint and the mobile REST endpoint so all of them enforce identical
-    access rules and produce identical broadcasts. Returns ``(status,
-    message)``: the new ``Message`` on "ok", else ``None``. Status is one of:
+    access rules and produce identical broadcasts. Returns ``(status, message,
+    html)``: on "ok" the new ``Message`` and the web HTML that was broadcast,
+    else ``None, None``. ``client_id`` is the sending tab's id for its
+    optimistic copy, echoed on the rendered message so the tab can swap one for
+    the other. Status is one of:
 
       "ok"              — message created and broadcast
       "empty"           — nothing to send (no text, no attachments)
@@ -1269,7 +1277,7 @@ def handle_inbound_message(
       "bad_ref"         — a parent/quote/attachment id the sender can't use
     """
     if not chat_text and not attachment_file_ids:
-        return "empty", None
+        return "empty", None, None
 
     conversation = Conversation.get_or_none(conversation_id_str=conv_id_str)
     if not conversation:
@@ -1281,12 +1289,12 @@ def handle_inbound_message(
             conv_id_str,
             getattr(sender, "id", None),
         )
-        return "no_conversation", None
+        return "no_conversation", None, None
 
     try:
         parsed_conv = parse_conversation_id(conversation.conversation_id_str)
     except ValueError:
-        return "bad_request", None
+        return "bad_request", None, None
 
     # Membership + posting-restriction gate: any authenticated client could
     # otherwise post into any conversation by naming another conv's id.
@@ -1294,7 +1302,7 @@ def handle_inbound_message(
         current_app.logger.warning(
             "Send blocked: user %s can't post to %r", sender.id, conv_id_str
         )
-        return "forbidden", None
+        return "forbidden", None, None
 
     try:
         parent_id, reply_type, quoted_message_id, file_ids = (
@@ -1311,7 +1319,7 @@ def handle_inbound_message(
         current_app.logger.warning(
             "Send blocked: user %s, bad reference (%s)", sender.id, exc
         )
-        return "bad_ref", None
+        return "bad_ref", None, None
 
     new_message = chat_service.handle_new_message(
         sender=sender,
@@ -1324,10 +1332,14 @@ def handle_inbound_message(
     )
 
     # --- Broadcast and Notification Logic ---
+    if client_id is not None and not CLIENT_ID_RE.fullmatch(str(client_id)):
+        client_id = None
     if new_message.reply_type == "thread":
-        _broadcast_thread_reply(sender, new_message, parent_id, conv_id_str)
+        html = _broadcast_thread_reply(
+            sender, new_message, new_message.parent_message_id, conv_id_str, client_id
+        )
     else:
-        _broadcast_regular_message(sender, new_message, conv_id_str)
+        html = _broadcast_regular_message(sender, new_message, conv_id_str, client_id)
 
     # Notification fan-out (badges, sounds, desktop + FCM push) runs off the hot
     # path so the sender's send returns immediately and slow FCM HTTP can't
@@ -1335,7 +1347,11 @@ def handle_inbound_message(
     spawn_background(
         chat_service.send_notifications_for_new_message, new_message, sender
     )
-    return "ok", new_message
+    return "ok", new_message, html
+
+
+# A sending tab's id for its optimistic copy of a message (crypto.randomUUID).
+CLIENT_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
 
 
 # --- WebSocket connection helpers ---

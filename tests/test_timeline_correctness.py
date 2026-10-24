@@ -356,7 +356,7 @@ def test_valkey_outage_does_not_fail_a_send(logged_in_client, general, mocker):
         f"/chat/conversations/{general['conv'].conversation_id_str}/messages",
         data={"chat_message": "still saved"},
     )
-    assert res.status_code == 204
+    assert res.status_code == 200
     assert Message.select().where(Message.content == "still saved").count() == 1
 
 

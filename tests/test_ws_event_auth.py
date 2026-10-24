@@ -88,7 +88,7 @@ class TestAllowedSends:
             handle_new_message = mocker.patch(
                 "app.routes.chat_service.handle_new_message"
             )
-            mocker.patch("app.routes._broadcast_regular_message")
+            mocker.patch("app.routes._broadcast_regular_message", return_value="")
             mocker.patch("app.routes.chat_service.send_notifications_for_new_message")
 
             _process_ws_event(
@@ -109,7 +109,7 @@ class TestAllowedSends:
             handle_new_message = mocker.patch(
                 "app.routes.chat_service.handle_new_message"
             )
-            mocker.patch("app.routes._broadcast_regular_message")
+            mocker.patch("app.routes._broadcast_regular_message", return_value="")
             mocker.patch("app.routes.chat_service.send_notifications_for_new_message")
 
             _process_ws_event(

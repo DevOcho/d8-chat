@@ -1431,3 +1431,94 @@ a.hashtag-link:hover {
     font-size: 0.75rem;
     opacity: 0.8;
 }
+
+/* --- Instant feedback (chat.js: conversation switching, optimistic sends) --- */
+
+/* The open conversation, highlighted the moment it's clicked. */
+.sidebar-item-link.active {
+    background-color: rgba(255, 255, 255, 0.18);
+}
+.sidebar-item-link.active [id^="link-"] {
+    color: #fff !important;
+}
+[data-bs-theme="dark"] .sidebar-item-link.active {
+    background-color: #3b4659;
+}
+
+/* Shown only when opening a conversation takes longer than ~150ms. */
+.pane-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 2px;
+    width: 0;
+    z-index: 20;
+    background: linear-gradient(90deg, #a855f7, #ec4899);
+    opacity: 0;
+    pointer-events: none;
+}
+.pane-progress.htmx-request {
+    opacity: 1;
+    animation: pane-progress 1.6s ease-out 150ms both;
+}
+@keyframes pane-progress {
+    from { width: 0; }
+    to { width: 85%; }
+}
+
+/* "N new messages ↓", pinned above the composer. */
+.jump-to-latest-anchor {
+    position: relative;
+    height: 0;
+    z-index: 10;
+}
+.jump-to-latest-anchor #jump-to-bottom-btn {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+/* A message on its way: dimmed until the server's copy replaces it. */
+.pending-message {
+    opacity: 0.6;
+}
+.pending-message .pending-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.pending-message.failed {
+    opacity: 1;
+}
+.pending-message.failed .pending-text {
+    color: var(--bs-secondary-color);
+}
+
+/* A conversation holding an unsent draft. */
+.has-draft::after {
+    content: "✎";
+    margin-left: 0.35rem;
+    font-size: 0.8em;
+    opacity: 0.75;
+}
+
+/* A just-arrived message fades in instead of popping. */
+.message-container.just-arrived {
+    animation: message-arrive 160ms ease-out;
+}
+@keyframes message-arrive {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .message-container.just-arrived,
+    .pane-progress.htmx-request {
+        animation: none;
+    }
+}
+
+/* A single image with known dimensions gets its exact box before it loads
+   (message.html sets aspect-ratio and width), so the timeline doesn't jump. */
+.attachment-grid[data-count="1"] .attachment-grid-item[style*="aspect-ratio"] img {
+    height: 100%;
+}

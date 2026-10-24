@@ -346,14 +346,20 @@
             this.titleTimer = setInterval(() => {
                 on = !on;
                 const first = this.entries.values().next().value;
-                document.title = on && first ? `🚨 PAGE: ${first.incident.title}` : this.originalTitle;
+                document.title = on && first ? `🚨 PAGE: ${first.incident.title}` : this.baseTitle();
             }, 1000);
         },
 
         stopTitleFlash() {
             clearInterval(this.titleTimer);
             this.titleTimer = null;
-            document.title = this.originalTitle;
+            document.title = this.baseTitle();
+        },
+
+        // The title chat.js would show right now (the open conversation and
+        // unread count), not the one captured when the page loaded.
+        baseTitle() {
+            return window.TitleManager ? window.TitleManager.current() : this.originalTitle;
         },
 
         notify(incident, renotify) {
