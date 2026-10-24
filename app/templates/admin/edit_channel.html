@@ -100,9 +100,7 @@
                               method="POST"
                               class="d-flex align-items-center me-3">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <select name="role"
-                                    class="form-select form-select-sm"
-                                    onchange="this.form.submit()">
+                            <select name="role" class="form-select form-select-sm" data-autosubmit>
                                 <option value="member" {% if member.role == 'member' %}selected{% endif %}>Member</option>
                                 <option value="admin" {% if member.role == 'admin' %}selected{% endif %}>Admin</option>
                             </select>
@@ -110,7 +108,7 @@
                         <!-- Form to remove the user from the channel -->
                         <form action="{{ url_for('admin.remove_channel_member', channel_id=channel.id, user_id=member.user.id) }}"
                               method="POST"
-                              onsubmit="return confirm('Are you sure you want to remove this user from the channel?');">
+                              data-confirm="Remove this user from the channel?">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                             <button type="submit" class="btn btn-sm btn-danger">Remove</button>
                         </form>

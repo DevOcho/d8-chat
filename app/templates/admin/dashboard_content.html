@@ -100,89 +100,12 @@
                 <h6 class="m-0 font-weight-bold text-primary">Messages Sent (Last 24 Hours)</h6>
             </div>
             <div class="card-body">
-                <canvas id="messagesChart"></canvas>
+                <canvas id="messagesChart"
+                        data-chart-src="{{ static_url('js/local/chart.umd.min.js') }}"></canvas>
             </div>
         </div>
     </div>
 </div>
-<!-- Chart.js (vendored locally — see static/js/local/chart.umd.min.js) -->
-<script>
-    (function() {
-        // Draw only once chart.js is there. When this partial is swapped in by
-        // htmx, a <script src> next to it loads asynchronously, after this
-        // inline script has already run, which left the chart blank.
-        function draw() {
-            const ctx = document.getElementById('messagesChart');
-            if (!ctx) return; // Defensive check
-
-            // --- Dark Mode Logic for Chart ---
-            const htmlElement = document.documentElement;
-            const isDarkMode = htmlElement.getAttribute('data-bs-theme') === 'dark';
-            const gridColor = isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
-            const textColor = isDarkMode ? '#dee2e6' : '#6c757d';
-
-            // Hour starts come as UTC ISO strings; label them in the viewer's
-            // own time zone, the current hour as "Now".
-            const hours = {{ chart_hours | tojson }};
-            const labels = hours.map((iso, i) => (i === hours.length - 1
-                ? 'Now'
-                : new Date(iso).toLocaleTimeString([], { hour: 'numeric' })));
-            const dataPoints = {{ chart_values | tojson }};
-
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Messages',
-                        data: dataPoints,
-                        backgroundColor: 'rgba(54, 185, 204, 0.5)', // Fill color
-                        borderColor: 'rgb(54, 185, 204)',     // Border color
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            ticks: {
-                                precision: 0,
-                                color: textColor
-                            },
-                            grid: { color: gridColor }
-                        },
-                        x: {
-                            ticks: { color: textColor },
-                            grid: { color: gridColor }
-                        }
-                    },
-                    plugins: {
-                        legend: { display: false }
-                    }
-                }
-            });
-        }
-
-        if (window.Chart) {
-            draw();
-            return;
-        }
-        const script = document.createElement('script');
-        script.src = "{{ static_url('js/local/chart.umd.min.js') }}";
-        script.onload = draw;
-        document.head.appendChild(script);
-    })();
-</script>
-<style>
-        .card .border-left-primary { border-left: 0.25rem solid #4e73df !important; }
-        .card .border-left-success { border-left: 0.25rem solid #1cc88a !important; }
-        .card .border-left-info { border-left: 0.25rem solid #36b9cc !important; }
-        .card .border-left-warning { border-left: 0.25rem solid #f6c23e !important; }
-        .card .border-left-indigo { border-left: 0.25rem solid #6610f2 !important; }
-        .card .border-left-orange { border-left: 0.25rem solid #fd7e14 !important; }
-        .text-gray-300 { color: #dddfeb !important; }
-        .text-indigo { color: #6610f2 !important; }
-        .text-orange { color: #fd7e14 !important; }
-        /* #fd7e14 is 2.6:1 on white; this is 5.6:1. Dark mode keeps the bright one. */
-        :root:not([data-bs-theme="dark"]) .text-orange { color: #a14a04 !important; }
-</style>
+{# Drawn by admin.js (which loads the vendored chart.js first if needed): hour
+   starts as UTC ISO strings, and the message count for each. #}
+<script type="application/json" id="dashboard-chart-data">{{ {"hours": chart_hours, "values": chart_values} | tojson }}</script>

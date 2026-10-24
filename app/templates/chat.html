@@ -397,27 +397,7 @@
                 </div>
             </div>
         </div>
-        {# Asks before destructive actions (hx-confirm), instead of the browser's
-           native dialog (chat.js ConfirmDialog). #}
-        <div class="modal fade"
-             id="confirm-modal"
-             tabindex="-1"
-             aria-labelledby="confirm-modal-title"
-             aria-describedby="confirm-modal-body"
-             aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered modal-sm">
-                <div class="modal-content">
-                    <div class="modal-header border-0 pb-0">
-                        <h2 class="modal-title fs-6 fw-semibold" id="confirm-modal-title">Are you sure?</h2>
-                    </div>
-                    <div class="modal-body" id="confirm-modal-body"></div>
-                    <div class="modal-footer border-0 pt-0">
-                        <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-danger" id="confirm-modal-ok">Confirm</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        {% include "partials/confirm_modal.html" %}
         <!-- Generic HTMX Modal -->
         <div class="modal fade"
              id="htmx-modal"

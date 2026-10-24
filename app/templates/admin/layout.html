@@ -51,7 +51,6 @@
             {% block content %}{% endblock %}
         </main>
     </div>
+    {% include "partials/confirm_modal.html" %}
 {% endblock layout %}
-{% block scripts %}
-    {% block admin_scripts %}{% endblock %}
-{% endblock %}
+{% block scripts %}<script src="{{ static_url('js/admin.js') }}"></script>{% endblock %}

@@ -45,6 +45,7 @@ const SCRIPT_FILES = {
     ui: 'app/static/js/ui.js',
     chat: 'app/static/js/chat.js',
     pager: 'app/static/js/pager.js',
+    admin: 'app/static/js/admin.js',
 };
 
 // <emoji-picker> ships as an ES module bundle; chat.js only needs the element

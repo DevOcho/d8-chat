@@ -1633,3 +1633,16 @@ a.hashtag-link {
 .message-toolbar .author-only-action {
     display: none !important;
 }
+
+/* Admin dashboard stat cards. */
+.card .border-left-primary { border-left: 0.25rem solid #4e73df !important; }
+.card .border-left-success { border-left: 0.25rem solid #1cc88a !important; }
+.card .border-left-info { border-left: 0.25rem solid #36b9cc !important; }
+.card .border-left-warning { border-left: 0.25rem solid #f6c23e !important; }
+.card .border-left-indigo { border-left: 0.25rem solid #6610f2 !important; }
+.card .border-left-orange { border-left: 0.25rem solid #fd7e14 !important; }
+.text-gray-300 { color: #dddfeb !important; }
+.text-indigo { color: #6610f2 !important; }
+.text-orange { color: #fd7e14 !important; }
+/* #fd7e14 is 2.6:1 on white; this is 5.6:1. Dark mode keeps the bright one. */
+:root:not([data-bs-theme="dark"]) .text-orange { color: #a14a04 !important; }

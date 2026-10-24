@@ -2249,43 +2249,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Confirmations ---------------------------------------------------------
-    // hx-confirm (delete a message, leave a conversation...) asks in a modal
-    // instead of the browser's native dialog, which blocks the page and can't
-    // be styled.
-    const ConfirmDialog = (() => {
-        const el = document.getElementById('confirm-modal');
-        if (!el || typeof bootstrap === 'undefined') return null;
-        const modal = new bootstrap.Modal(el);
-        const body = document.getElementById('confirm-modal-body');
-        const ok = document.getElementById('confirm-modal-ok');
-        let onConfirm = null;
-        ok.addEventListener('click', () => {
-            const proceed = onConfirm;
-            onConfirm = null;
-            modal.hide();
-            if (proceed) proceed();
-        });
-        el.addEventListener('hidden.bs.modal', () => { onConfirm = null; });
-        el.addEventListener('shown.bs.modal', () => ok.focus());
-        return {
-            ask(question, proceed, label = 'Confirm') {
-                body.textContent = question;
-                ok.textContent = label;
-                onConfirm = proceed;
-                modal.show();
-            },
-        };
-    })();
-    window.ConfirmDialog = ConfirmDialog;
-    document.body.addEventListener('htmx:confirm', (evt) => {
-        const question = evt.detail.question;
-        if (!question || !ConfirmDialog) return;
-        evt.preventDefault();
-        const label = /\bdelete\b/i.test(question) ? 'Delete'
-            : /\bleave\b/i.test(question) ? 'Leave'
-            : /\bremove\b/i.test(question) ? 'Remove' : 'Confirm';
-        ConfirmDialog.ask(question, () => evt.detail.issueRequest(true), label);
-    });
+    // hx-confirm (delete a message, leave a conversation...) asks in the app's
+    // modal: see ConfirmDialog in ui.js.
 
     // --- Reactions -----------------------------------------------------------------
     // Clicking a reaction pill flips it at once; the server's copy of the

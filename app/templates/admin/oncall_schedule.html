@@ -161,7 +161,7 @@
                 </div>
                 <form action="{{ url_for('admin.oncall_delete_override', schedule_id=schedule.id, override_id=override.id) }}"
                       method="POST"
-                      onsubmit="return confirm('Remove this override?');">
+                      data-confirm="Remove this override?">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
                 </form>
@@ -201,7 +201,7 @@
                     {% endfor %}
                     <form action="{{ url_for('admin.oncall_remove_member', schedule_id=schedule.id, member_id=member.id) }}"
                           method="POST"
-                          onsubmit="return confirm('Remove {{ member.user.username }} from the rotation?');">
+                          data-confirm="Remove {{ member.user.username }} from the rotation?">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
                     </form>
@@ -279,21 +279,8 @@
     <form action="{{ url_for('admin.oncall_delete_schedule', schedule_id=schedule.id) }}"
           method="POST"
           class="mt-5"
-          onsubmit="return confirm('Delete this rotation? Escalation levels that use it will page nobody until you fix them.');">
+          data-confirm="Delete this rotation? Escalation levels that use it will page nobody until you fix them.">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-outline-danger">Delete rotation</button>
     </form>
-{% endblock %}
-{% block admin_scripts %}
-    <script>
-      // "Override this week" fills the override form with that shift's bounds.
-      document.querySelectorAll('.use-shift-dates').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          document.getElementById('override-start').value = btn.dataset.start;
-          document.getElementById('override-end').value = btn.dataset.end;
-          document.getElementById('override-form-title').scrollIntoView({ behavior: 'smooth' });
-          document.getElementById('override-user').focus();
-        });
-      });
-    </script>
 {% endblock %}

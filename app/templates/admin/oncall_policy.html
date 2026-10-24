@@ -106,7 +106,7 @@
                             <form action="{{ url_for('admin.oncall_delete_level', policy_id=policy.id, level_id=level.id) }}"
                                   method="POST"
                                   class="d-inline"
-                                  onsubmit="return confirm('Remove level {{ level.level }}?');">
+                                  data-confirm="Remove level {{ level.level }}?">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
                             </form>
@@ -217,21 +217,4 @@
                 {% endfor %}
             </tbody>
         </table>
-    {% endblock %}
-    {% block admin_scripts %}
-        <script>
-      // Show only the target input that matches each row's target type.
-      function syncLevelTarget(select) {
-        const prefix = select.dataset.prefix;
-        ['schedule', 'group', 'user'].forEach((kind) => {
-          document.querySelectorAll(`.${prefix}-${kind}`).forEach((el) => {
-            el.hidden = select.value !== kind;
-          });
-        });
-      }
-      document.querySelectorAll('.level-target-type').forEach((select) => {
-        syncLevelTarget(select);
-        select.addEventListener('change', () => syncLevelTarget(select));
-      });
-        </script>
     {% endblock %}
