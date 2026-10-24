@@ -268,6 +268,8 @@ Copy `example.env` to `.env`. Required variables:
 
 Optional SSO: `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_ISSUER_URL`
 
+Content-Security-Policy: `CSP_MODE` = `report` (default: loose policy enforced, strict one sent as Report-Only), `enforce` (strict for every group in `app.CSP_ENFORCEABLE`), or `legacy` (no reporting). Browsers POST violations to `/csp-report`, logged as `csp_violation` lines; the e2e suite records them too and prints a burn-down summary. See `CSP_PLAN.md`.
+
 Optional Authentik account sync: `AUTHENTIK_API_TOKEN` (a service account that can view users); `AUTHENTIK_API_URL` (defaults to the issuer's origin), `AUTHENTIK_SUBJECT_FIELD` (default `uid`), `AUTHENTIK_SYNC_INTERVAL_SECONDS` (60), `AUTHENTIK_SYNC_GROUPS` (`true`)
 
 ## Testing Notes

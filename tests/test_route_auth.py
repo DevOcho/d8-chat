@@ -56,6 +56,7 @@ PUBLIC_ENDPOINTS = {
     "api_ws": "WebSocket: bearer token via Sec-WebSocket-Protocol",
     # Infrastructure.
     "main.healthz": "k8s readiness probe; reports component status only",
+    "csp.csp_report": "browsers POST CSP violation reports without a session; log-only, rate-limited, size-capped",
     "static": "static assets",
 }
 

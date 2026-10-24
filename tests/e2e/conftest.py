@@ -44,6 +44,35 @@ from .helpers import (
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+# --- Content-Security-Policy violations (CSP_PLAN.md) ------------------------
+#
+# Every browser context reports each CSP violation (enforced or Report-Only)
+# through an exposed binding, so the list survives navigations. A test fails on
+# any violation of a directive in CSP_FAIL_DIRECTIVES (the groups the app
+# enforces strictly); the rest are collected for the end-of-run summary, which
+# is the burn-down list for the next phase.
+CSP_FAIL_DIRECTIVES: tuple[str, ...] = ()
+
+CSP_RECORDER = """
+(() => {
+    document.addEventListener('securitypolicyviolation', (e) => {
+        try {
+            window.__d8RecordCsp({
+                directive: e.effectiveDirective || e.violatedDirective || '',
+                disposition: e.disposition || '',
+                blocked: e.blockedURI || '',
+                source: (e.sourceFile || '').replace(location.origin, ''),
+                line: e.lineNumber || 0,
+                sample: (e.sample || '').slice(0, 80),
+                page: location.pathname,
+            });
+        } catch (err) { /* the binding is gone during teardown */ }
+    });
+})();
+"""
+
+_csp_violations: list[dict] = []
+
 # Satisfies the password policy (12+ chars, a letter and a number).
 E2E_USER_PASSWORD = "E2e-password-12345"
 
@@ -122,6 +151,71 @@ def fresh_context(context: BrowserContext) -> BrowserContext:
 def fixture_path():
     """Builds absolute paths to ``tests/e2e/fixtures/<name>``."""
     return lambda name: str(FIXTURES_DIR / name)
+
+
+@pytest.fixture
+def new_context(new_context, request):
+    """pytest-playwright's context factory, recording CSP violations."""
+    violations: list[dict] = []
+    contexts: list[BrowserContext] = []
+
+    def _record(_source, violation):
+        violations.append({**violation, "test": request.node.nodeid})
+
+    def _new_context(**kwargs) -> BrowserContext:
+        context = new_context(**kwargs)
+        context.expose_binding("__d8RecordCsp", _record)
+        context.add_init_script(CSP_RECORDER)
+        contexts.append(context)
+        return context
+
+    yield _new_context
+
+    # Let pending binding calls land before the contexts close.
+    for context in contexts:
+        for page in context.pages:
+            try:
+                page.evaluate("0")
+            except Exception:  # noqa: BLE001 - a closed page has nothing pending
+                pass
+    _csp_violations.extend(violations)
+    failing = [
+        v
+        for v in violations
+        if CSP_FAIL_DIRECTIVES and v["directive"].startswith(CSP_FAIL_DIRECTIVES)
+    ]
+    if failing:
+        lines = [f"{len(failing)} CSP violation(s) of an enforced directive:"]
+        lines += [
+            f"  {v['directive']} on {v['page']}: blocked {v['blocked'] or '(inline)'}"
+            f" at {v['source']}:{v['line']} {v['sample']!r}"
+            for v in failing[:10]
+        ]
+        pytest.fail("\n".join(lines), pytrace=False)
+
+
+def pytest_terminal_summary(terminalreporter):
+    """The CSP burn-down: what the strict policy would still block."""
+    if not _csp_violations:
+        return
+    from collections import Counter
+
+    grouped = Counter(
+        (
+            v["directive"],
+            v["disposition"],
+            v["source"] or v["blocked"] or "(inline)",
+            v["sample"],
+        )
+        for v in _csp_violations
+    )
+    terminalreporter.section("CSP violations (strict policy)")
+    for (directive, disposition, where, sample), count in grouped.most_common(40):
+        terminalreporter.write_line(
+            f"{count:4d}  {directive} [{disposition}] {where} {sample!r}"
+        )
+    if len(grouped) > 40:
+        terminalreporter.write_line(f"  ... and {len(grouped) - 40} more distinct")
 
 
 # --- Accounts (one form login per account per session) ----------------------

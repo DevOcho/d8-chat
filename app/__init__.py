@@ -298,6 +298,11 @@ def _validate_config(app):
     """
     cfg = app.config
 
+    if cfg.get("CSP_MODE", "report") not in CSP_MODES:
+        raise RuntimeError(
+            f"CSP_MODE must be one of {', '.join(CSP_MODES)}, not {cfg.get('CSP_MODE')!r}."
+        )
+
     # SECRET_KEY length is enforced in config.py at import time, but we double-
     # check here in case a caller passed a custom config_class.
     secret = cfg.get("SECRET_KEY") or ""
@@ -390,35 +395,53 @@ def _check_valkey_health(app):
         )
 
 
-def _build_csp(minio_origin):
+# Which strict directive groups the code is ready to enforce (CSP_PLAN.md).
+# A phase flips its group once nothing in the app needs the loose rule; until
+# then the strict rule is only reported (Content-Security-Policy-Report-Only).
+CSP_ENFORCEABLE = {"scripts": False, "styles": False}
+
+CSP_MODES = ("legacy", "report", "enforce")
+CSP_REPORT_PATH = "/csp-report"
+CSP_REPORT_GROUP = "csp"
+
+
+def _build_csp(
+    minio_origin, *, strict_scripts=False, strict_styles=False, report=False
+):
     """
     Build the Content-Security-Policy for HTML responses.
 
-    Two deliberate looseness points are documented inline below — both are
-    known costs of legacy template choices and could be tightened by
-    refactoring.
+    The loose (legacy) rules are what the templates needed before CSP_PLAN.md:
+    ``'unsafe-inline'`` for inline ``<script>``s, ``on*=`` handlers and
+    ``style="..."`` attributes, and ``'unsafe-eval'`` because htmx evaluates
+    ``hx-on`` attributes with ``new Function()``. ``strict_scripts`` /
+    ``strict_styles`` give the target rules instead. ``report`` adds the
+    ``report-uri`` / ``report-to`` directives that send violations to
+    ``/csp-report``.
     """
     img_src = "'self' data: blob:"
     if minio_origin:
         img_src += f" {minio_origin}"
 
-    # `'unsafe-inline'` for scripts and styles: ~30 elements with inline
-    # `style="..."`, plus several inline `<script>` blocks and a few
-    # `onclick`/`onsubmit`/`onchange` attributes in admin templates. Drop by
-    # refactoring to nonces/hashes — tracked as a follow-up.
-    #
-    # `'unsafe-eval'` for scripts: htmx evaluates `hx-on:`, `hx-on::*`, and
-    # `hx-vals` JS expressions via `new Function()`. Several templates use
-    # these. Drop by rewriting those handlers into addEventListener calls.
-    #
     # No third-party origins are allowed — emoji-picker-element, chart.js,
     # and their data bundles are all vendored under `static/js/local/`.
-    script_src = "'self' 'unsafe-inline' 'unsafe-eval'"
+    if strict_scripts:
+        script_directives = ["script-src 'self'"]
+    else:
+        script_directives = ["script-src 'self' 'unsafe-inline' 'unsafe-eval'"]
+    if strict_styles:
+        style_directives = [
+            "style-src 'self'",
+            "style-src-elem 'self'",
+            "style-src-attr 'none'",
+        ]
+    else:
+        style_directives = ["style-src 'self' 'unsafe-inline'"]
 
     directives = [
         "default-src 'self'",
-        f"script-src {script_src}",
-        "style-src 'self' 'unsafe-inline'",
+        *script_directives,
+        *style_directives,
         f"img-src {img_src}",
         "font-src 'self' data:",
         # `data:` for the base64-encoded silent WAV used to prime audio
@@ -430,7 +453,33 @@ def _build_csp(minio_origin):
         "form-action 'self'",
         "object-src 'none'",
     ]
+    if report:
+        directives += [f"report-uri {CSP_REPORT_PATH}", f"report-to {CSP_REPORT_GROUP}"]
     return "; ".join(directives)
+
+
+def _csp_headers(minio_origin, mode):
+    """``(enforced, report_only)`` policies for a CSP_MODE.
+
+    - ``legacy``:  the loose policy, no reporting (an escape hatch).
+    - ``report``:  the loose policy enforced; the full target policy sent as
+                   Report-Only, so violations are logged but nothing breaks.
+    - ``enforce``: every group in CSP_ENFORCEABLE enforced strictly (the rest
+                   loose), plus the full target as Report-Only for what's left.
+    """
+    if mode == "legacy":
+        return _build_csp(minio_origin), None
+    enforce = mode == "enforce"
+    enforced = _build_csp(
+        minio_origin,
+        strict_scripts=enforce and CSP_ENFORCEABLE["scripts"],
+        strict_styles=enforce and CSP_ENFORCEABLE["styles"],
+        report=True,
+    )
+    target = _build_csp(
+        minio_origin, strict_scripts=True, strict_styles=True, report=True
+    )
+    return enforced, target
 
 
 def _register_security_headers(app):
@@ -442,7 +491,9 @@ def _register_security_headers(app):
         if parsed.scheme and parsed.netloc:
             minio_origin = f"{parsed.scheme}://{parsed.netloc}"
 
-    html_csp = _build_csp(minio_origin)
+    html_csp, html_csp_report_only = _csp_headers(
+        minio_origin, app.config.get("CSP_MODE", "report")
+    )
     api_csp = "default-src 'none'; frame-ancestors 'none'"
 
     @app.after_request
@@ -464,6 +515,16 @@ def _register_security_headers(app):
             response.headers.setdefault("Content-Security-Policy", api_csp)
         else:
             response.headers.setdefault("Content-Security-Policy", html_csp)
+            if html_csp_report_only:
+                response.headers.setdefault(
+                    "Content-Security-Policy-Report-Only", html_csp_report_only
+                )
+            if html_csp_report_only or "report-to" in html_csp:
+                # The Reporting API wants an absolute URL for the endpoint.
+                response.headers.setdefault(
+                    "Reporting-Endpoints",
+                    f'{CSP_REPORT_GROUP}="{request.url_root.rstrip("/")}{CSP_REPORT_PATH}"',
+                )
         return response
 
 
@@ -696,6 +757,7 @@ def register_blueprints(app):
     from .blueprints.api_v1 import api_v1_bp
     from .blueprints.auth import auth_bp
     from .blueprints.channels import channels_bp
+    from .blueprints.csp import csp_bp
     from .blueprints.dms import dms_bp
     from .blueprints.files import files_bp
     from .blueprints.messages import messages_bp
@@ -718,6 +780,7 @@ def register_blueprints(app):
     app.register_blueprint(oncall_bp)
     app.register_blueprint(profile_bp)
     app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
+    app.register_blueprint(csp_bp)
 
 
 def _init_sentry():
@@ -960,5 +1023,9 @@ def create_app(config_class=Config, start_listener=True):
     from .blueprints.api_v1 import api_v1_bp
 
     csrf.exempt(api_v1_bp)
+    # Browsers send CSP violation reports without cookies or a token.
+    from .blueprints.csp import csp_bp
+
+    csrf.exempt(csp_bp)
 
     return app

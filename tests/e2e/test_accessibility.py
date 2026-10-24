@@ -32,7 +32,16 @@ pytestmark = pytest.mark.skipif(
 
 def axe_violations(page: Page, context: str | None = None) -> list[dict]:
     """Run axe on the page (or the element matching ``context``)."""
-    page.add_script_tag(path=str(AXE_BUNDLE))
+    # A message mid fade-in (.just-arrived) or still in flight (.pending-message,
+    # dimmed) is partly transparent, so axe would measure a contrast it never
+    # settles at. Scan once the timeline is at rest.
+    page.wait_for_function(
+        "!document.querySelector('.just-arrived, .pending-message')", timeout=5000
+    )
+    # Evaluated over DevTools rather than injected as a <script>: the page's
+    # CSP (script-src 'self') would block an injected inline script.
+    if not page.evaluate("typeof window.axe === 'object'"):
+        page.evaluate(AXE_BUNDLE.read_text(encoding="utf-8") + "\n;0")
     return page.evaluate(
         """async ([selector, tags]) => {
             const root = selector ? document.querySelector(selector) : document;

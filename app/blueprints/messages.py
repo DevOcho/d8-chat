@@ -93,15 +93,6 @@ def get_message_view(message_id):
     )
 
 
-@messages_bp.route("/chat/message/<int:message_id>/edit", methods=["GET"])
-@login_required
-def get_edit_message_form(message_id):
-    message = Message.get_or_none(id=message_id)
-    if not message or message.user.id != g.user.id:
-        return "", 403
-    return render_template("partials/edit_message_form.html", message=message)
-
-
 @messages_bp.route("/chat/message/<int:message_id>", methods=["PUT"])
 @login_required
 def update_message(message_id):

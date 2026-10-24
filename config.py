@@ -84,6 +84,12 @@ class Config:
     MINIO_SECURE = s3_setting("S3_SECURE", "MINIO_SECURE", "False").lower() == "true"
     MINIO_PUBLIC_URL = s3_setting("S3_PUBLIC_URL", "MINIO_PUBLIC_URL")
 
+    # Content-Security-Policy rollout (CSP_PLAN.md): "report" enforces the
+    # loose policy and reports the strict one; "enforce" also enforces every
+    # strict directive group the code is ready for; "legacy" turns reporting
+    # off. Switching back to "report" is the rollback for a bad enforcement.
+    CSP_MODE = os.environ.get("CSP_MODE", "report").strip().lower()
+
     # Valkey Config for message broker
     VALKEY_URL = os.environ.get("VALKEY_URL")
 
