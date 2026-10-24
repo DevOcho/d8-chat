@@ -4,6 +4,7 @@ import os
 import uuid
 from functools import wraps
 
+import emoji
 from flask import (
     Blueprint,
     Response,
@@ -15,6 +16,7 @@ from flask import (
 )
 from flask_limiter.util import get_remote_address
 from itsdangerous import URLSafeTimedSerializer
+from peewee import JOIN, fn
 from PIL import Image, ImageOps
 from playhouse.shortcuts import model_to_dict
 from werkzeug.utils import secure_filename
@@ -56,7 +58,7 @@ from app.routes import (
     prepare_messages_for_render,
 )
 from app.services import minio_service
-from app.services.image_processing import reencode_avatar
+from app.services.image_processing import image_dimensions, reencode_avatar
 from app.services.upload_validation import (
     ALLOWED_EXTENSIONS,
     AVATAR_EXTENSIONS,
@@ -302,12 +304,15 @@ def api_upload_file():
         if not success:
             return jsonify({"error": "Failed to upload file to storage"}), 500
 
+        width, height = image_dimensions(temp_path, validated.sniffed_mime)
         new_file = UploadedFile.create(
             uploader=g.api_user,
             original_filename=original_filename,
             stored_filename=stored_filename,
             mime_type=validated.sniffed_mime,
             file_size_bytes=file_size,
+            width=width,
+            height=height,
         )
         return (
             jsonify(
@@ -317,6 +322,8 @@ def api_upload_file():
                     "url": new_file.url,
                     "original_filename": new_file.original_filename,
                     "mime_type": new_file.mime_type,
+                    "width": new_file.width,
+                    "height": new_file.height,
                 }
             ),
             201,
@@ -552,10 +559,21 @@ def get_channels():
         .order_by(Channel.name)
     )
 
+    user_channels = list(user_channels)
+    convs_by_str = {
+        c.conversation_id_str: c
+        for c in Conversation.select().where(
+            Conversation.conversation_id_str.in_(
+                [f"channel_{c.id}" for c in user_channels]
+            )
+        )
+    }
+    last_fields = _last_message_fields([c.id for c in convs_by_str.values()])
+
     results = []
     for channel in user_channels:
         conv_id_str = f"channel_{channel.id}"
-        conv = Conversation.get_or_none(conversation_id_str=conv_id_str)
+        conv = convs_by_str.get(conv_id_str)
 
         unread_count = 0
         mention_count = 0
@@ -600,9 +618,79 @@ def get_channels():
         )
         ch_dict["unread_count"] = unread_count
         ch_dict["mention_count"] = mention_count
+        ch_dict.update(
+            last_fields.get(conv.id)
+            if conv
+            else {"last_message": None, "last_activity_at": None}
+        )
         results.append(ch_dict)
 
     return jsonify({"channels": results}), 200
+
+
+PREVIEW_LENGTH = 140
+
+
+def _latest_messages(conversation_ids):
+    """``{conversation_id: Message}``: each conversation's newest timeline
+    message, with its author loaded, in two queries for any number of
+    conversations."""
+    if not conversation_ids:
+        return {}
+    latest_ids = (
+        Message.select(fn.MAX(Message.id))
+        .where(Message.conversation.in_(list(conversation_ids)) & Message.in_timeline())
+        .group_by(Message.conversation)
+    )
+    return {
+        m.conversation_id: m
+        for m in Message.select(Message, User)
+        .join(User, JOIN.LEFT_OUTER, on=(Message.user == User.id))
+        .where(Message.id.in_(latest_ids))
+    }
+
+
+def _last_message_summary(message, with_attachments):
+    """The home screen's preview of a conversation's last message, or None."""
+    if message is None:
+        return None
+    if message.is_deleted:
+        preview = "This message was deleted."
+    else:
+        text = emoji.emojize(
+            " ".join((message.content or "").split()), language="alias"
+        )
+        preview = (
+            text if len(text) <= PREVIEW_LENGTH else text[: PREVIEW_LENGTH - 1] + "…"
+        )
+    return {
+        "id": message.id,
+        "content_preview": preview,
+        "user": user_to_dict(message.user) if message.user_id else None,
+        "created_at": message.created_at.isoformat(),
+        "has_attachments": message.id in with_attachments,
+    }
+
+
+def _last_message_fields(conversation_ids):
+    """``{conversation_id: {"last_message": ..., "last_activity_at": ...}}``."""
+    latest = _latest_messages(conversation_ids)
+    with_attachments = set()
+    if latest:
+        with_attachments = {
+            a.message_id
+            for a in MessageAttachment.select(MessageAttachment.message).where(
+                MessageAttachment.message.in_([m.id for m in latest.values()])
+            )
+        }
+    fields = {}
+    for conv_id in conversation_ids:
+        message = latest.get(conv_id)
+        fields[conv_id] = {
+            "last_message": _last_message_summary(message, with_attachments),
+            "last_activity_at": message.created_at.isoformat() if message else None,
+        }
+    return fields
 
 
 @api_v1_bp.route("/dms", methods=["GET"])
@@ -625,6 +713,8 @@ def get_dms():
     )
 
     activity_cutoff = utc_now() - datetime.timedelta(days=30)
+    dm_convs = list(dm_convs)
+    last_fields = _last_message_fields([c.id for c in dm_convs])
     rows = []
     for conv in dm_convs:
         # Extract the partner ID from the string; skip self-DMs (no partner
@@ -656,13 +746,13 @@ def get_dms():
 
         # Visibility: recent within 30 days OR has unread. Ordering: most recent
         # activity first, same as the web sidebar.
-        last_msg = (
-            Message.select(Message.created_at)
-            .where(Message.conversation == conv)
-            .order_by(Message.created_at.desc())
-            .first()
+        fields = last_fields[conv.id]
+        last_message = fields["last_message"]
+        last_at = (
+            datetime.datetime.fromisoformat(last_message["created_at"])
+            if last_message
+            else None
         )
-        last_at = last_msg.created_at if last_msg else None
         is_recent = last_at is not None and last_at >= activity_cutoff
         if not is_recent and unread_count == 0:
             continue
@@ -674,6 +764,7 @@ def get_dms():
                     "conversation_id_str": conv.conversation_id_str,
                     "other_user": user_to_dict(partner),
                     "unread_count": unread_count,
+                    **fields,
                 },
             )
         )
@@ -802,16 +893,40 @@ def get_messages(conv_id_str):
     if not user_has_conversation_access(g.api_user, parsed):
         return jsonify({"error": "Access denied"}), 403
 
-    # Pagination: fetches older messages if before_message_id is provided
-    # Or fetches a window around a specific message if around_message_id is provided
+    # Pagination, at most one cursor:
+    #   before_message_id — the page of older history above it
+    #   after_message_id  — the page of newer messages below it (fill a gap
+    #                       after a reconnect, or scroll forward after a jump)
+    #   around_message_id — a window centred on it (jump to a message)
     before_message_id = request.args.get("before_message_id", type=int)
+    after_message_id = request.args.get("after_message_id", type=int)
     around_message_id = request.args.get("around_message_id", type=int)
+    if (
+        sum(
+            c is not None
+            for c in (before_message_id, after_message_id, around_message_id)
+        )
+        > 1
+    ):
+        return jsonify(
+            {
+                "error": "Use only one of before_message_id, after_message_id, around_message_id"
+            }
+        ), 400
 
     base_condition = (Message.conversation == conv) & (Message.in_timeline())
 
     messages = list()
 
-    if around_message_id:
+    if after_message_id is not None:
+        # Oldest first, the next 30 after the cursor; ids order by insert.
+        messages = list(
+            Message.select()
+            .where(base_condition & (Message.id > after_message_id))
+            .order_by(Message.id.asc())
+            .limit(30)
+        )
+    elif around_message_id:
         # Fetch 15 messages before the target
         msgs_before = list(
             Message.select()
@@ -821,8 +936,11 @@ def get_messages(conv_id_str):
         )
         msgs_before.reverse()
 
-        # Fetch the target message itself
-        target_msg = Message.get_or_none(Message.id == around_message_id)
+        # The target itself — only if it's in this conversation's timeline.
+        # Fetched by id alone, any message from any conversation came back.
+        target_msg = Message.get_or_none(
+            base_condition & (Message.id == around_message_id)
+        )
 
         # Fetch 15 messages after the target
         msgs_after = list(
@@ -1010,7 +1128,14 @@ def toggle_reaction(message_id):
     chat_manager.broadcast(
         conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
     )
-    return jsonify(api_data["data"]), 200
+    # The updated message rides along, so the app needn't wait for the echo.
+    reactions_map, attachments_map = prepare_messages_for_render([message])
+    return jsonify(
+        {
+            **api_data["data"],
+            "message": serialize_message(message, reactions_map, attachments_map),
+        }
+    ), 200
 
 
 @api_v1_bp.route("/messages/<int:message_id>", methods=["PATCH"])
@@ -1282,8 +1407,6 @@ def api_vote_on_poll(poll_id):
 @api_token_required
 def api_search():
     """Searches messages, channels, and people across the workspace."""
-    from peewee import JOIN, fn
-
     from app.access import accessible_conversations
     from app.blueprints.search import _get_message_context
 

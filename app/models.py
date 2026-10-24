@@ -392,6 +392,11 @@ class UploadedFile(BaseModel):
     mime_type = CharField()
     file_size_bytes = BigIntegerField()
     scan_status = CharField(default="pending")  # pending, clean, infected
+    # Pixel size of an image upload (as stored, after optimize_if_image), so
+    # clients can reserve its box before it loads. NULL for non-images and for
+    # images uploaded before migration 0011.
+    width = IntegerField(null=True)
+    height = IntegerField(null=True)
 
     @property
     def url(self):

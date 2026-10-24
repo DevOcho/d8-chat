@@ -16,6 +16,19 @@ from __future__ import annotations
 from PIL import Image, ImageOps, ImageSequence
 
 
+def image_dimensions(path: str, mime_type: str) -> tuple[int | None, int | None]:
+    """``(width, height)`` of the image at ``path``, or ``(None, None)`` for a
+    non-image or bytes Pillow can't read. Measured on the stored file, so call
+    it after any re-encoding."""
+    if not mime_type.startswith("image/"):
+        return None, None
+    try:
+        with Image.open(path) as img:
+            return img.size
+    except Exception:  # pylint: disable=broad-exception-caught
+        return None, None
+
+
 def reencode_avatar(temp_path: str, size: tuple[int, int]) -> tuple[str, str]:
     """Resize the image at ``temp_path`` in place, preserving animation.
 

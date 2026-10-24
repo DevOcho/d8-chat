@@ -100,7 +100,15 @@ Many of the events below utilize a standardized `Message` and `User` object payl
   "description": "Main channel for the Alpha team.",
   "is_private": true,
   "unread_count": 3,
-  "mention_count": 1
+  "mention_count": 1,
+  "last_message": {               // null when the channel has no messages
+    "id": 812,
+    "content_preview": "Deploy is done 🎉", // whitespace collapsed, emoji shortcodes expanded, ≤140 chars
+    "user": { ...User Object... },   // null for a system message
+    "created_at": "2026-10-24T15:02:11.123456",
+    "has_attachments": false
+  },
+  "last_activity_at": "2026-10-24T15:02:11.123456" // last_message.created_at, or null
 }
 ```
 
@@ -142,7 +150,9 @@ Many of the events below utilize a standardized `Message` and `User` object payl
       "file_id": 42,
       "url": "https://<minio-url>/file.pdf",
       "original_filename": "file.pdf",
-      "mime_type": "application/pdf"
+      "mime_type": "application/pdf",
+      "width": null,  // pixels, for images; null for other files and older images
+      "height": null
     }
   ],
   "thread_reply_count": 0,
@@ -254,7 +264,9 @@ Use this endpoint to pre-upload a file before attaching it to a new message. The
   "message": "File uploaded successfully",
   "url": "https://<minio-url>/...",
   "original_filename": "document.pdf",
-  "mime_type": "application/pdf"
+  "mime_type": "application/pdf",
+  "width": null,   // pixels for an image (as stored, after server-side resizing)
+  "height": null
 }
 ```
 
@@ -360,7 +372,10 @@ Returns a paginated list of messages for a given conversation. By default, it re
 
 **Query Parameters:**
 * `before_message_id` (optional, int): Pass the oldest message ID you currently have to fetch the next page of older history.
-* `around_message_id` (optional, int): Pass a specific message ID to fetch a contextual window of messages (15 before, the target message itself, and 15 after). Useful for "jump to message" from search results.
+* `after_message_id` (optional, int): Pass the newest message ID you have to fetch the next 30 newer messages, oldest first. Use it to fill a gap after reconnecting, or to scroll forward after a jump; repeat until fewer than 30 come back.
+* `around_message_id` (optional, int): Pass a specific message ID to fetch a contextual window of messages (15 before, the target message itself, and 15 after). Useful for "jump to message" from search results. The target must belong to this conversation.
+
+Pass at most one of the three (400 otherwise). Thread replies are never included; fetch them with the thread endpoint.
 
 **Response (200 OK):**
 ```json
@@ -371,6 +386,34 @@ Returns a paginated list of messages for a given conversation. By default, it re
   ]
 }
 ```
+
+### Conversation Lists (home screen)
+**GET** `/api/v1/channels` returns `{"channels": [ ...Channel Object... ]}`, sorted by name.
+**GET** `/api/v1/dms` returns `{"dms": [...]}`, most recent activity first:
+```json
+{
+  "conversation_id_str": "dm_3_7",
+  "other_user": { ...User Object... },
+  "unread_count": 2,
+  "last_message": { ... },          // same shape as on the Channel Object
+  "last_activity_at": "2026-10-24T15:02:11.123456"
+}
+```
+`last_message` is the newest message in the main timeline (thread replies excluded).
+
+### Edit a Message / Toggle a Reaction
+**PATCH** `/api/v1/messages/<id>` with `{"content": "..."}` returns the updated `Message` Object (200).
+**POST** `/api/v1/messages/<id>/reactions` with `{"emoji": "👍"}` toggles your reaction and returns:
+```json
+{
+  "message_id": 42,
+  "conversation_id_str": "channel_5",
+  "reactions": [ ... ],
+  "message": { ...Message Object... }   // the updated message
+}
+```
+Both responses carry the new state, so the app doesn't need to wait for the
+`message_edited` / `reaction_updated` WebSocket echo.
 
 ### Global Search
 Searches across messages, channels, and people within the authenticated user's workspace. Results are scoped to what the user is permitted to see.

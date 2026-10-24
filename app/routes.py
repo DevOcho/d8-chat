@@ -223,6 +223,8 @@ def get_attachments_for_messages(messages):
                 "url": link.attachment.url,
                 "original_filename": link.attachment.original_filename,
                 "mime_type": link.attachment.mime_type,
+                "width": link.attachment.width,
+                "height": link.attachment.height,
             }
         )
     return attachments_map

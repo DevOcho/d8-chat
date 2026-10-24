@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 from app.models import UploadedFile
 from app.routes import login_required
 from app.services import minio_service
+from app.services.image_processing import image_dimensions
 from app.services.upload_validation import (
     ALLOWED_EXTENSIONS,
     ValidationError,
@@ -87,12 +88,15 @@ def upload_file():
         if not success:
             return jsonify(error="Failed to upload file to storage"), 500
 
+        width, height = image_dimensions(temp_path, validated.sniffed_mime)
         new_file = UploadedFile.create(
             uploader=g.user,
             original_filename=original_filename,
             stored_filename=stored_filename,
             mime_type=validated.sniffed_mime,
             file_size_bytes=file_size,
+            width=width,
+            height=height,
         )
         return (
             jsonify(file_id=new_file.id, message="File uploaded successfully"),
