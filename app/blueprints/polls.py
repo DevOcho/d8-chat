@@ -144,6 +144,61 @@ def create_poll():
     return response
 
 
+def cast_vote(user, poll, option):
+    """Vote for ``option``, switch to it, or withdraw the vote when it's the
+    option already chosen. Shared by the web and API vote routes."""
+    with db.atomic():
+        # Serialize votes on this poll: two racing clicks on different options
+        # each saw no vote and both inserted, two votes in a single-choice poll.
+        lock_for_update(Poll.select().where(Poll.id == poll.id)).execute()
+        existing_vote = (
+            Vote.select()
+            .join(PollOption)
+            .where((Vote.user == user) & (PollOption.poll == poll))
+            .first()
+        )
+        if existing_vote:
+            # Option is part of Vote's composite primary key, so a switch is a
+            # delete and a create rather than an update.
+            existing_vote.delete_instance()
+            if existing_vote.option.id == option.id:
+                return
+        Vote.create(user=user, option=option)
+
+
+def announce_votes(poll, voter):
+    """Tell everyone in the poll's conversation its tallies changed, however
+    the vote was cast: web clients get the tally OOB update, mobile clients the
+    poll's message as ``message_edited`` (the same frame for a web vote and an
+    API vote). The frame carries no ``voted_option_id``: ChatManager drops it
+    from every frame, since the voter's choice isn't anyone else's.
+
+    Returns ``(poll_context, message_data)`` from the voter's point of view,
+    for the route's own response.
+    """
+    from app.blueprints.api_v1 import serialize_message
+
+    message = poll.message
+    conv_id_str = message.conversation.conversation_id_str
+    poll_context = get_poll_context(poll, voter)
+    broadcast_html = render_template(
+        "partials/message_poll_oob_update.html", poll_context=poll_context
+    )
+    message_data = serialize_message(
+        message,
+        get_reactions_for_messages([message]),
+        get_attachments_for_messages([message]),
+    )
+    chat_manager.broadcast(
+        conv_id_str,
+        {
+            "_raw_html": broadcast_html,
+            "api_data": {"type": "message_edited", "data": message_data},
+        },
+    )
+    return poll_context, message_data
+
+
 @polls_bp.route("/chat/poll/option/<int:option_id>/vote", methods=["POST"])
 @login_required
 def vote_on_poll(option_id):
@@ -157,56 +212,13 @@ def vote_on_poll(option_id):
     if not user_can_access_message(g.user, message):
         return "Unauthorized", 403
 
-    with db.atomic():
-        # Serialize votes on this poll: two racing clicks on different options
-        # each saw no vote and both inserted, two votes in a single-choice poll.
-        lock_for_update(Poll.select().where(Poll.id == poll.id)).execute()
-        # Find if the user has already voted on any option in this poll
-        existing_vote = (
-            Vote.select()
-            .join(PollOption)
-            .where((Vote.user == g.user) & (PollOption.poll == poll))
-            .first()
-        )
+    cast_vote(g.user, poll, option)
+    poll_context, _ = announce_votes(poll, g.user)
 
-        if existing_vote:
-            # If they clicked the same option they already voted for, it's an "un-vote"
-            if existing_vote.option.id == option.id:
-                existing_vote.delete_instance()
-            else:
-                # If they clicked a different option, switch their vote.
-                # Because 'option' is part of a composite primary key, we must
-                # delete the old record and create a new one instead of updating.
-                existing_vote.delete_instance()
-                Vote.create(user=g.user, option=option)
-        else:
-            # If they haven't voted yet, create a new vote
-            Vote.create(user=g.user, option=option)
-
-    # Get the fresh poll data for rendering
-    poll_context = get_poll_context(poll, g.user)
-
-    # --- For the user who voted ---
-    # Render the full poll partial. This will switch their view to the "voted" state.
+    # The voter's own poll switches to the "voted" state; everyone else got
+    # the tallies from announce_votes.
     response_for_voter = render_template(
         "partials/message_poll.html", poll_context=poll_context
-    )
-
-    # --- For everyone else ---
-    # Render the OOB update partial. This will only update the numbers for users
-    # who have already voted and can see the results.
-    broadcast_html = render_template(
-        "partials/message_poll_oob_update.html", poll_context=poll_context
-    )
-    conv_id_str = message.conversation.conversation_id_str
-    # api_data lets mobile clients know this poll's tallies changed so they can
-    # refresh the message (the OOB HTML is web-only).
-    api_data = {
-        "type": "poll_update",
-        "data": {"message_id": message.id, "conversation_id_str": conv_id_str},
-    }
-    chat_manager.broadcast(
-        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
     )
 
     # Return the full updated partial directly to the user who voted

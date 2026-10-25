@@ -418,3 +418,46 @@ def test_dispatch_routes_channel_message_to_subscribed_client(app, chat_manager)
 
         on_channel.send.assert_called_once()
         off_channel.send.assert_not_called()
+
+
+# --- Frames carry no viewer's own poll vote ---------------------------------------
+
+
+def test_published_frames_leave_out_voted_option_id(mock_redis, app):
+    import json
+
+    from app.chat_manager import chat_manager, without_viewer_fields
+
+    poll = {"id": 7, "voted_option_id": 3, "options": [{"id": 3, "count": 1}]}
+    reply_frame = {
+        "type": "thread_reply",
+        "data": {
+            "parent_message": {"id": 1, "poll": poll},
+            "reply": {"id": 2, "poll": None},
+        },
+    }
+    with app.app_context():
+        chat_manager.redis_client.publish.reset_mock()
+        chat_manager.broadcast(
+            "channel_1", {"_raw_html": "<div></div>", "api_data": reply_frame}
+        )
+        chat_manager.send_to_user(
+            5, {"api_data": {"type": "new_message", "data": {"poll": poll}}}
+        )
+
+    sent = [
+        json.loads(c.args[1])["api_data"]
+        for c in chat_manager.redis_client.publish.call_args_list
+    ]
+    assert sent[0]["data"]["parent_message"]["poll"] == {
+        "id": 7,
+        "options": [{"id": 3, "count": 1}],
+    }
+    assert sent[0]["data"]["reply"]["poll"] is None
+    assert "voted_option_id" not in sent[1]["data"]["poll"]
+    # The caller's copy (an API route returns it to the voter) is untouched.
+    assert poll["voted_option_id"] == 3
+    assert without_viewer_fields([{"poll": poll}, 4]) == [
+        {"poll": {"id": 7, "options": [{"id": 3, "count": 1}]}},
+        4,
+    ]

@@ -160,7 +160,7 @@ Many of the events below utilize a standardized `Message` and `User` object payl
   "poll": {
     "id": 1,
     "question": "Where should we go for lunch?",
-    "voted_option_id": 4, // null if the current user has not voted
+    "voted_option_id": 4, // null if the current user has not voted; absent in WebSocket frames (see below)
     "options": [
       {
         "id": 4,
@@ -349,7 +349,7 @@ Creates a new message containing a poll. Broadcasts the standard new_message Web
 Returns the fully serialized Message Object (including the new poll dictionary).
 
 ### Vote on a Poll
-Casts, changes, or removes a vote on a poll option. If the user selects the same option they already voted for, their vote is removed. If they select a new option, their vote is switched. This automatically triggers a message_edited WebSocket event for all clients.
+Casts, changes, or removes a vote on a poll option. If the user selects the same option they already voted for, their vote is removed. If they select a new option, their vote is switched. Every vote, cast from the app or from the web, triggers a `message_edited` WebSocket event for the conversation carrying the poll's new counts (without `voted_option_id`; see "Polls in WebSocket frames").
 
 **POST** `/api/v1/polls/<poll_id>/vote`
 **Headers:** `Authorization: Bearer <api_token>`
@@ -651,11 +651,37 @@ Received when someone replies inside a thread. Includes both the updated parent 
 ```
 
 ### Message Edited
-Received when an existing message is edited. The payload contains the fully updated Message object.
+Received when an existing message is edited, and when someone votes on a poll
+(from the app or the web). The payload contains the fully updated Message
+object.
 ```json
 {
   "type": "message_edited",
   "data": { ...Message Object... }
+}
+```
+
+#### Polls in WebSocket frames
+A frame goes to everyone in the conversation, so a poll inside any frame
+(`message_edited`, `new_message`, `new_thread_reply`, ...) has **no
+`voted_option_id` key**: it would otherwise be the choice of whoever caused the
+frame. Update the counts from the frame and keep the user's own choice from
+what you already have (their vote response, or the last REST fetch, which do
+include `voted_option_id`). A poll you haven't seen before means the user
+hasn't voted on it.
+
+#### Legacy: `poll_update`
+Older servers announced a vote cast on the web with this frame
+instead of `message_edited`. It carries no counts: refetch the message (for
+example with `around_message_id`) when it arrives for a message on screen.
+Current servers no longer send it.
+```json
+{
+  "type": "poll_update",
+  "data": {
+    "message_id": 42,
+    "conversation_id_str": "channel_5"
+  }
 }
 ```
 

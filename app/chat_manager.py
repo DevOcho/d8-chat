@@ -39,6 +39,26 @@ MAX_SOCKETS_PER_USER = 10
 STATS_LOG_INTERVAL = 60  # seconds between per-worker WS stats log lines
 
 
+def without_viewer_fields(value):
+    """A copy of a frame's ``api_data`` without the fields that only hold for
+    one viewer: each poll's ``voted_option_id``.
+
+    Frames are built from whoever caused them (the voter, the poster, the
+    editor) and go to everyone, so that field would hand the sender's vote to
+    every other client. Mobile keeps its own vote from its vote responses and
+    REST fetches instead (MOBILE_WEBSOCKET_API_DOCS.md).
+    """
+    if isinstance(value, list):
+        return [without_viewer_fields(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    copy = {key: without_viewer_fields(item) for key, item in value.items()}
+    poll = copy.get("poll")
+    if isinstance(poll, dict):
+        copy["poll"] = {k: v for k, v in poll.items() if k != "voted_option_id"}
+    return copy
+
+
 class ChatManager:
     """Manages WebSocket clients, online status, and Redis Pub/Sub broadcasting."""
 
@@ -399,6 +419,11 @@ class ChatManager:
                 "Valkey unavailable; dropped publish to %s", redis_channel
             )
             return False
+        if "api_data" in payload_data:
+            payload_data = {
+                **payload_data,
+                "api_data": without_viewer_fields(payload_data["api_data"]),
+            }
         try:
             client.publish(redis_channel, json.dumps(payload_data))
         except Exception:  # pylint: disable=broad-exception-caught

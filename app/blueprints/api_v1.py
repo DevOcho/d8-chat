@@ -47,7 +47,6 @@ from app.models import (
     Workspace,
     WorkspaceMember,
     db,
-    lock_for_update,
     utc_now,
 )
 from app.routes import (
@@ -1336,10 +1335,7 @@ def create_poll(conv_id_str):
 @limiter.limit("30 per minute", key_func=_api_user_key)
 def api_vote_on_poll(poll_id):
     """Casts or changes a vote on a poll."""
-    from flask import render_template
-
-    from app.blueprints.polls import get_poll_context
-    from app.chat_manager import chat_manager
+    from app.blueprints.polls import announce_votes, cast_vote
 
     poll = Poll.get_or_none(Poll.id == poll_id)
     if not poll:
@@ -1354,45 +1350,10 @@ def api_vote_on_poll(poll_id):
     if not option or option.poll_id != poll.id:
         return jsonify({"error": "Invalid option"}), 400
 
-    message = poll.message
-    conv_id_str = message.conversation.conversation_id_str
-
-    with db.atomic():
-        # Serialize votes on this poll (see polls.vote_on_poll).
-        lock_for_update(Poll.select().where(Poll.id == poll.id)).execute()
-        existing_vote = (
-            Vote.select()
-            .join(PollOption)
-            .where((Vote.user == g.api_user) & (PollOption.poll == poll))
-            .first()
-        )
-
-        if existing_vote:
-            if existing_vote.option.id == option.id:
-                existing_vote.delete_instance()  # Un-vote
-            else:
-                existing_vote.delete_instance()  # Switch vote
-                Vote.create(user=g.api_user, option=option)
-        else:
-            Vote.create(user=g.api_user, option=option)
-
-    reactions_map = get_reactions_for_messages(list([message]))
-    attachments_map = get_attachments_for_messages(list([message]))
-    message_data = serialize_message(message, reactions_map, attachments_map)
-
-    # Web client OOB HTML update
-    poll_context = get_poll_context(poll, g.api_user)
-    broadcast_html = render_template(
-        "partials/message_poll_oob_update.html", poll_context=poll_context
-    )
-
-    # Tell mobile clients the message was edited so they re-render the entire poll block
-    api_data = {"type": "message_edited", "data": message_data}
-
-    chat_manager.broadcast(
-        conv_id_str, {"_raw_html": broadcast_html, "api_data": api_data}
-    )
-
+    cast_vote(g.api_user, poll, option)
+    # Everyone else hears about it as message_edited (without this user's
+    # choice); this user gets the message from their own point of view.
+    _, message_data = announce_votes(poll, g.api_user)
     return jsonify(message_data), 200
 
 

@@ -139,3 +139,69 @@ def test_vote_on_nonexistent_option(logged_in_client):
     response = logged_in_client.post("/chat/poll/option/9999/vote")
     assert response.status_code == 404
     assert b"Poll option not found" in response.data
+
+
+# --- What a vote announces (web and API alike) ---------------------------------
+
+
+def _published_api_data(channel_prefix="chat:"):
+    import json
+
+    from app.chat_manager import chat_manager
+
+    frames = []
+    for call in chat_manager.redis_client.publish.call_args_list:
+        channel, payload = call.args
+        data = json.loads(payload)
+        if channel.startswith(channel_prefix) and "api_data" in data:
+            frames.append(data["api_data"])
+    return frames
+
+
+def test_web_vote_tells_mobile_with_message_edited(logged_in_client, setup_poll):
+    """Mobile listens for message_edited (what an API vote sends); a web vote
+    used to send poll_update, which the app ignored."""
+    poll, opt1 = setup_poll["poll"], setup_poll["opt1"]
+    logged_in_client.post(f"/chat/poll/option/{opt1.id}/vote")
+
+    (frame,) = _published_api_data()
+    assert frame["type"] == "message_edited"
+    data = frame["data"]
+    assert data["id"] == poll.message.id
+    assert data["poll"]["id"] == poll.id
+    counts = {o["id"]: o["count"] for o in data["poll"]["options"]}
+    assert counts == {opt1.id: 1, setup_poll["opt2"].id: 0}
+    # The voter's choice isn't everyone's.
+    assert "voted_option_id" not in data["poll"]
+
+
+def test_api_vote_frame_leaves_out_the_voters_choice(client, setup_poll):
+    from app.blueprints.api_v1 import generate_api_token
+
+    poll, opt2 = setup_poll["poll"], setup_poll["opt2"]
+    token = generate_api_token(setup_poll["user1"].id)
+    res = client.post(
+        f"/api/v1/polls/{poll.id}/vote",
+        json={"option_id": opt2.id},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    # The voter's own response still says what they chose...
+    assert res.get_json()["poll"]["voted_option_id"] == opt2.id
+    # ...the frame everyone else gets doesn't.
+    (frame,) = _published_api_data()
+    assert frame["type"] == "message_edited"
+    assert "voted_option_id" not in frame["data"]["poll"]
+    assert {o["id"]: o["count"] for o in frame["data"]["poll"]["options"]}[opt2.id] == 1
+
+
+def test_web_and_api_votes_share_the_toggle(logged_in_client, setup_poll):
+    """Same option twice withdraws, another option switches (cast_vote)."""
+    from app.blueprints.polls import cast_vote
+
+    user, poll = setup_poll["user1"], setup_poll["poll"]
+    opt1, opt2 = setup_poll["opt1"], setup_poll["opt2"]
+    cast_vote(user, poll, opt1)
+    cast_vote(user, poll, opt2)
+    assert [v.option_id for v in Vote.select()] == [opt2.id]
+    cast_vote(user, poll, opt2)
+    assert Vote.select().count() == 0
