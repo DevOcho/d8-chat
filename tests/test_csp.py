@@ -134,6 +134,38 @@ def test_loose_script_src_never_carries_the_nonce(mode):
         assert "'nonce-abc123'" in _directives(report_only)["script-src"]
 
 
+@pytest.mark.parametrize("mode", ["legacy", "report", "enforce", "enforce-scripts"])
+def test_cloudflare_analytics_is_off_by_default(mode):
+    for policy in filter(None, _csp_headers("", mode, nonce="abc123")):
+        assert "cloudflareinsights" not in policy
+
+
+@pytest.mark.parametrize("mode", ["legacy", "report", "enforce", "enforce-scripts"])
+def test_cloudflare_analytics_lets_the_beacon_through_every_policy(mode):
+    policies = _csp_headers("", mode, nonce="abc123", cloudflare_analytics=True)
+    for policy in filter(None, policies):
+        d = _directives(policy)
+        assert "https://static.cloudflareinsights.com" in d["script-src"].split()
+        assert d["connect-src"] == "'self' https://cloudflareinsights.com"
+    if mode == "enforce":
+        assert _directives(policies[0])["script-src"] == (
+            "'self' https://static.cloudflareinsights.com 'nonce-abc123' 'report-sample'"
+        )
+
+
+def test_cloudflare_analytics_setting_reaches_the_headers(app, client):
+    app.config["CSP_CLOUDFLARE_ANALYTICS"] = True
+    try:
+        res = client.get("/")
+    finally:
+        app.config["CSP_CLOUDFLARE_ANALYTICS"] = False
+    for name in ("Content-Security-Policy", "Content-Security-Policy-Report-Only"):
+        assert "https://static.cloudflareinsights.com" in res.headers[name]
+    assert (
+        "cloudflareinsights" not in client.get("/").headers["Content-Security-Policy"]
+    )
+
+
 def test_unknown_mode_fails_at_boot(monkeypatch):
     from config import TestConfig
 

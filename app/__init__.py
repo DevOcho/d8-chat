@@ -431,6 +431,13 @@ CSP_REPORT_PATH = "/csp-report"
 CSP_REPORT_GROUP = "csp"
 
 
+# Cloudflare Web Analytics (CSP_CLOUDFLARE_ANALYTICS): on a site proxied by
+# Cloudflare it adds a beacon <script> from this origin to every page, and the
+# beacon sends its page-load timings to the second one.
+CLOUDFLARE_ANALYTICS_SCRIPT_ORIGIN = "https://static.cloudflareinsights.com"
+CLOUDFLARE_ANALYTICS_REPORT_ORIGIN = "https://cloudflareinsights.com"
+
+
 def _build_csp(
     minio_origin,
     *,
@@ -439,6 +446,7 @@ def _build_csp(
     strict_style_attributes=False,
     report=False,
     nonce=None,
+    cloudflare_analytics=False,
 ):
     """
     Build the Content-Security-Policy for HTML responses.
@@ -451,15 +459,23 @@ def _build_csp(
     rules instead, per directive group. ``report`` adds the
     ``report-uri`` / ``report-to`` directives that send violations to
     ``/csp-report``. ``nonce`` joins the strict ``script-src`` only.
+    ``cloudflare_analytics`` allows Cloudflare Web Analytics' beacon.
     """
     img_src = "'self' data: blob:"
     if minio_origin:
         img_src += f" {minio_origin}"
 
     # No third-party origins are allowed — emoji-picker-element, chart.js,
-    # and their data bundles are all vendored under `static/js/local/`.
+    # and their data bundles are all vendored under `static/js/local/` — except
+    # Cloudflare's analytics beacon where a deployment switches it on.
     # 'report-sample' puts the first 40 characters of what was blocked in the
     # violation report, which is what makes a csp_violation line actionable.
+    analytics_script = (
+        f" {CLOUDFLARE_ANALYTICS_SCRIPT_ORIGIN}" if cloudflare_analytics else ""
+    )
+    connect_src = "'self'"
+    if cloudflare_analytics:
+        connect_src += f" {CLOUDFLARE_ANALYTICS_REPORT_ORIGIN}"
     if strict_scripts:
         # The nonce is for a script a proxy adds to our pages, not for ours:
         # Cloudflare, in front of prod, injects its JavaScript Detections
@@ -467,9 +483,13 @@ def _build_csp(
         # onto it. Our templates never use it (tests/test_csp_guard.py). The
         # loose rules get none: next to 'unsafe-inline' it would switch that off.
         nonce_source = f" 'nonce-{nonce}'" if nonce else ""
-        script_directives = [f"script-src 'self'{nonce_source} 'report-sample'"]
+        script_directives = [
+            f"script-src 'self'{analytics_script}{nonce_source} 'report-sample'"
+        ]
     else:
-        script_directives = ["script-src 'self' 'unsafe-inline' 'unsafe-eval'"]
+        script_directives = [
+            f"script-src 'self'{analytics_script} 'unsafe-inline' 'unsafe-eval'"
+        ]
     picker = f"'{EMOJI_PICKER_STYLE_HASH}'"
     if not (strict_style_elements or strict_style_attributes):
         style_directives = ["style-src 'self' 'unsafe-inline'"]
@@ -502,7 +522,7 @@ def _build_csp(
         # `data:` for the base64-encoded silent WAV used to prime audio
         # playback for notification sounds (chat.js:1100ish).
         "media-src 'self' data:",
-        "connect-src 'self'",
+        f"connect-src {connect_src}",
         # Nothing is framed and no workers run; the manifest is our own.
         # (default-src 'self' already covers these; the explicit values
         # forbid same-origin frames too and document the intent.)
@@ -519,9 +539,10 @@ def _build_csp(
     return "; ".join(directives)
 
 
-def _csp_headers(minio_origin, mode, nonce=None):
+def _csp_headers(minio_origin, mode, nonce=None, cloudflare_analytics=False):
     """``(enforced, report_only)`` policies for a CSP_MODE, both with the same
-    ``nonce`` wherever ``script-src`` is strict.
+    ``nonce`` wherever ``script-src`` is strict, and both allowing Cloudflare
+    Web Analytics when ``cloudflare_analytics`` is on.
 
     - ``legacy``:  the loose policy, no reporting (an escape hatch).
     - ``report``:  the loose policy enforced; the full target policy sent as
@@ -533,7 +554,7 @@ def _csp_headers(minio_origin, mode, nonce=None):
                    script protection doesn't wait on the fix.
     """
     if mode == "legacy":
-        return _build_csp(minio_origin), None
+        return _build_csp(minio_origin, cloudflare_analytics=cloudflare_analytics), None
     scripts = mode in ("enforce", "enforce-scripts")
     styles = mode == "enforce"
     enforced = _build_csp(
@@ -543,6 +564,7 @@ def _csp_headers(minio_origin, mode, nonce=None):
         strict_style_attributes=styles and CSP_ENFORCEABLE["style_attributes"],
         report=True,
         nonce=nonce,
+        cloudflare_analytics=cloudflare_analytics,
     )
     target = _build_csp(
         minio_origin,
@@ -551,6 +573,7 @@ def _csp_headers(minio_origin, mode, nonce=None):
         strict_style_attributes=True,
         report=True,
         nonce=nonce,
+        cloudflare_analytics=cloudflare_analytics,
     )
     return enforced, target
 
@@ -589,6 +612,7 @@ def _register_security_headers(app):
                 minio_origin,
                 app.config.get("CSP_MODE", "report"),
                 nonce=secrets.token_urlsafe(16),
+                cloudflare_analytics=app.config.get("CSP_CLOUDFLARE_ANALYTICS", False),
             )
             response.headers.setdefault("Content-Security-Policy", html_csp)
             if html_csp_report_only:

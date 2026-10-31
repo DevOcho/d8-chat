@@ -91,6 +91,13 @@ class Config:
     # enforcement.
     CSP_MODE = os.environ.get("CSP_MODE", "report").strip().lower()
 
+    # "true" lets Cloudflare Web Analytics' beacon through the CSP, for a
+    # deployment behind Cloudflare with Web Analytics on. Off by default:
+    # nobody else needs Cloudflare's origins in their policy.
+    CSP_CLOUDFLARE_ANALYTICS = (
+        os.environ.get("CSP_CLOUDFLARE_ANALYTICS", "false").strip().lower() == "true"
+    )
+
     # Password-login rate limits (web /login and /api/v1/auth/login), per
     # client IP and per submitted username. Flask-Limiter syntax. Loosen them
     # only where brute force isn't a concern: the local cluster sets higher

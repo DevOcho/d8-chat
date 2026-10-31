@@ -308,6 +308,14 @@ that's Cloudflare's script without the nonce: right after switching to
 `enforce` (where the enforced header carries it), check that the script in the
 page source has a `nonce` attribute.
 
+Cloudflare Web Analytics, when it's switched on for the site, adds a beacon
+`<script src="https://static.cloudflareinsights.com/beacon.min.js/…">`, and the
+beacon sends page-load timings to `https://cloudflareinsights.com`. Neither
+origin is in any policy by default, so even the loose one blocks it (the
+`csp_violation` lines with `blocked=https://static.cloudflareinsights.com/…`,
+under both dispositions). `CSP_CLOUDFLARE_ANALYTICS=true` adds the first to
+`script-src` and the second to `connect-src`, in every mode.
+
 ## Effort
 
 | Phase | Size |
