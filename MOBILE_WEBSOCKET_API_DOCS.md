@@ -851,12 +851,20 @@ user acknowledge from the alert.
       "overrides": [ { "id": 3, "user_id": 5, "start": "...", "end": "...", "reason": "Vacation" } ]
     }
   ],
-  "active_pages": [ ...Incident Objects paging me... ]
+  "active_pages": [ ...Incident Objects paging me... ],
+  "can_be_paged": true
 }
 ```
 `on_call` is `null` when the caller isn't on call right now. `upcoming_shifts`
 covers the next 8 weeks. Overrides are listed per shift; a shift can contain
 partial overrides.
+
+`can_be_paged` is `true` when any escalation policy could page the caller:
+rotation members of a targeted schedule, anyone covering one of its shifts
+with an override that hasn't ended, members of a targeted group, a targeted
+user, and workspace admins (paged when nobody else can be). Give these users
+the full pager setup (full-screen alerts, unrestricted battery) and ask everyone
+else only for notifications. Treat a missing field as `true`.
 
 ### Active pages
 `GET /api/v1/oncall/incidents/active` → `{ "incidents": [ ...Incident Objects... ] }`
@@ -939,22 +947,26 @@ Pages go to **every** registered device of each paged user. Unlike chat pushes,
 they are **not** suppressed when the user is active on the web. They are re-sent
 about every 60s until the page is acknowledged or cleared.
 
-- `notification`: `title` `"🚨 DOWN: <monitor>"`, `body` = details.
-- `data`: `{ "type": "page", "incident_id": "17", "conversation_id_str": "channel_4", "message_id": "123" }`
-  (a test page has `"test": "1"` and a string `incident_id`).
+- `data`: `{ "type": "page", "incident_id": "17", "conversation_id_str": "channel_4", "message_id": "123", "title": "🚨 DOWN: <monitor>", "body": "<details>" }`
+  (a test page has `"test": "1"` and a string `incident_id`). There is no
+  top-level `notification`: iOS gets its alert from `aps`, and Android
+  posts nothing until the app does.
 - **Lifetime:** a page that can't be delivered expires after **120 s** (Android
   `ttl`, iOS `apns-expiration`). A phone that was off or offline won't ring for
   a page that ended long ago when it reconnects. Active pages repeat about
   every 60 s, so this loses nothing.
-- **Android:** high-priority message with `ttl: 120s` and `collapse_key: incident-<id>`
-  (an offline phone gets only the newest page per incident). Notification
-  `channel_id` **`oncall_pages`**, priority `max`, tag `incident-<id>`, and
-  visibility **`public`**, so the monitor name shows on lock screens that hide
-  sensitive content. Create the `oncall_pages` channel with `IMPORTANCE_HIGH`, an alarm sound, and vibration,
-  and consider a full-screen intent. Repeats reuse the tag, so they replace the
-  notification and alert again instead of stacking.
-- **iOS:** `apns-priority: 10`, `apns-collapse-id: incident-<id>`,
-  `apns-expiration` 120 s out, and a **critical** alert (`interruption-level:
+- **Android:** **data-only**, high-priority message with `ttl: 120s` and
+  `collapse_key: incident-<id>` (an offline phone gets only the newest page
+  per incident). The app's background handler posts the page itself: tag
+  `incident-<id>` (so repeats replace it and alert again instead of
+  stacking), visibility **`public`** (so the monitor name shows on lock
+  screens that hide sensitive content), on an `oncall_pages` channel with
+  `IMPORTANCE_HIGH`, an alarm sound and vibration, plus a full-screen intent.
+  Pages used to carry a `notification` block. FCM then posted its own copy
+  first, and Android muted the app's alarm a moment later as "recently
+  noisy", which silenced a real page on 2026-10-30.
+- **iOS:** `apns-push-type: alert`, `apns-priority: 10`, `apns-collapse-id: incident-<id>`,
+  `apns-expiration` 120 s out, `alert` `{title, body}`, and a **critical** alert (`interruption-level:
   critical`, critical sound **`pager.caf`** at volume 1.0, category
   **`ONCALL_PAGE`**). Bundle a `pager.caf` (under 30 s) in the app for the
   alarm sound; without it iOS plays the default alert sound. Register the

@@ -378,35 +378,63 @@ def user_in_chain(incident, user):
         return True
     if can_manage_oncall(user):
         return True
-    for level in sorted_levels(incident.policy):
-        if level.target_type == "user" and level.target_user_id == user.id:
-            return True
-        if level.target_type == "group" and (
+    return any(_level_reaches(level, user) for level in sorted_levels(incident.policy))
+
+
+def can_be_paged(user, now=None):
+    """True if any escalation policy could page ``user``.
+
+    The mobile app gives these users the full pager setup (full-screen alerts,
+    unrestricted battery, …) and everyone else only asks for notifications.
+    That's anyone a level targets: rotation members of a targeted schedule
+    and anyone covering one of its shifts with an override that hasn't ended,
+    members of a targeted group, a targeted user. Workspace admins too: they
+    are paged when nobody else can be (``_page_admins_if_nobody_paged``).
+    Policies with paging switched off count, since it can be switched back on
+    at any time.
+    """
+    if user is None or not user.is_active:
+        return False
+    if is_workspace_admin(user):
+        return True
+    now = now or utc_now()
+    return any(
+        _level_reaches(level, user, overrides_ending_after=now)
+        for level in EscalationLevel.select()
+    )
+
+
+def _level_reaches(level, user, overrides_ending_after=None):
+    """True if ``level`` could page ``user``. For a schedule level that's any
+    rotation member or override user; ``overrides_ending_after`` skips
+    overrides that are already over."""
+    if level.target_type == "user":
+        return level.target_user_id == user.id
+    if level.target_type == "group":
+        return (
             UserGroup.select()
             .where(
                 (UserGroup.user == user)
                 & (UserGroup.name == normalize_group_name(level.target_group))
             )
             .exists()
-        ):
-            return True
-        if level.target_type == "schedule" and level.target_schedule_id:
-            schedule = level.target_schedule_id
-            if (
-                OnCallScheduleMember.select()
-                .where(
-                    (OnCallScheduleMember.schedule == schedule)
-                    & (OnCallScheduleMember.user == user)
-                )
-                .exists()
-                or OnCallOverride.select()
-                .where(
-                    (OnCallOverride.schedule == schedule)
-                    & (OnCallOverride.user == user)
-                )
-                .exists()
-            ):
-                return True
+        )
+    if level.target_type == "schedule" and level.target_schedule_id:
+        schedule = level.target_schedule_id
+        overrides = OnCallOverride.select().where(
+            (OnCallOverride.schedule == schedule) & (OnCallOverride.user == user)
+        )
+        if overrides_ending_after is not None:
+            overrides = overrides.where(OnCallOverride.end_at > overrides_ending_after)
+        return (
+            OnCallScheduleMember.select()
+            .where(
+                (OnCallScheduleMember.schedule == schedule)
+                & (OnCallScheduleMember.user == user)
+            )
+            .exists()
+            or overrides.exists()
+        )
     return False
 
 

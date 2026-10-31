@@ -550,24 +550,37 @@ def _page(app, monkeypatch):
     )
 
 
-def test_page_push_is_public_and_short_lived(app, monkeypatch):
-    before = int(time.time())
+def test_page_push_is_data_only_on_android(app, monkeypatch):
+    """The app posts the page itself. A notification block would make FCM
+    post a copy first, and Android then mutes the app's alarm as "recently
+    noisy" (the missed page of 2026-10-30)."""
     msg = _page(app, monkeypatch)
 
+    assert msg.notification is None
+    assert msg.android.notification is None
+    assert msg.data == {
+        "type": "page",
+        "incident_id": "17",
+        "title": "🚨 DOWN: Acme Portal",
+        "body": "timeout",
+    }
     android = msg.android
     assert android.priority == "high"
     assert android.ttl == 120
     assert android.collapse_key == "incident-17"
-    assert android.notification.visibility == "public"
-    assert android.notification.channel_id == "oncall_pages"
-    assert android.notification.tag == "incident-17"
-    assert android.notification.priority == "max"
+
+
+def test_page_push_is_a_short_lived_critical_alert_on_ios(app, monkeypatch):
+    before = int(time.time())
+    msg = _page(app, monkeypatch)
 
     headers = msg.apns.headers
+    assert headers["apns-push-type"] == "alert"
     assert headers["apns-priority"] == "10"
     assert headers["apns-collapse-id"] == "incident-17"
     assert before + 120 <= int(headers["apns-expiration"]) <= int(time.time()) + 120
     aps = msg.apns.payload.aps
+    assert (aps.alert.title, aps.alert.body) == ("🚨 DOWN: Acme Portal", "timeout")
     assert (aps.sound.name, aps.sound.critical, aps.sound.volume) == (
         "pager.caf",
         True,

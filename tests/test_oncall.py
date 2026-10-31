@@ -32,6 +32,7 @@ from app.services import oncall_service
 NOW = datetime.datetime(2026, 10, 14, 15, 0)
 SHIFT_START = datetime.datetime(2026, 10, 12, 12, 0)
 MINUTE = datetime.timedelta(minutes=1)
+DAY = datetime.timedelta(days=1)
 WEEK = datetime.timedelta(days=7)
 KUMA_HEADERS = {"Authorization": "Bearer test-uptime-kuma-key"}
 
@@ -433,6 +434,42 @@ def test_user_in_chain(oncall):
     assert not oncall_service.user_in_chain(incident, outsider)
 
 
+def test_can_be_paged(oncall):
+    """Who gets the full pager setup in the mobile app."""
+    for user in (oncall.eng, oncall.lead, oncall.director, oncall.ceo):
+        assert oncall_service.can_be_paged(user)
+    assert not oncall_service.can_be_paged(_user("outsider"))
+    assert not oncall_service.can_be_paged(None)
+    # Workspace admins are paged when nobody else can be.
+    assert oncall_service.can_be_paged(_user("boss", admin=True))
+    # On-call admins only manage the rotation; nobody pages them.
+    assert not oncall_service.can_be_paged(_user("ops", ["oncall-admin"]))
+
+
+def test_can_be_paged_follows_overrides_and_the_rotation(oncall):
+    cover = _user("cover")
+    override = OnCallOverride.create(
+        schedule=oncall.schedule,
+        user=cover,
+        start_at=NOW + DAY,
+        end_at=NOW + 2 * DAY,
+    )
+    assert oncall_service.can_be_paged(cover)
+    # A cover that's over doesn't make anyone pageable.
+    assert not oncall_service.can_be_paged(cover, now=override.end_at)
+
+    OnCallScheduleMember.delete().where(
+        OnCallScheduleMember.user == oncall.eng
+    ).execute()
+    assert not oncall_service.can_be_paged(oncall.eng)
+
+
+def test_can_be_paged_skips_deactivated_users(oncall):
+    oncall.lead.is_active = False
+    oncall.lead.save()
+    assert not oncall_service.can_be_paged(oncall.lead)
+
+
 # --- Uptime Kuma webhook ---
 
 
@@ -705,6 +742,11 @@ def test_api_oncall_me(client, oncall, mocker):
     assert data["on_call"]["until"] == (SHIFT_START + WEEK).isoformat()
     # 8-week window, eng has every other week.
     assert len(data["upcoming_shifts"]) == 4
+    assert data["can_be_paged"] is True
+
+    outsider = _user("outsider")
+    data = client.get("/api/v1/oncall/me", headers=_api_headers(outsider)).get_json()
+    assert data["can_be_paged"] is False
 
 
 def test_api_test_page_rings_only_me(client, oncall, mocker):

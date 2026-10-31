@@ -107,11 +107,6 @@ def send_to_user(user_id, *, title, body, data=None):
     _send(user_id, data, build)
 
 
-# Android notification channel the mobile app registers for on-call pages
-# (high importance, alarm sound). Sent on every page so the app can route it
-# without inspecting the payload.
-PAGE_ANDROID_CHANNEL_ID = "oncall_pages"
-
 # iOS sound for pages, bundled by the mobile app. iOS plays the default alert
 # sound when the app doesn't ship a file by this name, so this is safe to send
 # before the app has it.
@@ -130,10 +125,18 @@ PAGE_TTL_SECONDS = 120
 def send_page(user_id, *, title, body, data=None):
     """Send an on-call page: the most intrusive push the platforms allow.
 
-    Android: high-priority message on the ``oncall_pages`` channel with max
-    notification priority. iOS: priority-10 critical alert — it only breaks
-    through silent / Do Not Disturb once Apple grants the app the Critical
-    Alerts entitlement; until then iOS delivers it as a normal alert.
+    Android: a high-priority **data-only** message, with ``title`` and
+    ``body`` in ``data``. The app posts the page itself on the
+    ``oncall_pages`` channel (alarm sound looping until handled, full-screen
+    intent, Acknowledge button). A ``notification`` block would make FCM
+    post its own copy first, and Android mutes an app's next noisy
+    notification for about a second after one ("Muting recently noisy"),
+    which silenced a real page on 2026-10-30.
+
+    iOS: priority-10 critical alert. It only breaks through silent / Do Not
+    Disturb once Apple grants the app the Critical Alerts entitlement; until
+    then iOS delivers it as a normal alert.
+
     Repeat pages share a tag / collapse id per incident, so a re-send
     re-alerts and replaces the previous notification instead of stacking.
     Pages expire after ``PAGE_TTL_SECONDS`` undelivered, and the Android
@@ -141,36 +144,28 @@ def send_page(user_id, *, title, body, data=None):
     Unlike chat pushes, callers do not suppress pages for users active on
     the web — a page should reach every device.
     """
-    tag = f"incident-{(data or {}).get('incident_id', '')}"
+    data = {**(data or {}), "title": title, "body": body}
+    tag = f"incident-{data.get('incident_id', '')}"
 
     def build(messaging, token_strings, payload_data):
         return messaging.MulticastMessage(
             tokens=token_strings,
-            notification=messaging.Notification(title=title, body=body),
             data=payload_data,
             android=messaging.AndroidConfig(
                 priority="high",
                 ttl=PAGE_TTL_SECONDS,
                 collapse_key=tag,
-                notification=messaging.AndroidNotification(
-                    channel_id=PAGE_ANDROID_CHANNEL_ID,
-                    tag=tag,
-                    priority="max",
-                    default_sound=True,
-                    default_vibrate_timings=True,
-                    # The default (private) shows "Contents hidden" on lock
-                    # screens that hide sensitive content.
-                    visibility="public",
-                ),
             ),
             apns=messaging.APNSConfig(
                 headers={
+                    "apns-push-type": "alert",
                     "apns-priority": "10",
                     "apns-collapse-id": tag,
                     "apns-expiration": str(int(time.time()) + PAGE_TTL_SECONDS),
                 },
                 payload=messaging.APNSPayload(
                     aps=messaging.Aps(
+                        alert=messaging.ApsAlert(title=title, body=body),
                         sound=messaging.CriticalSound(
                             PAGE_IOS_SOUND, critical=True, volume=1.0
                         ),

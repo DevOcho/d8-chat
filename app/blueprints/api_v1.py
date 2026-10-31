@@ -1789,6 +1789,8 @@ def oncall_me():
                 oncall_service.serialize_incident(i)
                 for i in oncall_service.active_pages_for(g.api_user)
             ],
+            # The app asks people who can be paged for the full pager setup.
+            "can_be_paged": oncall_service.can_be_paged(g.api_user, now),
         }
     ), 200
 
