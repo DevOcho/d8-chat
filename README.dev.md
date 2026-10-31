@@ -123,8 +123,7 @@ auto restart d8-chat   # apply
 auto logs d8-chat
 ```
 
-Errors go through Python's `logging` module (no more `print()` — see the
-audit history in `SECURITY_AND_ENHANCEMENTS.md`). If you set `SENTRY_DSN` in
+Errors go through Python's `logging` module, never `print()`. If you set `SENTRY_DSN` in
 `.env`, unhandled exceptions also flow there automatically.
 
 ---
@@ -294,6 +293,5 @@ Things that don't work over plain HTTP:
 
 - `CLAUDE.md` — architecture, message flow, blueprint layout
 - `MOBILE_WEBSOCKET_API_DOCS.md` — mobile / Flutter integration
-- `SECURITY_AND_ENHANCEMENTS.md` — running audit checklist (running tally
-  of Critical/High/Medium fixes and what's still outstanding)
-- `WEB_TEAM_REQUESTS.md`, `PLAN.md` — historical product/eng notes
+- `ONCALL_PLAN.md` — on-call paging: decisions, file map, prod setup
+- `CSP_PLAN.md` — Content-Security-Policy rollout and `CSP_MODE`
