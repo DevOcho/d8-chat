@@ -47,9 +47,10 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'
 (+ the existing img/font/media/connect directives, + report-to)
 ```
 
-No nonces: everything inline moves into files under `static/js` / `style.css`,
-so the policy stays a static string (cacheable, no per-request templating, no
-nonce plumbing into htmx-swapped fragments).
+No nonces for our own code: everything inline moves into files under
+`static/js` / `style.css`, so nothing needs nonce plumbing into htmx-swapped
+fragments. The one nonce in the policy is for Cloudflare (see "Cloudflare in
+front of prod" below).
 
 ---
 
@@ -289,6 +290,23 @@ emoji-picker (its shadow `<style>`, Phase 5's hash), 6 `inline`, and 2 from
    ones (cosmetic) → `CSP_MODE=enforce-scripts` gets the script protection
    now, and `enforce` follows the fix. Any `script-src*` one → fix it first.
    Rollback is setting it back to `report`.
+
+## Cloudflare in front of prod
+
+chat.devocho.com is behind Cloudflare (dev and the local cluster aren't), and
+Cloudflare's JavaScript Detections adds an inline `<script>` to every HTML page
+(it loads `/cdn-cgi/challenge-platform/scripts/jsd/main.js`). `script-src
+'self'` would block it. So the strict `script-src` carries a fresh
+`'nonce-…'` on every response, the same one in both headers, and Cloudflare
+copies it from the header onto the script it injects
+([docs](https://developers.cloudflare.com/cloudflare-challenges/challenge-types/javascript-detections/)).
+Our templates never use the nonce, and the loose policy never gets one (next to
+`'unsafe-inline'` it would switch that off). Cloudflare doesn't say whether it
+reads the nonce from a Report-Only header. If prod's report-mode logs still
+show `inline` violations whose sample starts `(function(){function c()`,
+that's Cloudflare's script without the nonce: right after switching to
+`enforce` (where the enforced header carries it), check that the script in the
+page source has a `nonce` attribute.
 
 ## Effort
 

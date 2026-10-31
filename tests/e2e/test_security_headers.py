@@ -4,6 +4,8 @@ on responses from the running app. Catches regressions where someone
 accidentally drops the ``@app.after_request`` hook or the CSP gets relaxed.
 """
 
+import re
+
 from playwright.sync_api import Page
 
 REQUIRED_HEADERS = {
@@ -53,7 +55,7 @@ def test_local_cluster_enforces_the_strict_script_policy(page: Page, base_url: s
 
         pytest.skip("only the local cluster is known to run CSP_MODE=enforce")
     csp = _headers_for(page, "/").get("content-security-policy", "")
-    assert "script-src 'self' 'report-sample';" in csp, csp
+    assert re.search(r"script-src 'self' 'nonce-[\w-]+' 'report-sample';", csp), csp
     assert "unsafe-eval" not in csp, csp
 
 

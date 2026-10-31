@@ -6,6 +6,7 @@
 import hashlib
 import os
 import re
+import secrets
 import threading
 import time
 from urllib.parse import urlparse
@@ -437,6 +438,7 @@ def _build_csp(
     strict_style_elements=False,
     strict_style_attributes=False,
     report=False,
+    nonce=None,
 ):
     """
     Build the Content-Security-Policy for HTML responses.
@@ -448,7 +450,7 @@ def _build_csp(
     ``strict_style_elements`` / ``strict_style_attributes`` give the target
     rules instead, per directive group. ``report`` adds the
     ``report-uri`` / ``report-to`` directives that send violations to
-    ``/csp-report``.
+    ``/csp-report``. ``nonce`` joins the strict ``script-src`` only.
     """
     img_src = "'self' data: blob:"
     if minio_origin:
@@ -459,7 +461,13 @@ def _build_csp(
     # 'report-sample' puts the first 40 characters of what was blocked in the
     # violation report, which is what makes a csp_violation line actionable.
     if strict_scripts:
-        script_directives = ["script-src 'self' 'report-sample'"]
+        # The nonce is for a script a proxy adds to our pages, not for ours:
+        # Cloudflare, in front of prod, injects its JavaScript Detections
+        # script into every HTML page and copies the nonce from this header
+        # onto it. Our templates never use it (tests/test_csp_guard.py). The
+        # loose rules get none: next to 'unsafe-inline' it would switch that off.
+        nonce_source = f" 'nonce-{nonce}'" if nonce else ""
+        script_directives = [f"script-src 'self'{nonce_source} 'report-sample'"]
     else:
         script_directives = ["script-src 'self' 'unsafe-inline' 'unsafe-eval'"]
     picker = f"'{EMOJI_PICKER_STYLE_HASH}'"
@@ -511,8 +519,9 @@ def _build_csp(
     return "; ".join(directives)
 
 
-def _csp_headers(minio_origin, mode):
-    """``(enforced, report_only)`` policies for a CSP_MODE.
+def _csp_headers(minio_origin, mode, nonce=None):
+    """``(enforced, report_only)`` policies for a CSP_MODE, both with the same
+    ``nonce`` wherever ``script-src`` is strict.
 
     - ``legacy``:  the loose policy, no reporting (an escape hatch).
     - ``report``:  the loose policy enforced; the full target policy sent as
@@ -533,6 +542,7 @@ def _csp_headers(minio_origin, mode):
         strict_style_elements=styles and CSP_ENFORCEABLE["style_elements"],
         strict_style_attributes=styles and CSP_ENFORCEABLE["style_attributes"],
         report=True,
+        nonce=nonce,
     )
     target = _build_csp(
         minio_origin,
@@ -540,6 +550,7 @@ def _csp_headers(minio_origin, mode):
         strict_style_elements=True,
         strict_style_attributes=True,
         report=True,
+        nonce=nonce,
     )
     return enforced, target
 
@@ -553,9 +564,6 @@ def _register_security_headers(app):
         if parsed.scheme and parsed.netloc:
             minio_origin = f"{parsed.scheme}://{parsed.netloc}"
 
-    html_csp, html_csp_report_only = _csp_headers(
-        minio_origin, app.config.get("CSP_MODE", "report")
-    )
     api_csp = "default-src 'none'; frame-ancestors 'none'"
 
     @app.after_request
@@ -576,6 +584,12 @@ def _register_security_headers(app):
         if request.path.startswith("/api/v1"):
             response.headers.setdefault("Content-Security-Policy", api_csp)
         else:
+            # A fresh nonce for every response (see _build_csp).
+            html_csp, html_csp_report_only = _csp_headers(
+                minio_origin,
+                app.config.get("CSP_MODE", "report"),
+                nonce=secrets.token_urlsafe(16),
+            )
             response.headers.setdefault("Content-Security-Policy", html_csp)
             if html_csp_report_only:
                 response.headers.setdefault(

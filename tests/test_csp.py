@@ -4,6 +4,7 @@ endpoint (CSP_PLAN.md)."""
 
 import json
 import logging
+import re
 
 import pytest
 
@@ -116,6 +117,23 @@ def test_strict_policy_keeps_the_other_directives():
     assert "http://minio.local" in d["img-src"]
 
 
+def test_strict_script_src_carries_the_nonce_in_both_headers():
+    enforced, report_only = _csp_headers("", "enforce", nonce="abc123")
+    for policy in (enforced, report_only):
+        assert (
+            _directives(policy)["script-src"] == "'self' 'nonce-abc123' 'report-sample'"
+        )
+
+
+@pytest.mark.parametrize("mode", ["legacy", "report"])
+def test_loose_script_src_never_carries_the_nonce(mode):
+    """A nonce next to 'unsafe-inline' switches 'unsafe-inline' off."""
+    enforced, report_only = _csp_headers("", mode, nonce="abc123")
+    assert "nonce-" not in enforced
+    if report_only:
+        assert "'nonce-abc123'" in _directives(report_only)["script-src"]
+
+
 def test_unknown_mode_fails_at_boot(monkeypatch):
     from config import TestConfig
 
@@ -124,14 +142,35 @@ def test_unknown_mode_fails_at_boot(monkeypatch):
         create_app(config_class="config.TestConfig")
 
 
+NONCE = re.compile(r"'nonce-([A-Za-z0-9_-]{22})'")
+
+
 def test_html_pages_carry_both_headers_and_the_reporting_endpoint(client):
     res = client.get("/")
     assert "unsafe-inline" in res.headers["Content-Security-Policy"]
-    assert (
-        "script-src 'self' 'report-sample';"
-        in res.headers["Content-Security-Policy-Report-Only"]
-    )
+    target = _directives(res.headers["Content-Security-Policy-Report-Only"])
+    assert re.fullmatch(f"'self' {NONCE.pattern} 'report-sample'", target["script-src"])
     assert res.headers["Reporting-Endpoints"] == 'csp="http://localhost/csp-report"'
+
+
+def test_every_response_gets_a_fresh_nonce_shared_by_its_two_headers(app, client):
+    app.config["CSP_MODE"] = "enforce"
+    try:
+        responses = [client.get("/") for _ in range(2)]
+    finally:
+        app.config["CSP_MODE"] = "report"
+    nonces = []
+    for res in responses:
+        found = {
+            NONCE.search(res.headers[name]).group(1)
+            for name in (
+                "Content-Security-Policy",
+                "Content-Security-Policy-Report-Only",
+            )
+        }
+        assert len(found) == 1
+        nonces += found
+    assert nonces[0] != nonces[1]
 
 
 def test_api_responses_keep_their_own_policy_and_no_report_only(client):
