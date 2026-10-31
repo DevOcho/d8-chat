@@ -18,7 +18,17 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
-from .helpers import REALTIME_TIMEOUT, open_general_channel, wait_for_chat_ready
+from .helpers import (
+    REALTIME_TIMEOUT,
+    message_container,
+    open_general_channel,
+    open_thread,
+    send_message,
+    send_thread_reply,
+    unique_text,
+    wait_for_chat_ready,
+    wait_for_message_with_text,
+)
 
 AXE_BUNDLE = (
     Path(__file__).resolve().parents[2] / "node_modules" / "axe-core" / "axe.min.js"
@@ -83,13 +93,31 @@ def test_forgot_password_page_is_accessible(page: Page, base_url):
     assert_accessible(page, "the forgot-password page")
 
 
+def open_general_with_a_thread(page: Page) -> None:
+    """#general with a thread root on screen, so its "1 reply" link is scanned
+    too: whether the newest page holds one otherwise depends on earlier runs."""
+    open_general_channel(page)
+    text = unique_text("a11y thread")
+    send_message(page, text)
+    wait_for_message_with_text(page, text)
+    container = message_container(page, text)
+    parent_id = open_thread(page, container)
+    send_thread_reply(page, parent_id, unique_text("a11y reply"))
+    expect(container.locator("a", has_text="1 reply")).to_be_visible(
+        timeout=REALTIME_TIMEOUT
+    )
+    panel = page.locator("#right-panel-offcanvas")
+    panel.locator("[data-bs-dismiss='offcanvas']").click()
+    expect(panel).to_be_hidden()
+
+
 def test_chat_is_accessible(logged_in_page: Page):
-    open_general_channel(logged_in_page)
+    open_general_with_a_thread(logged_in_page)
     assert_accessible(logged_in_page, "#general")
 
 
 def test_chat_is_accessible_in_dark_mode(logged_in_page: Page):
-    open_general_channel(logged_in_page)
+    open_general_with_a_thread(logged_in_page)
     logged_in_page.evaluate(
         "document.documentElement.setAttribute('data-bs-theme', 'dark')"
     )
@@ -125,7 +153,7 @@ def test_profile_panel_is_accessible(logged_in_page: Page):
 
 
 def test_unreads_and_threads_views_are_accessible(logged_in_page: Page):
-    open_general_channel(logged_in_page)
+    open_general_with_a_thread(logged_in_page)
     logged_in_page.locator("#unreads-link").click()
     expect(
         logged_in_page.locator("#chat-messages-container > div[data-conversation-id]")
@@ -136,6 +164,13 @@ def test_unreads_and_threads_views_are_accessible(logged_in_page: Page):
         timeout=REALTIME_TIMEOUT
     )
     assert_accessible(logged_in_page, "Threads")
+    # A thread opens from the keyboard too.
+    item = logged_in_page.locator("#thread-list-container a").first
+    item.focus()
+    item.press("Enter")
+    panel = logged_in_page.locator("#right-panel-offcanvas")
+    expect(panel).to_be_visible(timeout=REALTIME_TIMEOUT)
+    expect(panel.locator("[id^='thread-replies-list-']")).to_be_attached()
 
 
 def test_search_results_are_accessible(logged_in_page: Page):

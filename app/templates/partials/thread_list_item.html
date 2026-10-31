@@ -1,7 +1,9 @@
 {% set channel = thread_channel_map.get(message.id) %}
-<div class="d-flex p-3 border-bottom text-decoration-none text-body cursor-pointer"
-     hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"
-     hx-target="#right-panel-offcanvas">
+{# A link, not a clickable div, so the keyboard can reach and open it. #}
+<a href="#"
+   class="d-flex p-3 border-bottom text-decoration-none text-body"
+   hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"
+   hx-target="#right-panel-offcanvas">
     <div class="flex-shrink-0">
         {% with user=message.user, size=40 %}
             {% include 'partials/_avatar_display.html' %}
@@ -37,4 +39,4 @@
             </div>
         {% endif %}
     </div>
-</div>
+</a>

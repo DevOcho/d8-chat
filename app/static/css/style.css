@@ -438,6 +438,14 @@ kbd { padding: 0.1em 0.4em; border-radius: 3px; border: 1px solid #b4b4b4; backg
     .channel-sidebar { background-color: #222529; }
     .main-content, .container-fluid { background-color: #2f3136 !important; }
     .chat-messages, .chat-input-form { background-color: #363f4f; }
+    /* Bootstrap's dark-mode link blue (#6ea8fe) is 4.39:1 on that background,
+       under WCAG AA's 4.5 (the "N replies" thread links); one shade lighter. */
+    .chat-messages {
+        --bs-link-color: #8bb9fe;
+        --bs-link-color-rgb: 139, 185, 254;
+        --bs-link-hover-color: #9ec5fe;
+        --bs-link-hover-color-rgb: 158, 197, 254;
+    }
 
     /* WYSIWYG Editor */
     .wysiwyg-editor-container { background-color: #40444b; border-color: #2f3136; }
