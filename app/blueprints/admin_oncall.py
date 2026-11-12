@@ -541,23 +541,29 @@ def oncall_policy(policy_id):
         users=_active_users(),
         groups=_group_directory(),
         next_level=(max((lv["level"].level for lv in levels), default=0) + 1),
+        alarms=oncall_service.ALARMS,
+        alarm_labels=oncall_service.ALARM_LABELS,
     )
 
 
 @admin_bp.route("/oncall/policies/<int:policy_id>/settings", methods=["POST"])
 @oncall_admin_required
 def oncall_policy_settings(policy_id):
-    """Rename, toggle paging, or change the no-on-call start level."""
+    """Rename, toggle paging, change the alarm or the no-on-call start level."""
     policy = _policy_or_redirect(policy_id)
     if policy is None:
         return redirect(url_for("admin.oncall_overview"))
     name = (request.form.get("name") or "").strip()
+    alarm = request.form.get("alarm") or policy.alarm
     if not name:
         flash("Name is required.", "danger")
+    elif alarm not in oncall_service.ALARMS:
+        flash("Pick an alarm from the list.", "danger")
     else:
         was_active = policy.is_active
         policy.name = name
         policy.is_active = request.form.get("is_active") == "on"
+        policy.alarm = alarm
         policy.no_oncall_start_level = _int_or_none(
             request.form.get("no_oncall_start_level")
         )
@@ -568,6 +574,7 @@ def oncall_policy_settings(policy_id):
             "oncall.policy_updated",
             target=policy,
             is_active=policy.is_active,
+            alarm=policy.alarm,
             no_oncall_start_level=policy.no_oncall_start_level,
         )
         flash("Policy updated.", "success")

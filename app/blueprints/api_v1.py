@@ -1580,6 +1580,27 @@ def update_avatar():
 
 
 HELPDESK_BOT_USERNAME = "helpdesk-bot"
+_PAGE_REQUEST_ERROR = (
+    "page needs a key (up to 200 characters) and a title; details and an "
+    "http(s) url are optional"
+)
+
+
+def _valid_page_request(page):
+    """The ``page`` object of an internal notify, as handle_page_request reads it."""
+    if not isinstance(page, dict):
+        return False
+    key, title = page.get("key"), page.get("title")
+    if not (isinstance(key, str) and 0 < len(key) <= 200):
+        return False
+    if not (isinstance(title, str) and title.strip()):
+        return False
+    details, url = page.get("details"), page.get("url")
+    if details is not None and not isinstance(details, str):
+        return False
+    return url is None or (
+        isinstance(url, str) and url.startswith(("https://", "http://"))
+    )
 
 
 @api_v1_bp.route("/internal/notify", methods=["POST"])
@@ -1593,7 +1614,12 @@ def internal_notify():
     User row (created by migration 0003 / ``init_db.py``).
 
     Body:
-        ``{"channel_name": "<name>", "message": "<text>"}``
+        ``{"channel_name": "<name>", "message": "<text>"}``, plus optionally
+        ``"page": {"key": "<id>", "title": "<text>", "details": "<text>",
+        "url": "https://…"}`` to page the channel's escalation policy (D8's
+        website leads). A page request is posted as ``d8-bot`` and opens an
+        incident (``oncall_service.handle_page_request``); ``key`` dedupes
+        while that incident is open. Without a policy it is only posted.
 
     Behaviour mirrors the user-facing message-create path so the message
     is persisted, mention/hashtag extraction runs, the message is
@@ -1603,7 +1629,7 @@ def internal_notify():
     from flask import render_template
 
     from app.chat_manager import chat_manager
-    from app.services import chat_service
+    from app.services import chat_service, oncall_service
 
     expected_key = current_app.config.get("INTERNAL_NOTIFY_KEY")
     provided_key = request.headers.get("X-Internal-Key", "")
@@ -1620,6 +1646,9 @@ def internal_notify():
         or not message_text
     ):
         return jsonify({"error": "channel_name and message are required"}), 400
+    page = data.get("page")
+    if page is not None and not _valid_page_request(page):
+        return jsonify({"error": _PAGE_REQUEST_ERROR}), 400
 
     # Channel names are unique per workspace, not globally. For the
     # current single-workspace deployment this picks the only match;
@@ -1638,6 +1667,13 @@ def internal_notify():
     conv = Conversation.get_or_none(Conversation.conversation_id_str == conv_id_str)
     if conv is None:
         return jsonify({"error": "Channel conversation missing"}), 500
+
+    if page is not None:
+        try:
+            result = oncall_service.handle_page_request(channel, message_text, page)
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 500
+        return jsonify({"ok": True, **result}), 200
 
     bot_user = User.get_or_none(User.username == HELPDESK_BOT_USERNAME)
     if bot_user is None:

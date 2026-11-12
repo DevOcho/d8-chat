@@ -123,6 +123,11 @@ class Config:
     # on-call engineer when that channel has an escalation policy.
     UPTIME_KUMA_WEBHOOK_KEY = os.environ.get("UPTIME_KUMA_WEBHOOK_KEY")
     UPTIME_KUMA_CHANNEL = os.environ.get("UPTIME_KUMA_CHANNEL", "devops-uptime")
+    # D8 posts website leads here through the internal notify endpoint, with a
+    # page request that pages this channel's escalation policy ("Website
+    # leads": the SDRs, then the CEO). D8's WEBSITE_LEADS_CHAT_CHANNEL must
+    # name the same channel.
+    WEBSITE_LEADS_CHANNEL = os.environ.get("WEBSITE_LEADS_CHANNEL", "website-leads")
     # Members of this group (SSO or local) get the on-call admin pages and may
     # acknowledge/resolve any incident, without being workspace admins.
     ONCALL_ADMIN_GROUP = os.environ.get("ONCALL_ADMIN_GROUP", "oncall-admin")
@@ -232,3 +237,4 @@ class TestConfig(Config):
     # Fixed bearer key for the Uptime Kuma webhook in tests.
     UPTIME_KUMA_WEBHOOK_KEY = "test-uptime-kuma-key"
     UPTIME_KUMA_CHANNEL = "devops-uptime"
+    WEBSITE_LEADS_CHANNEL = "website-leads"
