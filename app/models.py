@@ -605,6 +605,10 @@ class EscalationPolicy(BaseModel):
     ``no_oncall_start_level``: when a schedule level resolves to nobody (empty
     rotation, or an override with no cover), paging jumps straight to this
     level instead of walking the chain level by level. Null disables the jump.
+
+    ``alarm``: what the pager plays for this policy's incidents (one of
+    ``oncall_service.ALARMS``): the looping ``siren`` for outages, or the
+    ``ka-ching`` that repeats for website leads.
     """
 
     id = PrimaryKeyField()
@@ -614,6 +618,7 @@ class EscalationPolicy(BaseModel):
     )
     no_oncall_start_level = IntegerField(null=True, default=3)
     is_active = BooleanField(default=True)
+    alarm = CharField(max_length=16, default="siren")
 
 
 class EscalationLevel(BaseModel):
@@ -648,7 +653,9 @@ class EscalationLevel(BaseModel):
 
 
 class Incident(BaseModel):
-    """A paging incident, opened by a monitor DOWN event.
+    """A paging incident, opened by a monitor DOWN event or by a page request
+    through ``POST /api/v1/internal/notify`` (D8's website leads, ``source``
+    ``d8``).
 
     Lifecycle: ``triggered`` (paging, escalating) → ``acknowledged`` (paging
     stopped, someone is on it) → ``resolved`` (monitor back UP, or resolved by

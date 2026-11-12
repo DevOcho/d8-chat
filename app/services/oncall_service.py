@@ -4,14 +4,17 @@
 Flow: Uptime Kuma POSTs a monitor event to the webhook
 (``api_v1.uptime_kuma_webhook``) → ``handle_uptime_kuma_event`` posts it into
 the configured channel as ``uptime-bot``. A DOWN event on a channel with an
-``EscalationPolicy`` opens an ``Incident`` and pages level 1. Each gunicorn
+``EscalationPolicy`` opens an ``Incident`` and pages level 1. D8 pages the same
+way for a website lead: ``POST /api/v1/internal/notify`` with a ``page`` →
+``handle_page_request`` posts as ``d8-bot`` and opens the incident. Each gunicorn
 worker runs ``run_ticker``, which escalates incidents nobody acknowledged and
 re-sends page frames to everyone still being paged. An UP event (or a manual
 resolve) closes the incident.
 
 Paging rules (product decisions, see ONCALL_PLAN.md):
 
-* Only DOWN events page. Human messages, @channel and @here never do.
+* Only DOWN events and D8 page requests page. Human messages, @channel and
+  @here never do.
 * Pages are cumulative — every level paged so far keeps ringing until someone
   acknowledges, including after the last level.
 * A schedule level with nobody on call jumps to the policy's
@@ -58,6 +61,11 @@ from app.models import (
 from app.services import push_service
 
 UPTIME_BOT_USERNAME = "uptime-bot"
+# Authors D8's page requests (website leads) and the incident posts after them.
+D8_BOT_USERNAME = "d8-bot"
+# Bots whose messages can open an incident, so only their messages are checked
+# for an incident card.
+PAGING_BOT_USERNAMES = (UPTIME_BOT_USERNAME, D8_BOT_USERNAME)
 DEFAULT_TIMEZONE = "America/Santo_Domingo"
 DEFAULT_SCHEDULE_NAME = "DevOps Primary"
 DEFAULT_POLICY_NAME = "DevOps Uptime"
@@ -67,6 +75,18 @@ DEFAULT_ESCALATION_MINUTES = 10
 DEFAULT_NO_ONCALL_START_LEVEL = 3
 
 TARGET_TYPES = ("schedule", "group", "user")
+# What the pager plays (EscalationPolicy.alarm). The siren loops until the
+# page stops; the ka-ching plays every 5 seconds for the first minute, then
+# every 10 (pager.js). Both are synthesized in the browser: no audio file.
+ALARMS = ("siren", "ka-ching")
+ALARM_LABELS = {"siren": "Siren (outages)", "ka-ching": "Ka-ching (leads)"}
+
+# Website leads from D8 (plan in ONCALL_PLAN.md, "Website leads"). Every SDR is
+# paged at once; nobody acknowledges within 15 minutes and the CEO is paged
+# too. Admins change the levels in Admin → On-Call.
+LEADS_POLICY_NAME = "Website leads"
+LEADS_LEVELS = ((1, "sdr", 0), (2, "ceo", 15))
+LEADS_SOURCE = "d8"
 OPEN_STATES = ("triggered", "acknowledged")
 WEEKDAY_NAMES = (
     "Monday",
@@ -503,6 +523,14 @@ def paged_users(incident):
     ]
 
 
+def incident_alarm(incident):
+    """The alarm the pager plays for ``incident``: its policy's, else the siren
+    (a policy deleted mid-incident)."""
+    policy = incident.policy if incident.policy_id else None
+    alarm = policy.alarm if policy is not None else None
+    return alarm if alarm in ALARMS else "siren"
+
+
 def serialize_incident(incident):
     """JSON shape shared by the web pager, the WS ``page`` frame and the API.
 
@@ -515,6 +543,7 @@ def serialize_incident(incident):
         "details": incident.details,
         "source": incident.source,
         "source_url": incident.source_url,
+        "alarm": incident_alarm(incident),
         "state": incident.state,
         "current_level": incident.current_level,
         "triggered_at": _iso(incident.created_at),
@@ -571,8 +600,9 @@ def uptime_bot():
     return User.get_or_none(User.username == UPTIME_BOT_USERNAME)
 
 
-def post_bot_message(channel, text, on_created=None):
-    """Post ``text`` into ``channel`` as ``uptime-bot`` and broadcast it.
+def post_bot_message(channel, text, on_created=None, bot=None):
+    """Post ``text`` into ``channel`` as ``bot`` (``uptime-bot`` by default)
+    and broadcast it.
 
     Mirrors the user-facing send path: persist (mention/hashtag extraction),
     broadcast over pub/sub, then badge/notification fan-out off the hot path.
@@ -585,14 +615,14 @@ def post_bot_message(channel, text, on_created=None):
     from app.routes import _broadcast_regular_message
     from app.services import chat_service
 
-    bot = uptime_bot()
+    bot = bot or uptime_bot()
     conv_id_str = f"channel_{channel.id}"
     conversation = Conversation.get_or_none(
         Conversation.conversation_id_str == conv_id_str
     )
     if bot is None or conversation is None:
         current_app.logger.error(
-            "Cannot post to #%s: uptime-bot user or channel conversation missing.",
+            "Cannot post to #%s: bot user or channel conversation missing.",
             channel.name,
         )
         return None
@@ -605,6 +635,20 @@ def post_bot_message(channel, text, on_created=None):
     _broadcast_regular_message(bot, message, conv_id_str)
     spawn_background(chat_service.send_notifications_for_new_message, message, bot)
     return message
+
+
+def d8_bot():
+    """The ``d8-bot`` user that authors D8's page requests."""
+    return User.get_or_none(User.username == D8_BOT_USERNAME)
+
+
+def incident_bot(incident):
+    """Who posts about ``incident`` (escalated, acknowledged, resolved): the
+    bot that posted the message that opened it, so a lead's thread reads as
+    D8's and an outage's as Uptime Kuma's."""
+    if incident.message_id and incident.message.user.username in PAGING_BOT_USERNAMES:
+        return incident.message.user
+    return uptime_bot()
 
 
 def broadcast_incident_update(incident):
@@ -652,20 +696,30 @@ def _deliver_page(incident, user_ids, repeat=False):
     spawn_background(_push_pages, incident.id, list(user_ids))
 
 
+# (title prefix, body when the incident has no details) for each alarm.
+_PUSH_WORDING = {
+    "siren": ("🚨 DOWN: ", "Production alert. Open D8-Chat to acknowledge."),
+    "ka-ching": ("💰 ", "Someone wants to talk to us. Open D8-Chat to acknowledge."),
+}
+
+
 def _push_pages(incident_id, user_ids):
     incident = Incident.get_or_none(Incident.id == incident_id)
     if incident is None or incident.state != "triggered":
         return
+    alarm = incident_alarm(incident)
+    prefix, fallback = _PUSH_WORDING[alarm]
     for user_id in user_ids:
         push_service.send_page(
             user_id,
-            title=f"🚨 DOWN: {incident.title}",
-            body=incident.details or "Production alert. Open D8-Chat to acknowledge.",
+            title=f"{prefix}{incident.title}",
+            body=incident.details or fallback,
             data={
                 "type": "page",
                 "incident_id": incident.id,
                 "conversation_id_str": f"channel_{incident.channel_id}",
                 "message_id": incident.message_id or "",
+                "alarm": alarm,
             },
         )
 
@@ -732,36 +786,60 @@ def silence_policy(policy):
         )
 
 
-def send_test_page(user):
-    """Ring ``user``'s pager with a fake incident (nothing is stored)."""
-    now = utc_now()
-    frame = {
-        "type": "page",
-        "test": True,
-        "repeat": False,
-        "incident": {
-            "id": f"test-{int(time.time())}",
-            "title": "Test page",
-            "details": "This is a test of your D8-Chat pager. Nothing is down.",
-            "source": "test",
-            "source_url": None,
-            "state": "triggered",
-            "current_level": 1,
-            "triggered_at": _iso(now),
-            "channel_name": None,
-            "conversation_id_str": None,
-            "message_id": None,
-            "paged_users": [dict(_user_brief(user), level=1)],
-        },
+def alarms_for(user):
+    """The alarms ``user`` can be paged with, siren first: one per active
+    policy with a level that reaches them. The siren when none does (workspace
+    admins, the last-resort fallback, hear the siren)."""
+    alarms = {
+        level.policy.alarm
+        for level in EscalationLevel.select(EscalationLevel, EscalationPolicy)
+        .join(EscalationPolicy)
+        .where(EscalationPolicy.is_active)
+        if _level_reaches(level, user)
     }
-    chat_manager.send_to_user(user.id, frame)
-    spawn_background(
-        push_service.send_page,
-        user.id,
-        title="🚨 Test page",
-        body="This is a test of your D8-Chat pager.",
-        data={"type": "page", "test": "1", "incident_id": frame["incident"]["id"]},
-    )
+    found = [alarm for alarm in ALARMS if alarm in alarms]
+    return found or ["siren"]
+
+
+def send_test_page(user):
+    """Ring ``user``'s pager with a fake incident per alarm they can be paged
+    with (nothing is stored), so an SDR hears the ka-ching, not the siren."""
+    now = utc_now()
+    stamp = int(time.time())
+    for alarm in alarms_for(user):
+        frame = {
+            "type": "page",
+            "test": True,
+            "repeat": False,
+            "incident": {
+                "id": f"test-{stamp}" if alarm == "siren" else f"test-{stamp}-{alarm}",
+                "title": "Test page",
+                "details": "This is a test of your D8-Chat pager. Nothing is down.",
+                "source": "test",
+                "source_url": None,
+                "alarm": alarm,
+                "state": "triggered",
+                "current_level": 1,
+                "triggered_at": _iso(now),
+                "channel_name": None,
+                "conversation_id_str": None,
+                "message_id": None,
+                "paged_users": [dict(_user_brief(user), level=1)],
+            },
+        }
+        chat_manager.send_to_user(user.id, frame)
+        spawn_background(
+            push_service.send_page,
+            user.id,
+            title="🚨 Test page",
+            body="This is a test of your D8-Chat pager.",
+            data={
+                "type": "page",
+                "test": "1",
+                "incident_id": frame["incident"]["id"],
+                "alarm": alarm,
+            },
+        )
 
 
 def _paging_enabled():
@@ -882,7 +960,7 @@ def _page_admins_if_nobody_paged(incident):
     return admins
 
 
-def trigger_incident(
+def trigger_incident(  # pylint: disable=too-many-arguments
     policy,
     channel,
     dedupe_key,
@@ -891,6 +969,7 @@ def trigger_incident(
     source_url=None,
     message=None,
     now=None,
+    source="uptime-kuma",
 ):
     """Open an incident and page level 1. Returns the incident.
 
@@ -903,6 +982,7 @@ def trigger_incident(
             incident = Incident.create(
                 policy=policy,
                 channel=channel,
+                source=source,
                 dedupe_key=dedupe_key,
                 title=title[:255],
                 details=details,
@@ -982,6 +1062,7 @@ def _escalate(candidate, now):
             incident.channel,
             f"⏫ **Escalated** · {incident.title} · not acknowledged, "
             f"now paging {names} (level {incident.current_level})",
+            bot=incident_bot(incident),
         )
     broadcast_incident_update(incident)
     return incident, newly_paged
@@ -1041,6 +1122,7 @@ def acknowledge_incident(incident, user, now=None):
     post_bot_message(
         incident.channel,
         f"✅ **Acknowledged** · {incident.title} · by **{display_name(user)}**",
+        bot=incident_bot(incident),
     )
     return True
 
@@ -1073,6 +1155,7 @@ def resolve_incident(incident, user=None, now=None, announce=True):
         post_bot_message(
             incident.channel,
             f"☑️ **Resolved** · {incident.title} · by **{display_name(user)}**",
+            bot=incident_bot(incident),
         )
     return incident
 
@@ -1214,6 +1297,62 @@ def handle_uptime_kuma_event(payload, channel, now=None):
     return {"event": event}
 
 
+# --- Page requests (D8) ---
+
+
+def handle_page_request(channel, text, page, now=None):
+    """Post ``text`` as ``d8-bot`` and page the channel's policy for it.
+
+    ``page`` is ``{"key", "title", "details"?, "url"?}`` from
+    ``POST /api/v1/internal/notify``. ``key`` dedupes: while an incident for
+    it is open, a repeat is posted but pages nobody new. A channel without an
+    active policy gets the post and no page. Returns
+    ``{"incident_id": …, "repeat": bool}`` (``incident_id`` None when nothing
+    pages).
+    """
+    now = now or utc_now()
+    bot = d8_bot()
+    if bot is None:
+        raise LookupError("d8-bot user not provisioned")
+    dedupe_key = f"{LEADS_SOURCE}:{page['key']}"
+    existing = open_incident_for(dedupe_key)
+    if existing is not None:
+        _record(existing, "repeat_page")
+        post_bot_message(channel, text, bot=bot)
+        return {"incident_id": existing.id, "repeat": True}
+
+    policy = EscalationPolicy.get_or_none(
+        (EscalationPolicy.channel == channel) & (EscalationPolicy.is_active)
+    )
+    if policy is None:
+        post_bot_message(channel, text, bot=bot)
+        return {"incident_id": None, "repeat": False}
+
+    opened = {}
+
+    def _open(message):
+        opened["incident"] = trigger_incident(
+            policy,
+            channel,
+            dedupe_key,
+            title=page["title"],
+            details=page.get("details") or None,
+            source_url=page.get("url") or None,
+            message=message,
+            now=now,
+            source=LEADS_SOURCE,
+        )
+
+    post_bot_message(channel, text, on_created=_open, bot=bot)
+    incident = opened.get("incident")
+    if incident is None:
+        # Lost the race to a concurrent request with the same key: that one
+        # is paging.
+        existing = open_incident_for(dedupe_key)
+        return {"incident_id": existing.id if existing else None, "repeat": True}
+    return {"incident_id": incident.id, "repeat": False}
+
+
 # --- Ticker ---
 
 
@@ -1260,7 +1399,7 @@ def incident_for_message(message):
     Only bot messages can carry one, so ordinary messages cost no query.
     """
     user = getattr(message, "user", None)
-    if user is None or user.username != UPTIME_BOT_USERNAME:
+    if user is None or user.username not in PAGING_BOT_USERNAMES:
         return None
     return Incident.get_or_none(Incident.message == message.id)
 
@@ -1339,6 +1478,64 @@ def ensure_default_oncall(channel, now=None):
                 target_group=group,
             )
     return schedule, policy
+
+
+def ensure_d8_bot(workspace):
+    """The ``d8-bot`` user D8's page requests post as. Idempotent."""
+    bot, _ = User.get_or_create(
+        username=D8_BOT_USERNAME,
+        defaults={
+            "email": "d8-bot@d8chat.local",
+            "display_name": "D8",
+            # Inactive: can never log in; only used as Message.user.
+            "is_active": False,
+        },
+    )
+    WorkspaceMember.get_or_create(
+        user=bot, workspace=workspace, defaults={"role": "member"}
+    )
+    return bot
+
+
+def ensure_leads_paging(workspace, channel_name="website-leads"):
+    """The website leads channel, ``d8-bot`` and the "Website leads" policy
+    (ka-ching; every SDR, then the CEO 15 minutes later). Idempotent: an
+    existing policy is left as the admins have it."""
+    bot = ensure_d8_bot(workspace)
+    channel, _ = Channel.get_or_create(
+        workspace=workspace,
+        name=channel_name,
+        defaults={
+            "is_private": False,
+            "topic": "Website leads from D8. A new lead pages the SDRs.",
+            "description": (
+                "Every contact form fill on devocho.com that D8 takes in. It "
+                "pages every SDR until one acknowledges, and the CEO after 15 "
+                "minutes."
+            ),
+        },
+    )
+    Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel.id}", defaults={"type": "channel"}
+    )
+    ChannelMember.get_or_create(user=bot, channel=channel)
+    policy = EscalationPolicy.get_or_none(EscalationPolicy.channel == channel)
+    if policy is None:
+        policy = EscalationPolicy.create(
+            name=LEADS_POLICY_NAME,
+            channel=channel,
+            no_oncall_start_level=None,
+            alarm="ka-ching",
+        )
+        for level, group, delay in LEADS_LEVELS:
+            EscalationLevel.create(
+                policy=policy,
+                level=level,
+                delay_minutes=delay,
+                target_type="group",
+                target_group=group,
+            )
+    return channel, policy
 
 
 def default_workspace():

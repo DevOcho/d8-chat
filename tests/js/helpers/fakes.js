@@ -287,13 +287,27 @@ export function makeAudio(state) {
 }
 
 // Web Audio graph stub. Records oscillators so tests can tell whether the
-// pager's siren is running (started and not yet stopped).
+// pager's siren is running (started and not yet stopped), and the scheduled
+// start times (`startAt`) of oscillators and buffer sources so they can check
+// when each ka-ching plays. `currentTime` is the audio clock: tests set it.
 export function makeAudioContext(state) {
     const node = (extra = {}) => ({
         connect: vi.fn((dest) => dest),
         disconnect: vi.fn(),
         ...extra,
     });
+    const param = (value) => ({
+        value,
+        setValueAtTime: vi.fn(),
+        linearRampToValueAtTime: vi.fn(),
+        exponentialRampToValueAtTime: vi.fn(),
+    });
+    const source = (extra) => {
+        const src = node({ started: false, stopped: false, startAt: null, stopAt: null, ...extra });
+        src.start = vi.fn((at) => { src.started = true; src.startAt = at ?? null; });
+        src.stop = vi.fn((at) => { src.stopped = true; src.stopAt = at ?? null; });
+        return src;
+    };
     return class FakeAudioContext {
         constructor() {
             // Browsers start a context 'suspended' until the page has had a
@@ -302,6 +316,10 @@ export function makeAudioContext(state) {
             this.destination = {};
             this.listeners = {};
             this.oscillators = [];
+            this.bufferSources = [];
+            this.gains = [];
+            this.currentTime = 0;
+            this.sampleRate = 48000;
             state.audioContexts.push(this);
         }
 
@@ -319,20 +337,30 @@ export function makeAudioContext(state) {
         }
 
         createOscillator() {
-            const osc = node({
-                type: 'sine',
-                frequency: { value: 440 },
-                started: false,
-                stopped: false,
-            });
-            osc.start = vi.fn(() => { osc.started = true; });
-            osc.stop = vi.fn(() => { osc.stopped = true; });
+            const osc = source({ type: 'sine', frequency: param(440) });
             this.oscillators.push(osc);
             return osc;
         }
 
+        createBufferSource() {
+            const src = source({ buffer: null });
+            this.bufferSources.push(src);
+            return src;
+        }
+
+        createBuffer(channels, length, sampleRate) {
+            const data = new Float32Array(length);
+            return { numberOfChannels: channels, length, sampleRate, getChannelData: () => data };
+        }
+
+        createBiquadFilter() {
+            return node({ type: 'lowpass', frequency: param(350), Q: param(1) });
+        }
+
         createGain() {
-            return node({ gain: { value: 1 } });
+            const gain = node({ gain: param(1) });
+            this.gains.push(gain);
+            return gain;
         }
     };
 }

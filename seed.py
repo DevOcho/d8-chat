@@ -72,6 +72,7 @@ def seed_data():
         print("User 'kp' already exists.")
 
     seed_oncall(workspace, kp)
+    seed_lead_paging(workspace, kp)
 
     print("Seeding complete.")
 
@@ -125,6 +126,33 @@ def seed_oncall(workspace, kp):
         oncall_service.reanchor_schedule(schedule, first.user_id if first else None)
         on_call = oncall_service.oncall_user(schedule, oncall_service.utc_now())
         print(f"On call now: {oncall_service.display_name(on_call)}.")
+
+
+def seed_lead_paging(workspace, kp):
+    """An SDR for the "Website leads" policy, and the leads channel for her and
+    kp (the CEO, its second level)."""
+    leads = Channel.get_or_none(
+        Channel.name == "website-leads", Channel.workspace == workspace
+    )
+    sara, created = User.get_or_create(
+        username="sara",
+        defaults={
+            "email": "sara@example.com",
+            "display_name": "Sara SDR",
+            "is_active": True,
+        },
+    )
+    if created:
+        sara.set_password("sara555")
+        sara.save()
+        print("Created user 'sara' (password sara555, group sdr).")
+    WorkspaceMember.get_or_create(
+        user=sara, workspace=workspace, defaults={"role": "member"}
+    )
+    set_local_groups(sara, ["sdr"])
+    if leads:
+        for user in (sara, kp):
+            ChannelMember.get_or_create(user=user, channel=leads)
 
 
 if __name__ == "__main__":

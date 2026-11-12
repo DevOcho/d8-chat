@@ -222,6 +222,11 @@ def seed_initial_data():
         workspace, Config.UPTIME_KUMA_CHANNEL or "devops-uptime"
     )
     oncall_service.ensure_default_oncall(uptime_channel)
+    # D8's website leads: d8-bot, the leads channel and its "Website leads"
+    # policy (the SDRs, then the CEO). Mirrored in migration 0012.
+    leads_channel, _leads_policy = oncall_service.ensure_leads_paging(
+        workspace, Config.WEBSITE_LEADS_CHANNEL or "website-leads"
+    )
 
     # Create the default admin user if they don't exist
     admin_user, created = User.get_or_create(
@@ -254,6 +259,7 @@ def seed_initial_data():
         ChannelMember.create(user=admin_user, channel=general_channel)
         ChannelMember.create(user=admin_user, channel=announcements_channel)
         ChannelMember.create(user=admin_user, channel=uptime_channel)
+        ChannelMember.create(user=admin_user, channel=leads_channel)
 
         creds_path = None
         if not from_env:
