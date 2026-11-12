@@ -45,6 +45,9 @@ spec:
           value: "1"
         - name: FLASK_SECRET
           value: "Dev-secrets-are-not-secure"
+        # config.py refuses to start without one (32+ characters). Dev only.
+        - name: SECRET_KEY
+          value: "dev-only-secret-key-not-for-production-0123456789"
         - name: FLASK_ENV
           value: "development"
         # Enforce the strict script policy here (CSP_PLAN.md); deployed
