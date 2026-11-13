@@ -373,6 +373,64 @@ Production setup:
    `INTERNAL_NOTIFY_KEY` as here) and `WEBSITE_LEADS_CHAT_CHANNEL` matching
    `WEBSITE_LEADS_CHANNEL` (both default to `website-leads`).
 
+## Interview day (the website), 2026-11-13
+
+Kenny: "the intern (or any tech candidate) finishes the test, we want the
+graders to be notified ... 'hey! Please grade this technical interview:
+[link]', and they grade it and then when both graders are done, they
+immediately take the candidate to a conference room and review the work. Then
+they tell the HR Recruiter if the next round should start ... this is
+synchronized in person stuff that needs alerts." On the alert: ring until
+acknowledged, escalating to the engineering manager, but "more subtle than the
+devops one", with a sound "more like an alarm clock and less like a siren".
+
+- **Who sends it.** The interview platform never calls out (its network
+  policy keeps it offline), and the website already polls its events, so the
+  website relays each step of the day to `#interview-day` through
+  `POST /api/v1/internal/notify`, as D8 does for leads (posted as `d8-bot`,
+  `source` `d8`, the same dedupe). The steps and their wording are the
+  website's: a finished exercise pages its two graders, both passing pages
+  them to take the candidate to the interview, a split pages the
+  tie-breakers, and a result pages the HR person who booked the visit.
+- **`page.to`: who to page.** A list of 1 to 10 emails. D8-Chat matches them
+  to active users (case does not matter) and pages exactly them as the
+  incident's first level, in place of the policy's own; the policy's later
+  levels escalate as usual. The answer adds `unmatched`, the emails that
+  matched nobody. A request whose `to` matches nobody pages the policy's first
+  level instead, so a step is never silently dropped. One page per person
+  (the website keys them `...:<email>`), so each acknowledges their own.
+  Anyone paged may acknowledge (`user_in_chain` already counts every paged
+  user). Without `to`, a page request works as before.
+- **Policy "Interview day"** (migration `0013`, `init_db.py`), on a
+  **private** channel because its posts name candidates: level 1 group `hr`
+  (only reached when `to` names nobody known), level 2 group
+  `engineering-manager` 10 minutes later.
+- **The chime** (`alarm` `chime`): two soft pairs of sine beeps at 988 Hz,
+  quieter than the ka-ching, at 0, 10, ... 60 s, then every 20 s, scheduled on
+  the audio clock like the ka-ching (one scheduler serves both). When only
+  chimes ring, the pager is a **banner in the corner** ("You're needed"), not
+  the red full-screen takeover, and it doesn't pulse; an outage or a lead
+  ringing at the same time brings the full screen back. Its link reads
+  "Open".
+- **Phones** get one ordinary notification per page (`send_to_user`, data
+  `type` `page_notice`, opening the channel), not the pager push, and not again
+  with each minute's re-send. The pager push is for the siren and the
+  ka-ching (`PAGER_PUSH_ALARMS`).
+- **Test my pager** also chimes for anyone in a chime policy's channel, since
+  a page request can name them there without any level reaching them.
+
+Production setup:
+1. Run migration `0013` (the deploy's migrate Job does).
+2. In Authentik, create groups **`hr`** and **`engineering-manager`**.
+3. Add HR, the graders, the engineering managers and the director to the
+   private `#interview-day`. The graders' D8-Chat emails must be the ones the
+   interview platform knows them by.
+4. Everyone on it: profile, Notifications, **Test my pager**.
+5. The website needs this D8-Chat's notify URL and `INTERNAL_NOTIFY_KEY`, and
+   its channel setting matching `INTERVIEW_DAY_CHANNEL` (default
+   `interview-day`). The production website runs on its own droplet: check it
+   can reach `/api/v1/internal/notify`.
+
 ## Open questions
 None blocking. Possible follow-ups: self-service swaps, re-paging stale
 acknowledged incidents, a Telegram/SMS fallback channel, and a pager on admin pages

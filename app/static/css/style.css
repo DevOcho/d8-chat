@@ -1432,6 +1432,52 @@ a.hashtag-link:hover {
     opacity: 0.85;
 }
 
+/* The interview day's chime: a banner in the corner, not the full screen. */
+.pager-overlay.pager-overlay--banner {
+    inset: auto 1rem 1rem auto;
+    width: min(420px, calc(100vw - 2rem));
+    display: block;
+    padding: 0;
+    background-color: transparent;
+    animation: none;
+}
+
+.pager-overlay--banner .pager-panel {
+    color: var(--bs-body-color);
+    background-color: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-left: 4px solid var(--bs-primary);
+    border-radius: 0.75rem;
+    box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.25);
+    padding: 1rem;
+    max-height: 70vh;
+}
+
+.pager-overlay--banner .pager-heading {
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+}
+
+.pager-overlay--banner .pager-sound-hint {
+    background-color: var(--bs-warning-bg-subtle);
+    color: var(--bs-body-color);
+}
+
+.pager-overlay--banner .pager-incident {
+    border: 1px solid var(--bs-border-color);
+    background-color: var(--bs-tertiary-bg);
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.pager-overlay--banner .pager-incident-title {
+    font-size: 1rem;
+}
+
+.pager-overlay--banner .pager-footer {
+    font-size: 0.8rem;
+}
+
 /* Incident card under an Uptime Kuma DOWN message */
 .incident-card {
     border-left: 4px solid var(--bs-success);

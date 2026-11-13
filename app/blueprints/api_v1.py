@@ -1581,9 +1581,25 @@ def update_avatar():
 
 HELPDESK_BOT_USERNAME = "helpdesk-bot"
 _PAGE_REQUEST_ERROR = (
-    "page needs a key (up to 200 characters) and a title; details and an "
-    "http(s) url are optional"
+    "page needs a key (up to 200 characters) and a title; details, an "
+    "http(s) url and to (a list of 1 to 10 emails) are optional"
 )
+
+
+def _valid_page_to(to):
+    """``page.to``: absent, or 1 to PAGE_TO_MAX emails."""
+    from app.services import oncall_service
+
+    if to is None:
+        return True
+    return (
+        isinstance(to, list)
+        and 0 < len(to) <= oncall_service.PAGE_TO_MAX
+        and all(
+            isinstance(email, str) and "@" in email and len(email) <= 254
+            for email in to
+        )
+    )
 
 
 def _valid_page_request(page):
@@ -1597,6 +1613,8 @@ def _valid_page_request(page):
         return False
     details, url = page.get("details"), page.get("url")
     if details is not None and not isinstance(details, str):
+        return False
+    if not _valid_page_to(page.get("to")):
         return False
     return url is None or (
         isinstance(url, str) and url.startswith(("https://", "http://"))
@@ -1616,10 +1634,13 @@ def internal_notify():
     Body:
         ``{"channel_name": "<name>", "message": "<text>"}``, plus optionally
         ``"page": {"key": "<id>", "title": "<text>", "details": "<text>",
-        "url": "https://…"}`` to page the channel's escalation policy (D8's
-        website leads). A page request is posted as ``d8-bot`` and opens an
-        incident (``oncall_service.handle_page_request``); ``key`` dedupes
-        while that incident is open. Without a policy it is only posted.
+        "url": "https://…", "to": ["<email>", …]}`` to page the channel's
+        escalation policy (D8's website leads, the website's interview day). A
+        page request is posted as ``d8-bot`` and opens an incident
+        (``oncall_service.handle_page_request``); ``key`` dedupes while that
+        incident is open. ``to`` pages those people in place of the policy's
+        first level, and the answer lists the emails that matched nobody
+        (``unmatched``). Without a policy it is only posted.
 
     Behaviour mirrors the user-facing message-create path so the message
     is persisted, mention/hashtag extraction runs, the message is

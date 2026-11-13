@@ -34,7 +34,7 @@ import time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from flask import current_app, render_template
-from peewee import IntegrityError
+from peewee import IntegrityError, fn
 
 from app.background import spawn_background
 from app.chat_manager import chat_manager
@@ -77,9 +77,20 @@ DEFAULT_NO_ONCALL_START_LEVEL = 3
 TARGET_TYPES = ("schedule", "group", "user")
 # What the pager plays (EscalationPolicy.alarm). The siren loops until the
 # page stops; the ka-ching plays every 5 seconds for the first minute, then
-# every 10 (pager.js). Both are synthesized in the browser: no audio file.
-ALARMS = ("siren", "ka-ching")
-ALARM_LABELS = {"siren": "Siren (outages)", "ka-ching": "Ka-ching (leads)"}
+# every 10; the chime, a soft alarm clock, every 10 seconds for the first
+# minute, then every 20 (pager.js). All three are synthesized in the browser:
+# no audio file. The siren and the ka-ching take over the screen and ring a
+# phone like an alarm; the chime shows a banner in the corner and sends the
+# phone one ordinary notification.
+ALARMS = ("siren", "ka-ching", "chime")
+ALARM_LABELS = {
+    "siren": "Siren (outages)",
+    "ka-ching": "Ka-ching (leads)",
+    "chime": "Chime (interview day)",
+}
+# Alarms whose page is a pager push (the phone rings like an alarm until the
+# page stops). The others send one ordinary notification.
+PAGER_PUSH_ALARMS = ("siren", "ka-ching")
 
 # Website leads from D8 (plan in ONCALL_PLAN.md, "Website leads"). Every SDR is
 # paged at once; nobody acknowledges within 15 minutes and the CEO is paged
@@ -87,6 +98,16 @@ ALARM_LABELS = {"siren": "Siren (outages)", "ka-ching": "Ka-ching (leads)"}
 LEADS_POLICY_NAME = "Website leads"
 LEADS_LEVELS = ((1, "sdr", 0), (2, "ceo", 15))
 LEADS_SOURCE = "d8"
+
+# The in-person interview day (ONCALL_PLAN.md, "Interview day"). The website
+# relays the interview platform's events as page requests naming who has to act
+# (``page.to``): the two graders, a tie-breaker, the HR person who booked the
+# visit. Nobody named acknowledges within 10 minutes and the engineering
+# managers are paged too. A request that names nobody D8-Chat knows pages HR.
+INTERVIEW_POLICY_NAME = "Interview day"
+INTERVIEW_LEVELS = ((1, "hr", 0), (2, "engineering-manager", 10))
+# The most people one page request may name.
+PAGE_TO_MAX = 10
 OPEN_STATES = ("triggered", "acknowledged")
 WEEKDAY_NAMES = (
     "Monday",
@@ -693,22 +714,40 @@ def _deliver_page(incident, user_ids, repeat=False):
             chat_manager.send_to_user(user_id, frame)
         except Exception:  # pylint: disable=broad-exception-caught
             current_app.logger.exception("page frame to user %s failed", user_id)
-    spawn_background(_push_pages, incident.id, list(user_ids))
+    spawn_background(_push_pages, incident.id, list(user_ids), repeat)
 
 
 # (title prefix, body when the incident has no details) for each alarm.
 _PUSH_WORDING = {
     "siren": ("🚨 DOWN: ", "Production alert. Open D8-Chat to acknowledge."),
     "ka-ching": ("💰 ", "Someone wants to talk to us. Open D8-Chat to acknowledge."),
+    "chime": ("🔔 ", "You're needed. Open D8-Chat to acknowledge."),
 }
 
 
-def _push_pages(incident_id, user_ids):
+def _push_pages(incident_id, user_ids, repeat=False):
     incident = Incident.get_or_none(Incident.id == incident_id)
     if incident is None or incident.state != "triggered":
         return
     alarm = incident_alarm(incident)
     prefix, fallback = _PUSH_WORDING[alarm]
+    if alarm not in PAGER_PUSH_ALARMS:
+        # One ordinary notification, not the phone's alarm, and not again
+        # with each minute's re-send: the browser chime keeps going instead.
+        if not repeat:
+            for user_id in user_ids:
+                push_service.send_to_user(
+                    user_id,
+                    title=f"{prefix}{incident.title}",
+                    body=incident.details or fallback,
+                    data={
+                        "type": "page_notice",
+                        "incident_id": str(incident.id),
+                        "conversation_id_str": f"channel_{incident.channel_id}",
+                        "message_id": str(incident.message_id or ""),
+                    },
+                )
+        return
     for user_id in user_ids:
         push_service.send_page(
             user_id,
@@ -742,6 +781,9 @@ def _deliver_page_cleared(incident, user_ids, state=None):
             chat_manager.send_to_user(user_id, frame)
         except Exception:  # pylint: disable=broad-exception-caught
             current_app.logger.exception("page_cleared to user %s failed", user_id)
+    if incident_alarm(incident) not in PAGER_PUSH_ALARMS:
+        # The phone only had an ordinary notification: nothing to stop.
+        return
     spawn_background(
         _push_page_cleared,
         incident.id,
@@ -788,8 +830,10 @@ def silence_policy(policy):
 
 def alarms_for(user):
     """The alarms ``user`` can be paged with, siren first: one per active
-    policy with a level that reaches them. The siren when none does (workspace
-    admins, the last-resort fallback, hear the siren)."""
+    policy with a level that reaches them, or whose channel they are in (a page
+    request can name them there: the graders on the interview day). The siren
+    when none does (workspace admins, the last-resort fallback, hear the
+    siren)."""
     alarms = {
         level.policy.alarm
         for level in EscalationLevel.select(EscalationLevel, EscalationPolicy)
@@ -797,6 +841,12 @@ def alarms_for(user):
         .where(EscalationPolicy.is_active)
         if _level_reaches(level, user)
     }
+    alarms.update(
+        policy.alarm
+        for policy in EscalationPolicy.select()
+        .join(ChannelMember, on=(ChannelMember.channel == EscalationPolicy.channel))
+        .where(EscalationPolicy.is_active & (ChannelMember.user == user))
+    )
     found = [alarm for alarm in ALARMS if alarm in alarms]
     return found or ["siren"]
 
@@ -828,6 +878,15 @@ def send_test_page(user):
             },
         }
         chat_manager.send_to_user(user.id, frame)
+        if alarm not in PAGER_PUSH_ALARMS:
+            spawn_background(
+                push_service.send_to_user,
+                user.id,
+                title="🔔 Test page",
+                body="This is a test of your D8-Chat pager.",
+                data={"type": "page_notice", "test": "1"},
+            )
+            continue
         spawn_background(
             push_service.send_page,
             user.id,
@@ -950,6 +1009,22 @@ def fire_level(incident, level_number, now):
     return new_users
 
 
+def _page_named(incident, levels, users, now):
+    """Page ``users`` as the incident's first level, in place of the policy's
+    own; the levels after it escalate as usual. Returns ``users``."""
+    first = levels[0].level if levels else 1
+    incident.current_level = first
+    for user in users:
+        IncidentPage.create(incident=incident, user=user, level=first)
+        _record(incident, "paged", user=user, level=first)
+    later = [lvl for lvl in levels if lvl.level > first]
+    incident.next_escalation_at = (
+        now + datetime.timedelta(minutes=later[0].delay_minutes) if later else None
+    )
+    incident.save()
+    return list(users)
+
+
 def _page_admins_if_nobody_paged(incident):
     if incident.pages.exists():
         return []
@@ -970,8 +1045,12 @@ def trigger_incident(  # pylint: disable=too-many-arguments
     message=None,
     now=None,
     source="uptime-kuma",
+    named=None,
 ):
     """Open an incident and page level 1. Returns the incident.
+
+    ``named`` (users) are paged in place of the policy's first level, which
+    then escalates to its second as usual (a page request's ``to``).
 
     Returns ``None`` when another worker opened one for ``dedupe_key`` first
     (the unique index on open incidents rejects the second).
@@ -992,7 +1071,12 @@ def trigger_incident(  # pylint: disable=too-many-arguments
             )
             _record(incident, "triggered")
             levels = sorted_levels(policy)
-            newly_paged = fire_level(incident, levels[0].level if levels else 1, now)
+            if named:
+                newly_paged = _page_named(incident, levels, named, now)
+            else:
+                newly_paged = fire_level(
+                    incident, levels[0].level if levels else 1, now
+                )
     except IntegrityError:
         return None
     _deliver_page(incident, [u.id for u in newly_paged])
@@ -1300,33 +1384,54 @@ def handle_uptime_kuma_event(payload, channel, now=None):
 # --- Page requests (D8) ---
 
 
+def page_recipients(emails):
+    """``(users, unmatched)`` for a page request's ``to``: the active users with
+    those emails (case does not matter), in the order given, and the emails
+    that match nobody."""
+    users, unmatched, seen = [], [], set()
+    for email in emails:
+        user = User.get_or_none(
+            (fn.LOWER(User.email) == email.strip().lower()) & User.is_active
+        )
+        if user is None:
+            unmatched.append(email)
+        elif user.id not in seen:
+            seen.add(user.id)
+            users.append(user)
+    return users, unmatched
+
+
 def handle_page_request(channel, text, page, now=None):
     """Post ``text`` as ``d8-bot`` and page the channel's policy for it.
 
-    ``page`` is ``{"key", "title", "details"?, "url"?}`` from
+    ``page`` is ``{"key", "title", "details"?, "url"?, "to"?}`` from
     ``POST /api/v1/internal/notify``. ``key`` dedupes: while an incident for
-    it is open, a repeat is posted but pages nobody new. A channel without an
-    active policy gets the post and no page. Returns
-    ``{"incident_id": …, "repeat": bool}`` (``incident_id`` None when nothing
-    pages).
+    it is open, a repeat is posted but pages nobody new. ``to`` (emails) names
+    who to page in place of the policy's first level; when it names nobody
+    D8-Chat knows, the first level is paged. A channel without an active policy
+    gets the post and no page. Returns ``{"incident_id": …, "repeat": bool}``
+    (``incident_id`` None when nothing pages), plus ``unmatched`` (the emails
+    in ``to`` that matched nobody) when ``to`` was given.
     """
     now = now or utc_now()
     bot = d8_bot()
     if bot is None:
         raise LookupError("d8-bot user not provisioned")
+    named, unmatched = page_recipients(page.get("to") or [])
+    extra = {"unmatched": unmatched} if page.get("to") else {}
     dedupe_key = f"{LEADS_SOURCE}:{page['key']}"
     existing = open_incident_for(dedupe_key)
     if existing is not None:
         _record(existing, "repeat_page")
         post_bot_message(channel, text, bot=bot)
-        return {"incident_id": existing.id, "repeat": True}
+        return {"incident_id": existing.id, "repeat": True, **extra}
 
     policy = EscalationPolicy.get_or_none(
         (EscalationPolicy.channel == channel) & (EscalationPolicy.is_active)
     )
     if policy is None:
         post_bot_message(channel, text, bot=bot)
-        return {"incident_id": None, "repeat": False}
+        return {"incident_id": None, "repeat": False, **extra}
 
     opened = {}
 
@@ -1341,6 +1446,7 @@ def handle_page_request(channel, text, page, now=None):
             message=message,
             now=now,
             source=LEADS_SOURCE,
+            named=named,
         )
 
     post_bot_message(channel, text, on_created=_open, bot=bot)
@@ -1349,8 +1455,12 @@ def handle_page_request(channel, text, page, now=None):
         # Lost the race to a concurrent request with the same key: that one
         # is paging.
         existing = open_incident_for(dedupe_key)
-        return {"incident_id": existing.id if existing else None, "repeat": True}
-    return {"incident_id": incident.id, "repeat": False}
+        return {
+            "incident_id": existing.id if existing else None,
+            "repeat": True,
+            **extra,
+        }
+    return {"incident_id": incident.id, "repeat": False, **extra}
 
 
 # --- Ticker ---
@@ -1528,6 +1638,54 @@ def ensure_leads_paging(workspace, channel_name="website-leads"):
             alarm="ka-ching",
         )
         for level, group, delay in LEADS_LEVELS:
+            EscalationLevel.create(
+                policy=policy,
+                level=level,
+                delay_minutes=delay,
+                target_type="group",
+                target_group=group,
+            )
+    return channel, policy
+
+
+def ensure_interview_paging(workspace, channel_name="interview-day"):
+    """The interview day's private channel, ``d8-bot`` and the "Interview day"
+    policy (the chime; whoever a page names, else HR, then the engineering
+    managers 10 minutes later). Idempotent: an existing policy is left as the
+    admins have it."""
+    bot = ensure_d8_bot(workspace)
+    channel, _ = Channel.get_or_create(
+        workspace=workspace,
+        name=channel_name,
+        defaults={
+            # Candidates' names: staff who interview, not the whole company.
+            "is_private": True,
+            "topic": "The in-person interview day. Each step pages who has to act.",
+            "description": (
+                "The interview platform's events on the day, relayed by the "
+                "website: a candidate finishing the exercise pages their two "
+                "graders, both passing pages them to start the interview, and a "
+                "result pages the HR person who booked the visit. Nobody "
+                "acknowledges within 10 minutes and the engineering managers "
+                "are paged too."
+            ),
+        },
+    )
+    Conversation.get_or_create(
+        conversation_id_str=f"channel_{channel.id}", defaults={"type": "channel"}
+    )
+    ChannelMember.get_or_create(user=bot, channel=channel)
+    for admin in _workspace_admins():
+        ChannelMember.get_or_create(user=admin, channel=channel)
+    policy = EscalationPolicy.get_or_none(EscalationPolicy.channel == channel)
+    if policy is None:
+        policy = EscalationPolicy.create(
+            name=INTERVIEW_POLICY_NAME,
+            channel=channel,
+            no_oncall_start_level=None,
+            alarm="chime",
+        )
+        for level, group, delay in INTERVIEW_LEVELS:
             EscalationLevel.create(
                 policy=policy,
                 level=level,

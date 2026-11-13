@@ -994,6 +994,19 @@ only arrives once the device is back online) rings it again. A re-sync via
   **only once Apple grants the app the Critical Alerts entitlement**. Request it
   from Apple early, because approval is manual. Without it, iOS delivers the page as a normal alert.
 
+### Push: page notice (the chime)
+An incident whose `alarm` is **`chime`** (the website's interview day: "please
+grade", "take them to the interview") is meant to be gentle. Its phone push is
+one ordinary notification, sent once, not the page push above, and no "page
+cleared" push follows it:
+
+- `title` `"🔔 <title>"`, `body` the details, and `data`:
+  `{ "type": "page_notice", "incident_id": "17", "conversation_id_str": "channel_9", "message_id": "123" }`.
+  Open the conversation on tap, as for a chat message.
+- The WS `page` frame still arrives while the app is open, with
+  `incident.alarm` `"chime"`. Show it as a quiet banner with Acknowledge, not
+  the full-screen pager, and don't loop the pager sound.
+
 ### Push: page cleared
 `data`: `{ "type": "page_cleared", "incident_id": "17", "state": "acknowledged" }`
 (`state` is `acknowledged` or `resolved`).

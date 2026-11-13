@@ -73,6 +73,7 @@ def seed_data():
 
     seed_oncall(workspace, kp)
     seed_lead_paging(workspace, kp)
+    seed_interview_paging(workspace, kp)
 
     print("Seeding complete.")
 
@@ -153,6 +154,44 @@ def seed_lead_paging(workspace, kp):
     if leads:
         for user in (sara, kp):
             ChannelMember.get_or_create(user=user, channel=leads)
+
+
+# The interview day's people, by the emails the local interview platform and
+# website use for them (the platform's staff are <username>@example.com, the
+# website's HR login is hr@devocho.com), so a page request naming them finds
+# them here. (username, display name, email, password, groups).
+INTERVIEW_DAY_USERS = (
+    ("grader1", "Grader One", "grader1@example.com", "grader1", []),
+    ("grader2", "Grader Two", "grader2@example.com", "grader2", []),
+    ("hr", "HR Coordinator", "hr@devocho.com", "hr", ["hr"]),
+    ("em", "Engineering Manager", "em@example.com", "em", ["engineering-manager"]),
+)
+
+
+def seed_interview_paging(workspace, kp):
+    """The graders, HR and an engineering manager for the "Interview day"
+    policy, in its private channel with kp."""
+    channel = Channel.get_or_none(
+        Channel.name == "interview-day", Channel.workspace == workspace
+    )
+    members = [kp]
+    for username, display_name, email, password, groups in INTERVIEW_DAY_USERS:
+        user, created = User.get_or_create(
+            username=username,
+            defaults={"email": email, "display_name": display_name, "is_active": True},
+        )
+        if created:
+            user.set_password(password)
+            user.save()
+            print(f"Created user '{username}' (password {password}).")
+        WorkspaceMember.get_or_create(
+            user=user, workspace=workspace, defaults={"role": "member"}
+        )
+        set_local_groups(user, groups)
+        members.append(user)
+    if channel:
+        for user in members:
+            ChannelMember.get_or_create(user=user, channel=channel)
 
 
 if __name__ == "__main__":
