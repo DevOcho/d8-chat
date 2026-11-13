@@ -1376,3 +1376,213 @@ def test_the_helpdesk_post_is_unchanged_without_a_page(client, leads):
     assert res.get_json() == {"ok": True}
     assert Message.get(Message.content == "[NEW] Ticket #1").user == helpdesk_bot
     assert Incident.select().count() == 0
+
+
+# --- The interview day: the website's page requests naming who has to act ---
+
+
+@pytest.fixture
+def interview(leads):
+    """#interview-day with the "Interview day" policy (chime: whoever a page
+    names, else group hr, then group engineering-manager after 10 minutes),
+    two graders, an HR coordinator and an engineering manager."""
+    workspace = Workspace.get(name="DevOcho")
+    channel, policy = oncall_service.ensure_interview_paging(workspace)
+    return SimpleNamespace(
+        channel=channel,
+        policy=policy,
+        bot=leads.bot,
+        g1=_user("grader1"),
+        g2=_user("grader2"),
+        hr=_user("hrc", ["hr"]),
+        em=_user("emgr", ["engineering-manager"]),
+        leads=leads,
+    )
+
+
+def _interview_page(client, key="iv-grade:20:grader1@example.com", **page):
+    body = {
+        "channel_name": "interview-day",
+        "message": "🔔 **Please grade** Jose Pasante's Developer internship exercise.",
+        "page": {
+            "key": key,
+            "title": "Please grade Jose Pasante's exercise",
+            "details": "He finished the Developer internship exercise at 10:47.",
+            "url": "https://interview.local/admin/sessions/20/grade",
+            "to": ["grader1@example.com"],
+            **page,
+        },
+    }
+    return client.post("/api/v1/internal/notify", json=body, headers=NOTIFY_HEADERS)
+
+
+def test_interview_policy_is_a_private_chime_then_the_engineering_managers(interview):
+    levels = oncall_service.sorted_levels(interview.policy)
+    assert interview.policy.alarm == "chime"
+    assert interview.channel.is_private is True
+    assert [
+        (lv.level, lv.target_type, lv.target_group, lv.delay_minutes) for lv in levels
+    ] == [
+        (1, "group", "hr", 0),
+        (2, "group", "engineering-manager", 10),
+    ]
+    assert ChannelMember.get_or_none(user=interview.bot, channel=interview.channel)
+    # Idempotent, and an admin's edits survive a second run.
+    interview.policy.alarm = "ka-ching"
+    interview.policy.save()
+    _channel, again = oncall_service.ensure_interview_paging(
+        Workspace.get(name="DevOcho")
+    )
+    assert again.id == interview.policy.id and again.alarm == "ka-ching"
+
+
+def test_a_page_naming_people_pages_exactly_them_with_the_chime(client, interview):
+    res = _interview_page(
+        client, to=["grader1@example.com", "GRADER2@Example.com", "nobody@example.com"]
+    )
+
+    body = res.get_json()
+    assert res.status_code == 200
+    assert body["repeat"] is False and body["unmatched"] == ["nobody@example.com"]
+    incident = Incident.get_by_id(body["incident_id"])
+    assert _paged_ids(incident) == {interview.g1.id, interview.g2.id}
+    assert incident.current_level == 1
+    assert incident.next_escalation_at == NOW + 10 * MINUTE
+    (frame,) = _frames(interview.g1.id, "page")
+    assert frame["incident"]["alarm"] == "chime"
+    # HR (the first level) and the engineering manager are not paged yet.
+    assert _frames(interview.hr.id, "page") == []
+    assert _frames(interview.em.id, "page") == []
+
+
+def test_nobody_named_acknowledges_and_the_engineering_manager_is_paged(
+    client, interview
+):
+    incident = Incident.get_by_id(_interview_page(client).get_json()["incident_id"])
+
+    assert oncall_service.run_escalations(NOW + 9 * MINUTE) == []
+    oncall_service.run_escalations(NOW + 10 * MINUTE)
+
+    assert _paged_ids(incident) == {interview.g1.id, interview.em.id}
+    assert _frames(interview.hr.id, "page") == []
+
+
+def test_a_named_person_acknowledges_their_own_page(client, interview):
+    first = _interview_page(client).get_json()
+    second = _interview_page(
+        client, key="iv-grade:20:grader2@example.com", to=["grader2@example.com"]
+    ).get_json()
+    _login(client, interview.g1)
+
+    res = client.post(f"/oncall/incidents/{first['incident_id']}/ack")
+
+    assert res.get_json()["ok"] is True
+    assert Incident.get_by_id(first["incident_id"]).state == "acknowledged"
+    # Each grader has a page of their own: the other is still ringing.
+    assert Incident.get_by_id(second["incident_id"]).state == "triggered"
+
+
+def test_a_page_naming_nobody_known_pages_hr(client, interview):
+    res = _interview_page(client, to=["stranger@example.com"])
+
+    body = res.get_json()
+    assert body["unmatched"] == ["stranger@example.com"]
+    assert _paged_ids(Incident.get_by_id(body["incident_id"])) == {interview.hr.id}
+
+
+def test_an_inactive_person_is_not_paged(client, interview):
+    interview.g1.is_active = False
+    interview.g1.save()
+
+    body = _interview_page(client).get_json()
+
+    assert body["unmatched"] == ["grader1@example.com"]
+    assert _paged_ids(Incident.get_by_id(body["incident_id"])) == {interview.hr.id}
+
+
+def test_a_repeat_of_an_open_page_still_reports_who_matched_nobody(client, interview):
+    first = _interview_page(client, to=["grader1@example.com", "x@example.com"])
+    again = _interview_page(client, to=["grader1@example.com", "x@example.com"])
+
+    assert again.get_json() == {
+        "ok": True,
+        "incident_id": first.get_json()["incident_id"],
+        "repeat": True,
+        "unmatched": ["x@example.com"],
+    }
+    assert len(_frames(interview.g1.id, "page")) == 1
+
+
+@pytest.mark.parametrize(
+    "to",
+    [
+        "grader1@example.com",
+        [],
+        ["not an email"],
+        [5],
+        ["a@example.com"] * 11,
+        ["a" * 250 + "@example.com"],
+    ],
+)
+def test_a_malformed_to_is_refused(client, interview, to):
+    res = _interview_page(client, to=to)
+
+    assert res.status_code == 400
+    assert Incident.select().count() == 0
+
+
+def test_a_chime_sends_one_ordinary_notification_not_the_phone_alarm(
+    client, interview, mocker
+):
+    send_page = mocker.patch.object(oncall_service.push_service, "send_page")
+    send_to_user = mocker.patch.object(oncall_service.push_service, "send_to_user")
+    incident = Incident.get_by_id(_interview_page(client).get_json()["incident_id"])
+    send_to_user.reset_mock()
+
+    oncall_service._push_pages(incident.id, [interview.g1.id])
+
+    send_page.assert_not_called()
+    kwargs = send_to_user.call_args.kwargs
+    assert kwargs["title"] == "🔔 Please grade Jose Pasante's exercise"
+    assert kwargs["body"] == "He finished the Developer internship exercise at 10:47."
+    assert kwargs["data"]["type"] == "page_notice"
+    assert kwargs["data"]["conversation_id_str"] == f"channel_{interview.channel.id}"
+
+    # The minute's re-send rings the browser again, not the phone.
+    send_to_user.reset_mock()
+    oncall_service._push_pages(incident.id, [interview.g1.id], repeat=True)
+    send_to_user.assert_not_called()
+
+
+def test_the_test_page_chimes_for_someone_in_the_interview_channel(
+    client, interview, mocker
+):
+    send_page = mocker.patch.object(oncall_service.push_service, "send_page")
+    send_to_user = mocker.patch.object(oncall_service.push_service, "send_to_user")
+    ChannelMember.create(user=interview.g1, channel=interview.channel)
+    _login(client, interview.g1)
+
+    assert client.post("/oncall/test-page").status_code == 204
+
+    frames = _frames(interview.g1.id, "page")
+    assert [f["incident"]["alarm"] for f in frames] == ["chime"]
+    send_page.assert_not_called()
+    assert send_to_user.call_args.kwargs["title"] == "🔔 Test page"
+
+
+def test_an_admin_can_choose_the_chime(admin_client, interview):
+    page = admin_client.get(f"/admin/oncall/policies/{interview.policy.id}")
+    assert 'value="chime" selected' in page.get_data(as_text=True)
+
+
+def test_acknowledging_a_chime_sends_the_phone_nothing_more(client, interview, mocker):
+    send_page_cleared = mocker.patch.object(
+        oncall_service.push_service, "send_page_cleared"
+    )
+    incident = Incident.get_by_id(_interview_page(client).get_json()["incident_id"])
+    _login(client, interview.g1)
+
+    client.post(f"/oncall/incidents/{incident.id}/ack")
+
+    assert _frames(interview.g1.id, "page_cleared")
+    send_page_cleared.assert_not_called()

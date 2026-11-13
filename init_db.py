@@ -227,6 +227,12 @@ def seed_initial_data():
     leads_channel, _leads_policy = oncall_service.ensure_leads_paging(
         workspace, Config.WEBSITE_LEADS_CHANNEL or "website-leads"
     )
+    # The website's interview day: the private channel and its "Interview day"
+    # policy (whoever a page names, then the engineering managers). Mirrored in
+    # migration 0013.
+    interview_channel, _interview_policy = oncall_service.ensure_interview_paging(
+        workspace, Config.INTERVIEW_DAY_CHANNEL or "interview-day"
+    )
 
     # Create the default admin user if they don't exist
     admin_user, created = User.get_or_create(
@@ -260,6 +266,7 @@ def seed_initial_data():
         ChannelMember.create(user=admin_user, channel=announcements_channel)
         ChannelMember.create(user=admin_user, channel=uptime_channel)
         ChannelMember.create(user=admin_user, channel=leads_channel)
+        ChannelMember.create(user=admin_user, channel=interview_channel)
 
         creds_path = None
         if not from_env:

@@ -768,3 +768,111 @@ describe('ka-ching (website leads from D8)', () => {
         expect(env.$('#pager-sound-hint').hidden).toBe(false);
     });
 });
+
+describe('chime (the interview day)', () => {
+    const CHIME_HZ = 988;
+    const call = (overrides = {}) => incident({
+        id: 91,
+        title: "Please grade Jose Pasante's exercise",
+        details: 'He finished the Developer internship exercise at 10:47.',
+        source: 'd8',
+        source_url: 'https://interview.local/admin/sessions/20/grade',
+        alarm: 'chime',
+        channel_name: 'interview-day',
+        message_id: 950,
+        ...overrides,
+    });
+    const ctxOf = (env) => env.state.audioContexts[0];
+    // When each scheduled chime starts (its first beep), relative to the alarm.
+    const chimes = (env) => ctxOf(env).oscillators
+        .filter((o) => o.frequency.value === CHIME_HZ)
+        .map((o) => Math.round((o.startAt - 0.05) * 1000) / 1000)
+        .filter((_, i) => i % 4 === 0);
+    const masters = (env, gain) => ctxOf(env).gains.filter((g) => g.gain.value === gain
+        && g.connect.mock.calls.some(([dest]) => dest === ctxOf(env).destination));
+    const ringingCall = async (inc = call()) => {
+        const env = await pagerEnv();
+        await env.openSocket();
+        await env.frame(pageFrame(inc));
+        return env;
+    };
+
+    it('is a banner in the corner, not the full screen', async () => {
+        const env = await ringingCall();
+
+        expect(overlay(env).hidden).toBe(false);
+        expect(overlay(env).classList.contains('pager-overlay--banner')).toBe(true);
+        expect(overlay(env).getAttribute('aria-modal')).toBe('false');
+        expect(env.$('#pager-heading-text').textContent).toBe("You're needed");
+        expect(env.$('#pager-footer').textContent).toContain('stops the chime');
+    });
+
+    it('chimes every 10 s for the first minute, then every 20 s, quietly and with no siren', async () => {
+        const env = await ringingCall();
+
+        // Scheduled 180 s ahead: the one due at 180 s goes on the next top-up.
+        expect(chimes(env)).toEqual([0, 10, 20, 30, 40, 50, 60, 80, 100, 120, 140, 160]);
+        expect(env.eval('[0, 6, 7, 8].map((n) => PagerManager.cueOffset("chime", n))')).toEqual([0, 60, 80, 100]);
+        expect(masters(env, 0.16)).toHaveLength(1);
+        expect(masters(env, 0.5)).toHaveLength(0);
+        expect(ctxOf(env).oscillators.every((o) => o.type === 'sine')).toBe(true);
+        expect(ctxOf(env).bufferSources).toHaveLength(0);
+    });
+
+    it('reads as a call and links what it is about', async () => {
+        const env = await ringingCall();
+        const [row] = rows(env);
+
+        expect(row.querySelector('.pager-incident-title').textContent).toBe("🔔 Please grade Jose Pasante's exercise");
+        const open = row.querySelector('a.btn');
+        expect(open.textContent).toBe('Open');
+        expect(open.href).toBe('https://interview.local/admin/sessions/20/grade');
+        expect(row.querySelector('[data-pager-ack]').className).toContain('btn-primary');
+        expect(env.notifications[0].title).toBe("🔔 Please grade Jose Pasante's exercise");
+    });
+
+    it('goes full screen when an outage rings alongside it, and back to a banner after', async () => {
+        const env = await ringingCall();
+        await env.frame(pageFrame(incident()));
+
+        expect(overlay(env).classList.contains('pager-overlay--banner')).toBe(false);
+        expect(overlay(env).getAttribute('aria-modal')).toBe('true');
+        expect(env.$('#pager-heading-text').textContent).toBe('You are being paged');
+        expect(sirenOn(env)).toBe(true);
+        expect(masters(env, 0.16)).toHaveLength(1);
+
+        await env.frame(pageClearedFrame(incident()));
+        expect(overlay(env).classList.contains('pager-overlay--banner')).toBe(true);
+        expect(sirenOn(env)).toBe(false);
+    });
+
+    it('stops when acknowledged elsewhere, including the chimes already scheduled', async () => {
+        const env = await ringingCall();
+        await env.frame(pageClearedFrame(call()));
+
+        expect(overlay(env).hidden).toBe(true);
+        const [master] = masters(env, 0.16);
+        expect(master.disconnect.mock.calls.length).toBeGreaterThanOrEqual(1);
+        expect(ctxOf(env).oscillators.every((s) => s.stop.mock.calls.length >= 1)).toBe(true);
+    });
+
+    it('Acknowledge silences it at once, offline too, until the server re-sends it', async () => {
+        const env = await pagerEnv({
+            fetchRoutes: [{ match: '/oncall/incidents/91/ack', reply: new TypeError('Failed to fetch') }],
+        });
+        await env.openSocket();
+        await env.frame(pageFrame(call()));
+        const live = () => masters(env, 0.16).filter((g) => g.disconnect.mock.calls.length === 0);
+        expect(live()).toHaveLength(1);
+
+        env.$('[data-pager-ack="91"]').click();
+        await env.flush();
+
+        expect(overlay(env).hidden).toBe(false);
+        expect(live()).toHaveLength(0);
+        expect(env.$('[data-incident-id="91"] .pager-incident-silenced')).not.toBeNull();
+
+        await env.frame(pageFrame(call(), { repeat: true }));
+        expect(live()).toHaveLength(1);
+    });
+});

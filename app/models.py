@@ -607,8 +607,9 @@ class EscalationPolicy(BaseModel):
     level instead of walking the chain level by level. Null disables the jump.
 
     ``alarm``: what the pager plays for this policy's incidents (one of
-    ``oncall_service.ALARMS``): the looping ``siren`` for outages, or the
-    ``ka-ching`` that repeats for website leads.
+    ``oncall_service.ALARMS``): the looping ``siren`` for outages, the
+    ``ka-ching`` that repeats for website leads, or the soft ``chime`` of the
+    interview day, which shows a banner instead of taking over the screen.
     """
 
     id = PrimaryKeyField()

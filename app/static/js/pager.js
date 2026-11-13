@@ -6,10 +6,13 @@
  * the monitor recovers. While ringing: a full-screen alert, the incident's
  * alarm, a flashing tab title and a sticky desktop notification.
  *
- * Each incident carries its policy's alarm: the looping `siren` (outages) or
+ * Each incident carries its policy's alarm: the looping `siren` (outages),
  * the `ka-ching` (website leads from D8), which plays every 5 seconds for the
- * first minute and every 10 seconds after that. A new lead starts the fast
- * minute again.
+ * first minute and every 10 seconds after that, or the `chime` (the interview
+ * day), a soft alarm clock every 10 seconds for the first minute and every 20
+ * after that. A new page starts its alarm's fast minute again. When only
+ * chimes are ringing the alert is a banner in the corner, not the full screen:
+ * the person is at work and only needs to know they are wanted.
  *
  * Acknowledge silences this tab at once, before the request. If it fails
  * (e.g. the connection dropped) the page stays up, silenced: the server never
@@ -20,13 +23,14 @@
  * GET /oncall/pages/active on load, on every WebSocket (re)connect, and every
  * RESYNC_MS while ringing, so a lost `page_cleared` can't leave the siren on.
  *
- * Both alarms are synthesized with Web Audio (no asset). The siren's two-tone
+ * Every alarm is synthesized with Web Audio (no asset). The siren's two-tone
  * wail comes from a square-wave LFO modulating the oscillator's frequency on
  * the audio thread, so it keeps going in a background tab where JS timers are
  * throttled. The ka-ching is a burst of filtered noise (the drawer) and a bell
- * (a few inharmonic partials that ring out); for the same reason each one is
- * scheduled on the audio clock minutes ahead, and a timer only tops the
- * schedule up, so a tab whose timers run once a minute still rings on time.
+ * (a few inharmonic partials that ring out); the chime is two soft pairs of
+ * sine beeps. For the same reason each of those is scheduled on the audio
+ * clock minutes ahead, and a timer only tops the schedule up, so a tab whose
+ * timers run once a minute still rings on time.
  * Browsers only allow audio after a user gesture on the page; until then the
  * alert shows a "click to start the alarm" hint.
  */
@@ -39,31 +43,41 @@
     const SIREN_RATE_HZ = 1.6;      // tone changes per second / 2
     const RESYNC_MS = 30000;        // while ringing, re-check what's still active
 
-    const KACHING_GAIN = 0.5;
-    const KACHING_FAST_EVERY_S = 5;     // a ka-ching every 5 s ...
-    const KACHING_FAST_FOR_S = 60;      // ... for the first minute,
-    const KACHING_SLOW_EVERY_S = 10;    // then every 10 s
-    const KACHING_LOOKAHEAD_S = 180;    // scheduled this far ahead on the audio clock
-    const KACHING_TOPUP_MS = 15000;     // how often the schedule is extended
+    const CUE_LOOKAHEAD_S = 180;        // repeating alarms are scheduled this far ahead on the audio clock
+    const CUE_TOPUP_MS = 15000;         // how often their schedule is extended
+    // The alarms that repeat a short sound rather than loop: how loud, and when.
+    const CUES = {
+        // A ka-ching every 5 s for the first minute, then every 10 s.
+        'ka-ching': { gain: 0.5, fastEvery: 5, fastFor: 60, slowEvery: 10, play: 'playKaching' },
+        // The chime: every 10 s for the first minute, then every 20 s, and quieter.
+        chime: { gain: 0.16, fastEvery: 10, fastFor: 60, slowEvery: 20, play: 'playChime' },
+    };
     const KACHING_BELL_HZ = 2093;       // C7, the bell's fundamental
     // [frequency ratio, peak gain, ring-out seconds]: bell-like inharmonic partials.
     const KACHING_PARTIALS = [[1, 0.32, 1.1], [2.0, 0.16, 0.7], [2.76, 0.14, 0.55], [5.4, 0.07, 0.35], [8.93, 0.04, 0.2]];
+    const CHIME_HZ = 988;               // B5: an alarm clock's beep, as a sine, not a buzzer
+    const CHIME_BEEPS = [0, 0.16, 0.55, 0.71];  // "beep-beep ... beep-beep", seconds from the cue
+    const CHIME_BEEP_S = 0.1;
 
     // How each alarm is worded: the overlay row, the flashing tab title, the
     // desktop notification and its fallback body.
     const ALARM_TEXT = {
         siren: { row: '🔴 DOWN: ', flash: '🚨 PAGE: ', notify: '🚨 DOWN: ', body: 'You are being paged. Open D8-Chat to acknowledge.' },
         'ka-ching': { row: '💰 ', flash: '💰 LEAD: ', notify: '💰 ', body: 'Someone wants to talk to us. Open D8-Chat to acknowledge.' },
+        chime: { row: '🔔 ', flash: '🔔 ', notify: '🔔 ', body: "You're needed. Open D8-Chat to acknowledge." },
     };
 
-    const alarmOf = (incident) => (incident && incident.alarm === 'ka-ching' ? 'ka-ching' : 'siren');
+    const alarmOf = (incident) => (incident && ALARM_TEXT[incident.alarm] ? incident.alarm : 'siren');
 
-    // Seconds after the alarm started that the n-th ka-ching (from 0) plays.
-    function kachingOffset(n) {
-        const fastCount = KACHING_FAST_FOR_S / KACHING_FAST_EVERY_S;
-        if (n <= fastCount) return n * KACHING_FAST_EVERY_S;
-        return KACHING_FAST_FOR_S + (n - fastCount) * KACHING_SLOW_EVERY_S;
+    // Seconds after the alarm started that its n-th cue (from 0) plays.
+    function cueOffset(alarm, n) {
+        const { fastEvery, fastFor, slowEvery } = CUES[alarm];
+        const fastCount = fastFor / fastEvery;
+        if (n <= fastCount) return n * fastEvery;
+        return fastFor + (n - fastCount) * slowEvery;
     }
+
+    const kachingOffset = (n) => cueOffset('ka-ching', n);
 
     const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
 
@@ -82,7 +96,7 @@
         clearedAt: new Map(),       // incident id → when it was cleared here (ms)
         audioCtx: null,
         siren: null,
-        kaching: null,
+        cues: new Map(),            // alarm → its repeating schedule (ka-ching, chime)
         noise: null,
         titleTimer: null,
         resyncTimer: null,
@@ -92,6 +106,8 @@
             this.overlay = document.getElementById('pager-overlay');
             this.list = document.getElementById('pager-incidents');
             this.soundHint = document.getElementById('pager-sound-hint');
+            this.heading = document.getElementById('pager-heading-text');
+            this.footer = document.getElementById('pager-footer');
             if (!this.overlay || !this.list) return;
 
             // Any click unlocks/resumes audio (browser autoplay policy). Cheap
@@ -147,7 +163,7 @@
             this.render();
             this.overlay.hidden = false;
             document.body.classList.add('pager-active');
-            this.syncAlarms(isNew && alarmOf(incident) === 'ka-ching');
+            this.syncAlarms(isNew ? alarmOf(incident) : null);
             this.startTitleFlash();
             this.startResync();
             this.notify(incident, !isNew);
@@ -161,13 +177,13 @@
             this.notifications.delete(id);
             if (this.entries.size) {
                 this.render();
-                this.syncAlarms(false);
+                this.syncAlarms(null);
                 return;
             }
             this.overlay.hidden = true;
             document.body.classList.remove('pager-active');
             this.stopSiren();
-            this.stopKaching();
+            this.stopCues();
             this.stopTitleFlash();
             this.stopResync();
         },
@@ -196,7 +212,7 @@
             // to fail.
             Object.assign(entry, { acking: true, silenced: true, error: null });
             this.render();
-            this.syncAlarms(false);
+            this.syncAlarms(null);
             try {
                 const response = await fetch(`/oncall/incidents/${encodeURIComponent(id)}/ack`, {
                     method: 'POST',
@@ -265,7 +281,25 @@
             }
         },
 
+        // Only chimes ringing: a banner in the corner instead of the full screen.
+        isBanner() {
+            return [...this.entries.values()].every(({ incident }) => alarmOf(incident) === 'chime');
+        },
+
+        setPresentation(banner) {
+            this.overlay.classList.toggle('pager-overlay--banner', banner);
+            this.overlay.setAttribute('aria-modal', banner ? 'false' : 'true');
+            if (this.heading) this.heading.textContent = banner ? "You're needed" : 'You are being paged';
+            if (this.footer) {
+                this.footer.textContent = banner
+                    ? 'Acknowledging stops the chime and tells the others you have it.'
+                    : "Acknowledging stops the alarm for everyone and tells the team you're on it.";
+            }
+        },
+
         render() {
+            const banner = this.isBanner();
+            this.setPresentation(banner);
             this.list.replaceChildren();
             for (const [id, { incident, test, acking, silenced, error }] of this.entries) {
                 const row = document.createElement('div');
@@ -279,7 +313,8 @@
                     : `${ALARM_TEXT[alarmOf(incident)].row}${incident.title}`;
                 row.appendChild(title);
 
-                // A D8 page links the lead in D8 instead of showing the URL.
+                // A page request (a D8 lead, the interview day) links what it is
+                // about instead of showing the URL.
                 const leadLink = incident.source === 'd8' && /^https?:\/\//.test(incident.source_url || '')
                     ? incident.source_url : null;
                 const meta = [];
@@ -314,24 +349,24 @@
                 actions.className = 'pager-incident-actions';
                 const ack = document.createElement('button');
                 ack.type = 'button';
-                ack.className = 'btn btn-light btn-lg fw-bold';
+                ack.className = banner ? 'btn btn-primary fw-bold' : 'btn btn-light btn-lg fw-bold';
                 ack.dataset.pagerAck = id;
                 ack.disabled = !!acking;
                 ack.textContent = test ? 'Stop test' : 'Acknowledge';
                 actions.appendChild(ack);
                 if (leadLink) {
                     const open = document.createElement('a');
-                    open.className = 'btn btn-outline-light';
+                    open.className = banner ? 'btn btn-outline-primary' : 'btn btn-outline-light';
                     open.href = leadLink;
                     open.target = '_blank';
                     open.rel = 'noopener noreferrer';
-                    open.textContent = 'Open the lead in D8';
+                    open.textContent = alarmOf(incident) === 'ka-ching' ? 'Open the lead in D8' : 'Open';
                     actions.appendChild(open);
                 }
                 if (incident.message_id) {
                     const view = document.createElement('button');
                     view.type = 'button';
-                    view.className = 'btn btn-outline-light';
+                    view.className = banner ? 'btn btn-outline-secondary' : 'btn btn-outline-light';
                     view.dataset.pagerView = incident.message_id;
                     view.dataset.pagerChannel = incident.channel_id || '';
                     view.textContent = 'View in channel';
@@ -412,8 +447,9 @@
         },
 
         // Play every alarm a ringing incident asks for, and stop the others.
-        // `restartKaching`: a new lead starts the fast first minute again.
-        syncAlarms(restartKaching) {
+        // `restart`: the alarm of a page that just arrived, whose fast first
+        // minute starts again.
+        syncAlarms(restart) {
             // A page silenced here (Acknowledge tapped, the request still out or
             // failed) makes no sound until its next re-send.
             const alarms = new Set(
@@ -423,43 +459,45 @@
             );
             if (alarms.has('siren')) this.startSiren();
             else this.stopSiren();
-            if (alarms.has('ka-ching')) this.startKaching(restartKaching);
-            else this.stopKaching();
+            for (const alarm of Object.keys(CUES)) {
+                if (alarms.has(alarm)) this.startCue(alarm, restart === alarm);
+                else this.stopCue(alarm);
+            }
         },
 
-        startKaching(restart) {
+        startCue(alarm, restart) {
             const ctx = this.ensureAudio();
-            if (!ctx || (this.kaching && !restart)) {
+            if (!ctx || (this.cues.has(alarm) && !restart)) {
                 this.updateSoundHint();
                 return;
             }
-            this.stopKaching();
+            this.stopCue(alarm);
             const master = ctx.createGain();
-            master.gain.value = KACHING_GAIN;
+            master.gain.value = CUES[alarm].gain;
             master.connect(ctx.destination);
-            this.kaching = {
+            this.cues.set(alarm, {
                 master,
                 origin: ctx.currentTime + 0.05,
                 next: 0,
                 sources: new Set(),
-                timer: setInterval(() => this.scheduleKaching(), KACHING_TOPUP_MS),
-            };
-            this.scheduleKaching();
+                timer: setInterval(() => this.scheduleCue(alarm), CUE_TOPUP_MS),
+            });
+            this.scheduleCue(alarm);
             this.updateSoundHint();
         },
 
-        // Schedule every ka-ching due before the lookahead horizon. One whose
-        // time has already passed (the tab slept past it) is skipped, so the
-        // alarm never plays a backlog all at once.
-        scheduleKaching() {
-            const kaching = this.kaching;
-            if (!kaching) return;
+        // Schedule every cue due before the lookahead horizon. One whose time
+        // has already passed (the tab slept past it) is skipped, so the alarm
+        // never plays a backlog all at once.
+        scheduleCue(alarm) {
+            const cue = this.cues.get(alarm);
+            if (!cue) return;
             const now = this.audioCtx.currentTime;
-            const horizon = now + KACHING_LOOKAHEAD_S;
-            while (kaching.origin + kachingOffset(kaching.next) <= horizon) {
-                const at = kaching.origin + kachingOffset(kaching.next);
-                if (at >= now) this.playKaching(at);
-                kaching.next += 1;
+            const horizon = now + CUE_LOOKAHEAD_S;
+            while (cue.origin + cueOffset(alarm, cue.next) <= horizon) {
+                const at = cue.origin + cueOffset(alarm, cue.next);
+                if (at >= now) this[CUES[alarm].play](at, cue);
+                cue.next += 1;
             }
         },
 
@@ -474,15 +512,17 @@
             return this.noise;
         },
 
-        playKaching(at) {
+        // Start `source` at `start`, stop it at `stop`, and keep it in the
+        // cue's set until it ends, so stopping the alarm can free it.
+        trackSource(cue, source, start, stop) {
+            cue.sources.add(source);
+            source.onended = () => cue.sources.delete(source);
+            source.start(start);
+            source.stop(stop);
+        },
+
+        playKaching(at, cue) {
             const ctx = this.audioCtx;
-            const { master, sources } = this.kaching;
-            const track = (source, start, stop) => {
-                sources.add(source);
-                source.onended = () => sources.delete(source);
-                source.start(start);
-                source.stop(stop);
-            };
 
             // "ka": a short burst of band-passed noise.
             const noise = ctx.createBufferSource();
@@ -495,8 +535,8 @@
             clack.gain.setValueAtTime(0.0001, at);
             clack.gain.exponentialRampToValueAtTime(0.6, at + 0.004);
             clack.gain.exponentialRampToValueAtTime(0.0001, at + 0.06);
-            noise.connect(band).connect(clack).connect(master);
-            track(noise, at, at + 0.08);
+            noise.connect(band).connect(clack).connect(cue.master);
+            this.trackSource(cue, noise, at, at + 0.08);
 
             // "ching": the bell, struck just after.
             const strike = at + 0.09;
@@ -508,30 +548,52 @@
                 envelope.gain.setValueAtTime(0.0001, strike);
                 envelope.gain.exponentialRampToValueAtTime(peak, strike + 0.003);
                 envelope.gain.exponentialRampToValueAtTime(0.0001, strike + ringOut);
-                osc.connect(envelope).connect(master);
-                track(osc, strike, strike + ringOut + 0.05);
+                osc.connect(envelope).connect(cue.master);
+                this.trackSource(cue, osc, strike, strike + ringOut + 0.05);
             }
         },
 
-        stopKaching() {
-            if (!this.kaching) return;
-            const { master, sources, timer } = this.kaching;
-            clearInterval(timer);
+        // Two pairs of short sine beeps, eased in and out so none of them clicks.
+        playChime(at, cue) {
+            const ctx = this.audioCtx;
+            for (const offset of CHIME_BEEPS) {
+                const start = at + offset;
+                const osc = ctx.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.value = CHIME_HZ;
+                const envelope = ctx.createGain();
+                envelope.gain.setValueAtTime(0.0001, start);
+                envelope.gain.exponentialRampToValueAtTime(1, start + 0.015);
+                envelope.gain.setValueAtTime(1, start + CHIME_BEEP_S - 0.03);
+                envelope.gain.exponentialRampToValueAtTime(0.0001, start + CHIME_BEEP_S);
+                osc.connect(envelope).connect(cue.master);
+                this.trackSource(cue, osc, start, start + CHIME_BEEP_S + 0.02);
+            }
+        },
+
+        stopCue(alarm) {
+            const cue = this.cues.get(alarm);
+            if (!cue) return;
+            clearInterval(cue.timer);
             // Disconnecting the master silences everything already scheduled;
             // stopping the sources frees them.
-            master.disconnect();
-            for (const source of sources) {
+            cue.master.disconnect();
+            for (const source of cue.sources) {
                 try {
                     source.stop();
                 } catch (err) { /* already stopped */ }
             }
-            this.kaching = null;
+            this.cues.delete(alarm);
             this.updateSoundHint();
+        },
+
+        stopCues() {
+            for (const alarm of [...this.cues.keys()]) this.stopCue(alarm);
         },
 
         updateSoundHint() {
             if (!this.soundHint) return;
-            const sounding = !!this.siren || !!this.kaching;
+            const sounding = !!this.siren || this.cues.size > 0;
             const blocked = sounding && (!this.audioCtx || this.audioCtx.state !== 'running');
             this.soundHint.hidden = !blocked;
         },
@@ -598,6 +660,7 @@
     };
 
     PagerManager.kachingOffset = kachingOffset;
+    PagerManager.cueOffset = cueOffset;
     window.PagerManager = PagerManager;
     document.addEventListener('DOMContentLoaded', () => PagerManager.init());
 })();
