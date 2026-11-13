@@ -165,6 +165,8 @@ INTERVIEW_DAY_USERS = (
     ("grader2", "Grader Two", "grader2@example.com", "grader2", []),
     ("hr", "HR Coordinator", "hr@devocho.com", "hr", ["hr"]),
     ("em", "Engineering Manager", "em@example.com", "em", ["engineering-manager"]),
+    # The platform's tie-breaker: a split at grading pages the director.
+    ("director", "Director", "director@example.com", "director", ["director"]),
 )
 
 
