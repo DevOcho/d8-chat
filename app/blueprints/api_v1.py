@@ -787,9 +787,7 @@ def create_dm():
     brand-new conversation, broadcasts the same ``dm_created`` event to the
     other user so their sidebar updates live.
     """
-    from flask import render_template
-
-    from app.chat_manager import chat_manager
+    from app.services import chat_service
 
     data = request.get_json(silent=True) or {}
     user_id = data.get("user_id")
@@ -807,19 +805,11 @@ def create_dm():
     if not other_user:
         return jsonify({"error": "User not found"}), 404
 
-    user_ids = sorted([g.api_user.id, other_user.id])
-    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
-
-    conversation, created = Conversation.get_or_create(
-        conversation_id_str=conv_id_str, defaults={"type": "dm"}
+    conv_id_str, conversation, created = chat_service.open_dm(g.api_user, other_user)
+    status = UserConversationStatus.get(
+        (UserConversationStatus.user == g.api_user)
+        & (UserConversationStatus.conversation == conversation)
     )
-
-    # Ensure both participants have a status record so the DM shows up in each
-    # user's sidebar / GET /dms.
-    status, _ = UserConversationStatus.get_or_create(
-        user=g.api_user, conversation=conversation
-    )
-    UserConversationStatus.get_or_create(user=other_user, conversation=conversation)
 
     unread_count = (
         Message.select()
@@ -833,32 +823,10 @@ def create_dm():
     )
 
     # On a brand-new conversation, notify the other user so their sidebar
-    # updates live — same payload the web emits from get_dm_chat. Skipped for
-    # self-DMs (nobody else to tell) and for already-existing DMs (idempotent).
-    if created and other_user.id != g.api_user.id:
-        new_contact_html = render_template(
-            "partials/dm_list_item_oob.html",
-            user=g.api_user,
-            conv_id_str=conv_id_str,
-            is_online=chat_manager.is_user_online_in_cluster(g.api_user.id),
-            is_active=chat_manager.is_user_active(g.api_user.id),
-        )
-        subscription_html = render_template(
-            "partials/subscribe_oob.html", conv_id_str=conv_id_str
-        )
-        chat_manager.send_to_user(
-            other_user.id,
-            {
-                "_raw_html": new_contact_html + subscription_html,
-                "api_data": {
-                    "type": "dm_created",
-                    "data": {
-                        "conversation_id_str": conv_id_str,
-                        "other_user": user_to_dict(g.api_user),
-                    },
-                },
-            },
-        )
+    # updates live (the same frame the web's get_dm_chat sends). Already
+    # existing DMs are left alone: idempotent.
+    if created:
+        chat_service.announce_new_dm(g.api_user, other_user, conv_id_str)
 
     return (
         jsonify(
@@ -1621,6 +1589,31 @@ def _valid_page_request(page):
     )
 
 
+def _valid_email(value):
+    return isinstance(value, str) and "@" in value and len(value) <= 254
+
+
+def _internal_dm(data):
+    """``{"to": "<email>", "message": "<text>"}``: a DM to that person from the
+    Chief of Staff bot (app/services/chief_of_staff.py). 404 when no active
+    user has the email. A DM never pages."""
+    from app.services import chief_of_staff
+
+    message_text = data.get("message")
+    if not _valid_email(data.get("to")) or not isinstance(message_text, str):
+        return jsonify({"error": "to (an email) and message are required"}), 400
+    if not message_text.strip():
+        return jsonify({"error": "to (an email) and message are required"}), 400
+    if data.get("page") is not None or data.get("channel_name") is not None:
+        return jsonify({"error": "a DM takes to, not a channel or a page"}), 400
+    person = chief_of_staff.recipient(data["to"])
+    if person is None:
+        return jsonify({"error": "No active user has that email"}), 404
+    if chief_of_staff.send_dm(person, message_text) is None:
+        return jsonify({"error": "Chief of Staff bot not provisioned"}), 500
+    return jsonify({"ok": True}), 200
+
+
 @api_v1_bp.route("/internal/notify", methods=["POST"])
 @limiter.limit("120 per minute", key_func=get_remote_address)
 def internal_notify():
@@ -1642,6 +1635,9 @@ def internal_notify():
         first level, and the answer lists the emails that matched nobody
         (``unmatched``). Without a policy it is only posted.
 
+        Or ``{"to": "<email>", "message": "<text>"}``: a DM to that person
+        from the ``chief-of-staff`` bot (D8's morning brief), never a page.
+
     Behaviour mirrors the user-facing message-create path so the message
     is persisted, mention/hashtag extraction runs, the message is
     broadcast over the WebSocket Pub/Sub layer, and unread
@@ -1658,6 +1654,8 @@ def internal_notify():
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
+    if data.get("to") is not None:
+        return _internal_dm(data)
     channel_name = data.get("channel_name")
     message_text = data.get("message")
     if (

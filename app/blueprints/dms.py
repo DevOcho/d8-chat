@@ -16,6 +16,7 @@ from app.routes import (
     login_required,
     prepare_messages_for_render,
 )
+from app.services import chat_service
 
 # A smaller page size for the user search modal
 DM_SEARCH_PAGE_SIZE = 20
@@ -202,8 +203,6 @@ def get_dm_chat(other_user_id):
             link_text=other_user.display_name or other_user.username,
         )
     elif created and other_user.id != g.user.id:
-        from app.blueprints.api_v1 import user_to_dict
-
         add_to_sidebar_html = render_template(
             "partials/dm_list_item_oob.html",
             user=other_user,
@@ -212,30 +211,8 @@ def get_dm_chat(other_user_id):
             is_active=chat_manager.is_user_active(other_user.id),
         )
 
-        # Render the correct partials for the recipient
-        new_contact_html = render_template(
-            "partials/dm_list_item_oob.html",
-            user=g.user,
-            conv_id_str=conv_id_str,
-            is_online=chat_manager.is_user_online_in_cluster(g.user.id),
-            is_active=chat_manager.is_user_active(g.user.id),
-        )
-        subscription_html = render_template(
-            "partials/subscribe_oob.html", conv_id_str=conv_id_str
-        )
-
-        payload = {
-            "_raw_html": new_contact_html + subscription_html,
-            "api_data": {
-                "type": "dm_created",
-                "data": {
-                    "conversation_id_str": conv_id_str,
-                    "other_user": user_to_dict(g.user),
-                },
-            },
-        }
-
-        chat_manager.send_to_user(other_user.id, payload)
+        # And the recipient's sidebar, live.
+        chat_service.announce_new_dm(g.user, other_user, conv_id_str)
 
     chat_input_oob_html = oob_self(
         "chat-input-container", render_template("partials/chat_input_default.html")
