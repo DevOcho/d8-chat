@@ -42,7 +42,7 @@ from app.models import (
     WorkspaceMember,
     db,
 )
-from app.services import oncall_service
+from app.services import chief_of_staff, oncall_service
 from config import Config
 
 ALL_MODELS = [
@@ -233,6 +233,9 @@ def seed_initial_data():
     interview_channel, _interview_policy = oncall_service.ensure_interview_paging(
         workspace, Config.INTERVIEW_DAY_CHANNEL or "interview-day"
     )
+    # D8's Chief of Staff: the bot its DMs (the morning brief) come from.
+    # Mirrored in migration 0014.
+    chief_of_staff.ensure_bot(workspace)
 
     # Create the default admin user if they don't exist
     admin_user, created = User.get_or_create(

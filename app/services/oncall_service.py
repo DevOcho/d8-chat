@@ -1467,9 +1467,18 @@ def handle_page_request(channel, text, page, now=None):
 
 
 def tick(now=None):
-    """One escalation + re-send pass (what each worker runs every TICK_SECONDS)."""
+    """One escalation + re-send pass (what each worker runs every TICK_SECONDS),
+    plus, at most hourly, the Chief of Staff's DM retention (the only other
+    periodic work, so it rides this loop rather than starting another)."""
+    # pylint: disable=import-outside-toplevel,cyclic-import
+    from app.services import chief_of_staff
+
     now = now or utc_now()
-    for label, step in (("escalation", run_escalations), ("re-send", resend_pages)):
+    for label, step in (
+        ("escalation", run_escalations),
+        ("re-send", resend_pages),
+        ("chief-of-staff retention", chief_of_staff.purge_if_due),
+    ):
         try:
             step(now)
         except Exception:  # pylint: disable=broad-exception-caught

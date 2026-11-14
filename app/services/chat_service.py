@@ -176,6 +176,55 @@ def end_channel_membership(user_id, channel):
         )
 
 
+def open_dm(user, other):
+    """Get or create the DM between ``user`` and ``other``, with a status row
+    for each so it shows in both sidebars and GET /dms. Returns
+    ``(conv_id_str, conversation, created)``."""
+    user_ids = sorted([user.id, other.id])
+    conv_id_str = f"dm_{user_ids[0]}_{user_ids[1]}"
+    conversation, created = Conversation.get_or_create(
+        conversation_id_str=conv_id_str, defaults={"type": "dm"}
+    )
+    UserConversationStatus.get_or_create(user=user, conversation=conversation)
+    UserConversationStatus.get_or_create(user=other, conversation=conversation)
+    return conv_id_str, conversation, created
+
+
+def announce_new_dm(opener, other, conv_id_str):
+    """Tell ``other`` that ``opener`` started a DM with them, so it appears in
+    their sidebar live and their sockets follow it: the web gets the sidebar
+    row and the subscription, the API the ``dm_created`` event. Nothing for a
+    self-DM."""
+    # pylint: disable=import-outside-toplevel,cyclic-import
+    from app.blueprints.api_v1 import user_to_dict
+
+    if other.id == opener.id:
+        return
+    new_contact_html = render_template(
+        "partials/dm_list_item_oob.html",
+        user=opener,
+        conv_id_str=conv_id_str,
+        is_online=chat_manager.is_user_online_in_cluster(opener.id),
+        is_active=chat_manager.is_user_active(opener.id),
+    )
+    subscription_html = render_template(
+        "partials/subscribe_oob.html", conv_id_str=conv_id_str
+    )
+    chat_manager.send_to_user(
+        other.id,
+        {
+            "_raw_html": new_contact_html + subscription_html,
+            "api_data": {
+                "type": "dm_created",
+                "data": {
+                    "conversation_id_str": conv_id_str,
+                    "other_user": user_to_dict(opener),
+                },
+            },
+        },
+    )
+
+
 def delete_message_and_files(message):
     """Delete ``message`` and the uploads that belong to it alone.
 
