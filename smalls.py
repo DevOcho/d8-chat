@@ -4,6 +4,7 @@
 # Python Modules
 import configparser
 import os
+import re
 import sys
 from datetime import datetime
 from glob import glob
@@ -289,19 +290,64 @@ def run_rollback(file):
         rprint(" [red]FAILED[/red]")
         rprint(f" Error was: [yellow1]{exp}[/yellow1]")
         print()  # intentionally print a blank line
-        sys.exit()
+        # A failed rollback is a failure: exit non-zero so a Job or a script
+        # running it stops.
+        sys.exit(1)
 
     # Let's tell the database
     MigrationHistory.delete().where(MigrationHistory.name == file).execute()
 
 
+_MIGRATION_PREFIX_RE = re.compile(r"^(\d{4})_")
+
+
+def _validate_migrations_directory(directory="migrations"):
+    """Fail loudly, before anything runs, if migrations/ has duplicate
+    4-digit prefixes or a gap (a missing number between two that exist).
+
+    lets_migrate() walks by last number + 1 and takes one file, so two
+    files sharing a number would leave one of them never run, and a gap
+    would end the walk early with "Migrations are complete". Ported from
+    new-d8's smalls.py, where two 0012s stranded a migration in production.
+    """
+    seen = {}
+    for path in sorted(glob(f"{directory}/*.py")):
+        match = _MIGRATION_PREFIX_RE.match(os.path.basename(path))
+        if match:
+            seen.setdefault(int(match.group(1)), []).append(path)
+
+    duplicates = {n: paths for n, paths in seen.items() if len(paths) > 1}
+    if duplicates:
+        rprint("[red]Duplicate migration numbers found:[/red]")
+        for n, paths in sorted(duplicates.items()):
+            rprint(f"  [red]{n:04d}[/red]: {', '.join(paths)}")
+        sys.exit(1)
+
+    numbers = sorted(seen)
+    if numbers:
+        missing = sorted(set(range(numbers[0], numbers[-1] + 1)) - set(numbers))
+        if missing:
+            rprint(
+                f"[red]Gap in {directory}/: missing {missing} "
+                f"(have {numbers[0]:04d}..{numbers[-1]:04d}).[/red]"
+            )
+            sys.exit(1)
+    return numbers
+
+
 def lets_migrate(number=0, recurse=False):
     """Recursive Migration processing"""
 
+    if not recurse:
+        _validate_migrations_directory()
+
     # If they passed a number that's the only one we want to run
     if number:
-        number_file = glob(f"migrations/{number}*.py")[:1][0]
-        run_migration(number_file)
+        matches = sorted(glob(f"migrations/{number}*.py"))
+        if len(matches) != 1:
+            rprint(f"[red]{len(matches)} migration files match {number}.[/red]")
+            sys.exit(1)
+        run_migration(matches[0])
         sys.exit()
 
     # Without a specific number we need to get the files we've already migrated
@@ -336,7 +382,14 @@ def lets_migrate(number=0, recurse=False):
 
 
 def run_migration(file):
-    """Run the migration file"""
+    """Run the migration file.
+
+    MigrationHistory.create() is reached only when the migration succeeded,
+    or when a person at a terminal in DEV says to carry on anyway. Before,
+    any run outside DEV (the production migrate Job sets SMALLS_ENV=PROD)
+    recorded a failed migration as applied and carried on: the deploy went
+    green and the migration never ran again.
+    """
 
     # Change the file name into a python module name
     module_name = file.split("/")[0] + "." + file.split("/")[1][:-3]
@@ -344,7 +397,7 @@ def run_migration(file):
     if not os.path.isfile(file):
         rprint(" [red]Unable to find migration file[/red]")
         rprint(f" {file} not found!")
-        sys.exit()
+        sys.exit(1)
 
     # Run the migration file
     print_str = "Running Migration: [sky_blue2]" + file + "[/sky_blue2]"
@@ -353,17 +406,19 @@ def run_migration(file):
         migration = import_module(module_name)
         migration.migrate()
         rprint(" [green]Successful[/green]")
-    except (DatabaseError, ImportError) as exp:
+    except Exception as exp:  # pylint: disable=broad-exception-caught
         rprint(" [red]FAILED[/red]")
         rprint(f" Error was: [yellow1]{exp}[/yellow1]")
         print()  # printing a blank line for readability
-        # If we are in DEV we might want to continue
-        if ENVIRONMENT == "DEV":
-            prompt = input(
-                "Since we are in DEV, do you want to continue as if it worked? [Y/n]"
-            )
-            if "n" in str(prompt).lower():
-                sys.exit()
+        # Never without a person at a terminal (a Job, CI, a pipe): input()
+        # would hang there or read EOF.
+        if not (ENVIRONMENT == "DEV" and sys.stdin.isatty()):
+            sys.exit(1)
+        prompt = input(
+            "Since we are in DEV, do you want to continue as if it worked? [Y/n]"
+        )
+        if "n" in str(prompt).lower():
+            sys.exit(1)
 
     # Let's tell the database
     MigrationHistory.create(name=file[11:-3], version=smalls_version)
