@@ -219,20 +219,22 @@ describe('acknowledge', () => {
         return env;
     }
 
-    it('POSTs to /oncall/incidents/<id>/ack with the CSRF token, then stops ringing', async () => {
+    it('POSTs to /oncall/incidents/<id>/ack with the CSRF token, then clears the page', async () => {
         const gate = deferred();
         const env = await ringingEnv(() => gate.promise);
-        const button = env.$('[data-pager-ack="42"]');
-        button.click();
+        env.$('[data-pager-ack="42"]').click();
         await env.flush();
-        expect(button.disabled).toBe(true);
+        expect(env.$('[data-pager-ack="42"]').disabled).toBe(true);
         const [call] = env.fetches('/oncall/incidents/42/ack');
         expect(call.init).toMatchObject({
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'X-CSRFToken': 'csrf-test-token', Accept: 'application/json' },
         });
-        expect(ringing(env)).toBe(true);
+        // Silenced before the server answers, still on screen.
+        expect(sirenOn(env)).toBe(false);
+        expect(overlay(env).hidden).toBe(false);
+        expect(env.$('.pager-incident-silenced')).toBeNull();
 
         gate.resolve({ json: { ok: true } });
         await env.flush();
@@ -240,7 +242,7 @@ describe('acknowledge', () => {
         expect(sirenOn(env)).toBe(false);
     });
 
-    it('shows the server error, re-enables the button and keeps ringing when the ack fails', async () => {
+    it('shows the server error, re-enables the button and keeps the page up, silenced, when the ack fails', async () => {
         const env = await ringingEnv({ status: 403, json: { error: 'You are not paged for this incident' } });
         env.$('[data-pager-ack="42"]').click();
         await env.flush();
@@ -248,7 +250,10 @@ describe('acknowledge', () => {
         expect(error.hidden).toBe(false);
         expect(error.textContent).toBe("Couldn't acknowledge: You are not paged for this incident. Try again.");
         expect(env.$('[data-pager-ack="42"]').disabled).toBe(false);
-        expect(ringing(env)).toBe(true);
+        expect(overlay(env).hidden).toBe(false);
+        expect(sirenOn(env)).toBe(false);
+        expect(env.$('[data-incident-id="42"] .pager-incident-silenced').textContent)
+            .toBe('🔇 Silenced in this tab. The page keeps escalating until someone acknowledges.');
     });
 
     it('reports the HTTP status when the error response is not JSON', async () => {
@@ -259,13 +264,50 @@ describe('acknowledge', () => {
             .toBe("Couldn't acknowledge: HTTP 502. Try again.");
     });
 
-    it('reports a network failure', async () => {
+    it('offline: reports the failure and stays silenced', async () => {
         const env = await ringingEnv(new TypeError('Failed to fetch'));
         env.$('[data-pager-ack="42"]').click();
         await env.flush();
         expect(env.$('[data-incident-id="42"] .pager-incident-error').textContent)
             .toBe("Couldn't acknowledge: Failed to fetch. Try again.");
+        expect(sirenOn(env)).toBe(false);
+        expect(env.$('[data-incident-id="42"] .pager-incident-silenced')).not.toBeNull();
+    });
+
+    it('the server re-sending a silenced page rings it again', async () => {
+        const env = await ringingEnv(new TypeError('Failed to fetch'));
+        env.$('[data-pager-ack="42"]').click();
+        await env.flush();
+
+        await env.frame(pageFrame(incident(), { repeat: true }));
+
         expect(ringing(env)).toBe(true);
+        expect(env.$('.pager-incident-silenced')).toBeNull();
+        expect(env.$('[data-incident-id="42"] .pager-incident-error').hidden).toBe(true);
+    });
+
+    it('a re-send while the ack is out stays silent and keeps the button disabled', async () => {
+        const gate = deferred();
+        const env = await ringingEnv(() => gate.promise);
+        env.$('[data-pager-ack="42"]').click();
+        await env.flush();
+
+        await env.frame(pageFrame(incident(), { repeat: true }));
+
+        expect(sirenOn(env)).toBe(false);
+        expect(env.$('[data-pager-ack="42"]').disabled).toBe(true);
+        gate.resolve({ json: { ok: true } });
+        await env.flush();
+        expect(overlay(env).hidden).toBe(true);
+    });
+
+    it('silencing one page leaves another ringing', async () => {
+        const env = await ringingEnv(new TypeError('Failed to fetch'));
+        await env.frame(pageFrame(incident({ id: 43, title: 'Other' })));
+        env.$('[data-pager-ack="42"]').click();
+        await env.flush();
+
+        expect(sirenOn(env)).toBe(true);
     });
 });
 

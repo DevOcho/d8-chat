@@ -1421,7 +1421,8 @@ a.hashtag-link:hover {
     margin-top: 0.75rem;
 }
 
-.pager-incident-error {
+.pager-incident-error,
+.pager-incident-silenced {
     margin-top: 0.5rem;
     font-weight: 600;
 }

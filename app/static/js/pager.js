@@ -6,6 +6,10 @@
  * the monitor recovers. While ringing: a full-screen alert, a looping siren,
  * a flashing tab title and a sticky desktop notification.
  *
+ * Acknowledge silences this tab at once, before the request. If it fails
+ * (e.g. the connection dropped) the page stays up, silenced: the server never
+ * heard, so it keeps escalating, and its next re-send rings here again.
+ *
  * Delivery is belt-and-braces because pub/sub is at-most-once: the server
  * re-sends every page each minute, and this file re-syncs from
  * GET /oncall/pages/active on load, on every WebSocket (re)connect, and every
@@ -37,7 +41,8 @@
     }
 
     const PagerManager = {
-        entries: new Map(),         // incident id (string) → { incident, test, since }
+        // incident id (string) → { incident, test, since, acking, silenced, error }
+        entries: new Map(),
         notifications: new Map(),   // incident id → Notification
         clearedAt: new Map(),       // incident id → when it was cleared here (ms)
         audioCtx: null,
@@ -60,7 +65,7 @@
 
             this.list.addEventListener('click', (e) => {
                 const ack = e.target.closest('[data-pager-ack]');
-                if (ack) this.acknowledge(ack.dataset.pagerAck, ack);
+                if (ack) this.acknowledge(ack.dataset.pagerAck);
                 const view = e.target.closest('[data-pager-view]');
                 if (view) this.viewMessage(view.dataset.pagerView, view.dataset.pagerChannel);
             });
@@ -88,13 +93,24 @@
 
         page(incident, frame = {}) {
             const id = String(incident.id);
-            const isNew = !this.entries.has(id);
-            const since = isNew ? Date.now() : this.entries.get(id).since;
-            this.entries.set(id, { incident, test: !!frame.test, since });
+            const prev = this.entries.get(id);
+            const isNew = !prev;
+            const since = isNew ? Date.now() : prev.since;
+            // A re-send means nobody has acknowledged it, so a page silenced
+            // here rings again, unless our acknowledgement is still out.
+            const acking = !!prev?.acking;
+            this.entries.set(id, {
+                incident,
+                test: !!frame.test,
+                since,
+                acking,
+                silenced: acking,
+                error: null,
+            });
             this.render();
             this.overlay.hidden = false;
             document.body.classList.add('pager-active');
-            this.startSiren();
+            this.syncSiren();
             this.startTitleFlash();
             this.startResync();
             this.notify(incident, !isNew);
@@ -108,6 +124,7 @@
             this.notifications.delete(id);
             if (this.entries.size) {
                 this.render();
+                this.syncSiren();
                 return;
             }
             this.overlay.hidden = true;
@@ -130,14 +147,18 @@
             this.resyncTimer = null;
         },
 
-        async acknowledge(id, button) {
+        async acknowledge(id) {
             const entry = this.entries.get(id);
-            if (!entry) return;
+            if (!entry || entry.acking) return;
             if (entry.test) {
                 this.clear(id);
                 return;
             }
-            button.disabled = true;
+            // Silence first: with no connection the request can take a while
+            // to fail.
+            Object.assign(entry, { acking: true, silenced: true, error: null });
+            this.render();
+            this.syncSiren();
             try {
                 const response = await fetch(`/oncall/incidents/${encodeURIComponent(id)}/ack`, {
                     method: 'POST',
@@ -151,8 +172,12 @@
                 // Acknowledged (or someone beat us to it) — either way, stop.
                 this.clear(id);
             } catch (err) {
-                button.disabled = false;
-                this.showError(id, `Couldn't acknowledge: ${err.message}. Try again.`);
+                // page() may have replaced the entry while the request was out.
+                const current = this.entries.get(id);
+                if (!current) return;
+                current.acking = false;
+                current.error = `Couldn't acknowledge: ${err.message}. Try again.`;
+                this.render();
             }
         },
 
@@ -204,7 +229,7 @@
 
         render() {
             this.list.replaceChildren();
-            for (const [id, { incident, test }] of this.entries) {
+            for (const [id, { incident, test, acking, silenced, error }] of this.entries) {
                 const row = document.createElement('div');
                 row.className = 'pager-incident';
                 row.dataset.incidentId = id;
@@ -248,6 +273,7 @@
                 ack.type = 'button';
                 ack.className = 'btn btn-light btn-lg fw-bold';
                 ack.dataset.pagerAck = id;
+                ack.disabled = !!acking;
                 ack.textContent = test ? 'Stop test' : 'Acknowledge';
                 actions.appendChild(ack);
                 if (incident.message_id) {
@@ -261,24 +287,32 @@
                 }
                 row.appendChild(actions);
 
-                const error = document.createElement('div');
-                error.className = 'pager-incident-error';
-                error.hidden = true;
-                row.appendChild(error);
+                const errorEl = document.createElement('div');
+                errorEl.className = 'pager-incident-error';
+                errorEl.textContent = error || '';
+                errorEl.hidden = !error;
+                row.appendChild(errorEl);
+
+                // Not while the request is out: it may still go through.
+                if (silenced && !acking) {
+                    const note = document.createElement('div');
+                    note.className = 'pager-incident-silenced';
+                    note.textContent = '🔇 Silenced in this tab. The page keeps escalating until someone acknowledges.';
+                    row.appendChild(note);
+                }
 
                 this.list.appendChild(row);
             }
         },
 
-        showError(id, message) {
-            const row = this.list.querySelector(`[data-incident-id="${CSS.escape(id)}"] .pager-incident-error`);
-            if (row) {
-                row.textContent = message;
-                row.hidden = false;
-            }
-        },
-
         // --- Sound ---
+
+        // The siren plays while any page isn't silenced here.
+        syncSiren() {
+            const ringing = [...this.entries.values()].some((entry) => !entry.silenced);
+            if (ringing) this.startSiren();
+            else this.stopSiren();
+        },
 
         ensureAudio() {
             const Ctx = window.AudioContext || window.webkitAudioContext;

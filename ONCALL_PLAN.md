@@ -276,6 +276,11 @@ second 10 minutes.
     audio file to license, and it ignores the user's notification-sound preference.
   - Flashing tab title and favicon.
   - Desktop `Notification` with `requireInteraction: true`.
+  - **Acknowledge silences this device first**, before the request. If it fails (lost
+    connection, server error) the page stays up, silenced here only. The server never
+    heard, so escalation carries on, and its next re-send (~60s, only once back online)
+    rings again. Same rule in the mobile app, including the notification's Acknowledge
+    button. Added 2026-11-15 after a page couldn't be stopped when the wifi dropped.
 - Pages ignore presence (busy/away) and `exclude_channel`. Viewing #devops-uptime
   doesn't silence a page.
 - Incident card in the DOWN message (rendered like polls in `message.html`): state

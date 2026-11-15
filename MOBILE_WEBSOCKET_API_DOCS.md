@@ -947,6 +947,13 @@ Pages go to **every** registered device of each paged user. Unlike chat pushes,
 they are **not** suppressed when the user is active on the web. They are re-sent
 about every 60s until the page is acknowledged or cleared.
 
+Clients stop the alarm on the device as soon as Acknowledge is tapped, before
+the request. If the request fails (no connection, timeout, error) the page
+stays up, silenced on that device only: the server never heard, so it keeps
+escalating. The next re-send (a `page` frame or push for that incident, which
+only arrives once the device is back online) rings it again. A re-sync via
+`GET /api/v1/oncall/incidents/active` does not.
+
 - `data`: `{ "type": "page", "incident_id": "17", "conversation_id_str": "channel_4", "message_id": "123", "title": "🚨 DOWN: <monitor>", "body": "<details>" }`
   (a test page has `"test": "1"` and a string `incident_id`). There is no
   top-level `notification`: iOS gets its alert from `aps`, and Android
