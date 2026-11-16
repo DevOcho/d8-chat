@@ -334,6 +334,7 @@ def update_channel_about(channel_id):
     if not membership or membership.role != "admin":
         return "Unauthorized", 403
 
+    channel.name = request.form.get("name")
     channel.topic = request.form.get("topic")
     channel.description = request.form.get("description")
     channel.save()

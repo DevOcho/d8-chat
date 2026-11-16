@@ -5,6 +5,14 @@
         <h6 class="text-muted mb-0">Edit Details</h6>
     </div>
     <div class="mb-2">
+        <label for="topic" class="form-label small">Channel Name</label>
+        <input type="text"
+               class="form-control form-control-sm"
+               id="name"
+               name="name"
+               value="{{ channel.name or '' }}">
+    </div>
+    <div class="mb-2">
         <label for="topic" class="form-label small">Topic</label>
         <input type="text"
                class="form-control form-control-sm"
