@@ -201,6 +201,24 @@ def test_non_admin_cannot_update_channel_about(
     assert response.status_code == 403
 
 
+def test_admin_can_rename_channel(
+    logged_in_client, setup_channel_with_admin_and_member
+):
+    """Covers: `update_channel_about` saving the new channel name."""
+    channel = setup_channel_with_admin_and_member["channel"]
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/about",
+        data={"name": "renamed-channel", "topic": "t", "description": "d"},
+    )
+
+    assert response.status_code == 200
+    updated = Channel.get_by_id(channel.id)
+    assert updated.name == "renamed-channel"
+    assert updated.topic == "t"
+    assert updated.description == "d"
+
+
 def test_get_channel_details_for_nonexistent_channel(logged_in_client):
     """
     Covers: `get_channel_details` error path for a channel that does not exist.

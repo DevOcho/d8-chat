@@ -1,0 +1,91 @@
+<div class="">
+    {# Copy button #}
+    <button class="btn btn-sm btn-light"
+            data-message-id="{{ message.id }}"
+            data-copy-message
+            title="Copy to clipboard">
+        <i class="bi bi-clipboard"></i>
+        <p>Copy</p>
+        <!-- Hidden input holds the pure, unescaped raw string safely via Jinja -->
+        <input type="hidden" class="copy-source" value="{{ message.content | markdown_clean }}">
+    </button>
+    {# Emoji Reaction button #}
+    <button class="btn btn-sm btn-light"
+            data-bs-toggle="popover"
+            data-message-id="{{ message.id }}"
+            title="Add Reaction">
+        <i class="bi bi-emoji-smile"></i>
+    </button>
+    {# Forward Button #}
+    <button class="btn btn-sm btn-light"
+            hx-get="/chat/message/{{ message.id }}/forward"
+            hx-target="#htmx-modal-content"
+            data-bs-toggle="modal"
+            data-bs-target="#htmx-modal"
+            title="Forward Message">
+        <i class="bi bi-arrow-90deg-right"></i>
+    </button>
+    {# Quote Reply Button #}
+    {% if is_in_thread_view %}
+        {# Inside a thread, target the thread's input container with a new route #}
+        <button class="btn btn-sm btn-light"
+                hx-get="/chat/message/{{ message.id }}/load_for_thread_reply"
+                hx-target="#thread-input-container-{{ message.parent_message.id }}"
+                hx-swap="outerHTML"
+                title="Quote Reply">
+            <i class="bi bi-reply"></i>
+        </button>
+    {% else %}
+        {# In the main channel, target the main input container #}
+        <button class="btn btn-sm btn-light"
+                hx-get="/chat/message/{{ message.id }}/reply"
+                hx-target="#chat-input-container"
+                hx-swap="outerHTML"
+                data-action="reply"
+                title="Quote Reply">
+            <i class="bi bi-reply"></i>
+        </button>
+        {# "Reply in Thread" button ONLY appears in main channel view #}
+        {% if message.conversation.type == 'channel' %}
+            <button class="btn btn-sm btn-light"
+                    hx-get="{{ url_for('messages.view_thread', parent_message_id=message.id) }}"
+                    hx-target="#right-panel-offcanvas"
+                    data-action="view-thread"
+                    title="Reply in Thread">
+                <i class="bi bi-chat-square-text"></i>
+            </button>
+        {% endif %}
+    {% endif %}
+    {# Edit Button #}
+    {% if is_in_thread_view %}
+        {# When in a thread, target the thread's input container #}
+        <button class="btn btn-sm btn-light author-only-action"
+                hx-get="/chat/message/{{ message.id }}/load_for_thread_edit"
+                hx-target="#thread-input-container-{{ message.parent_message.id }}"
+                hx-swap="outerHTML"
+                data-action="edit"
+                title="Edit">
+            <i class="bi bi-pencil-square"></i>
+        </button>
+    {% else %}
+        {# When in the main view, target the main chat input container #}
+        <button class="btn btn-sm btn-light author-only-action"
+                hx-get="/chat/message/{{ message.id }}/load_for_edit"
+                hx-target="#chat-input-container"
+                hx-swap="outerHTML"
+                data-action="edit"
+                title="Edit">
+            <i class="bi bi-pencil-square"></i>
+        </button>
+    {% endif %}
+    {# Delete Button #}
+    <button class="btn btn-sm btn-light author-only-action"
+            hx-delete="/chat/message/{{ message.id }}"
+            hx-target="#message-{{ message.id }}"
+            hx-swap="outerHTML"
+            hx-confirm="Are you sure you want to delete this message?"
+            data-action="delete"
+            title="Delete">
+        <i class="bi bi-trash"></i>
+    </button>
+</div>

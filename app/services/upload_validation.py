@@ -9,16 +9,15 @@ of malicious requests:
 2. **Lying ``Content-Type`` headers** — multipart clients can claim any MIME
    type they want, and we used to persist that string straight to the DB and
    serve it back from MinIO.
-3. **Browser-renderable formats hosted same-origin** — ``.html``/``.js``/``.css``
-   uploads turn the upload bucket into an XSS hosting platform when fetched
-   from the same origin as the chat UI.
+3. **Browser-renderable formats** — ``.html``/``.js``/``.css``/``.ts`` are
+   accepted as text, which is safe only because ``UploadedFile.url`` forces
+   ``Content-Disposition: attachment`` and files are served from the storage
+   origin, never the chat UI's origin. Keep both true or drop these again.
 
-This module fixes all three: it sniffs the actual content type with libmagic
-and matches it against an explicit per-extension allowlist. Callers should
-treat ``ValidationError`` as "reject the upload" and persist the returned
-``sniffed_mime`` rather than the client-supplied one. ``.html``/``.js``/``.css``/
-``.ts`` are no longer in the upload allowlist; share code via fenced-code
-markdown messages instead.
+This module sniffs the actual content type with libmagic and matches it
+against an explicit per-extension allowlist. Callers should treat
+``ValidationError`` as "reject the upload" and persist the returned
+``sniffed_mime`` rather than the client-supplied one.
 
 libmagic versions vary (esp. on text/source files) so we accept a small set
 of equivalent MIME strings per extension and fall back to a "starts-with
@@ -42,7 +41,6 @@ EXTENSION_MIME_MAP: dict[str, frozenset[str]] = {
     "gif": frozenset({"image/gif"}),
     "pdf": frozenset({"application/pdf"}),
     "json": frozenset({"application/json"}),
-    "sql": frozenset({"application/sql"}),
     "doc": frozenset({"application/msword"}),
     "docx": frozenset({"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}),
     "xls": frozenset({"application/vnd.ms-excel"}),

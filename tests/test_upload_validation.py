@@ -15,6 +15,8 @@ from app.models import UploadedFile
 from app.services.upload_validation import (
     ALLOWED_EXTENSIONS,
     AVATAR_EXTENSIONS,
+    EXTENSION_MIME_MAP,
+    TEXT_EXTENSIONS,
     ValidationError,
     validate_upload,
 )
@@ -73,6 +75,30 @@ class TestSniffMatches:
         assert result.sniffed_mime.startswith("text/")
 
 
+class TestNewExtensions:
+    @pytest.mark.parametrize(
+        "ext",
+        ["sql", "csv", "yaml", "yml", "toml", "log", "go", "cs", "tsx", "ts", "js", "css", "html"],
+    )
+    def test_text_extension_accepted(self, tmp_path, ext):
+        payload = b"SELECT 1;\n" if ext == "sql" else b"some plain text\n"
+        result = validate_upload(_write(tmp_path, f"x.{ext}", payload), f"x.{ext}")
+        assert result.extension == ext
+        assert result.sniffed_mime.startswith("text/")
+
+    def test_json_accepted(self, tmp_path):
+        result = validate_upload(
+            _write(tmp_path, "x.json", b'{"a": [1, 2, 3]}\n'), "data.json"
+        )
+        assert result.sniffed_mime == "application/json"
+
+    @pytest.mark.parametrize("ext", ["webp", "doc", "docx", "xls", "xlsx"])
+    def test_png_disguised_as_new_binary_type(self, tmp_path, ext):
+        path = _write(tmp_path, f"x.{ext}", TINY_PNG)
+        with pytest.raises(ValidationError, match="do not match"):
+            validate_upload(path, f"x.{ext}")
+
+
 class TestSniffRejects:
     def test_renamed_executable(self, tmp_path):
         """The single most important assertion: an MZ-header binary uploaded
@@ -99,7 +125,7 @@ class TestSniffRejects:
 
 
 class TestExtensionAllowlist:
-    @pytest.mark.parametrize("blocked_ext", ["html", "js", "css", "ts", "exe", "sh"])
+    @pytest.mark.parametrize("blocked_ext", ["exe", "sh", "bat"])
     def test_dropped_extension_rejected(self, tmp_path, blocked_ext):
         """Extensions removed from the allowlist must be refused even when
         the bytes look fine for that extension."""
@@ -112,9 +138,15 @@ class TestExtensionAllowlist:
         with pytest.raises(ValidationError, match="must have an extension"):
             validate_upload(path, "noext")
 
-    def test_html_js_css_ts_not_in_allowlist(self):
+    def test_html_js_css_ts_in_allowlist(self):
+        """Allowed on purpose: served as attachments from the storage origin."""
         for ext in ("html", "js", "css", "ts"):
-            assert ext not in ALLOWED_EXTENSIONS
+            assert ext in ALLOWED_EXTENSIONS
+
+    def test_no_extension_in_both_rules(self):
+        """An extension in both maps hits the binary rule first, so text
+        files (e.g. .sql sniffed as text/plain) would be wrongly rejected."""
+        assert not (set(EXTENSION_MIME_MAP) & TEXT_EXTENSIONS)
 
     def test_avatar_subset_is_image_only(self):
         for ext in AVATAR_EXTENSIONS:
@@ -201,9 +233,11 @@ class TestApiUploadEndpoint:
         assert res.get_json()["mime_type"] == "image/png"
         assert UploadedFile.get().mime_type == "image/png"
 
-    def test_dropped_html_extension_rejected(self, client):
-        """HTML uploads were on the allowlist before; now they're refused
-        outright with no chance to slip through via lying bytes."""
+    def test_html_upload_accepted(self, client, mocker):
+        """HTML is allowed again; it is only ever served as an attachment."""
+        mocker.patch(
+            "app.blueprints.api_v1.minio_service.upload_file", return_value=True
+        )
         token = self._login(client)
 
         res = client.post(
@@ -213,8 +247,18 @@ class TestApiUploadEndpoint:
             headers={"Authorization": f"Bearer {token}"},
         )
 
-        assert res.status_code == 400
-        assert "not allowed" in res.get_json()["error"]
+        assert res.status_code == 201
+        assert UploadedFile.get().original_filename == "page.html"
+
+
+def test_uploaded_file_url_forces_attachment(mocker):
+    """The html/js allowlist is only safe while downloads stay attachments."""
+    presign = mocker.patch(
+        "app.models.minio_service.get_presigned_url", return_value="u"
+    )
+    UploadedFile(stored_filename="k", original_filename="page.html").url
+    headers = presign.call_args.kwargs["response_headers"]
+    assert headers["response-content-disposition"].startswith("attachment;")
 
 
 class TestWebUploadEndpoint:
