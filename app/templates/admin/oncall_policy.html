@@ -180,6 +180,18 @@
                     just move on to the next level.
                 </div>
             </div>
+            <div class="mb-3">
+                <label class="form-label" for="policy-alarm">Alarm</label>
+                <select class="form-select" id="policy-alarm" name="alarm">
+                    {% for alarm in alarms %}
+                        <option value="{{ alarm }}" {% if policy.alarm == alarm %}selected{% endif %}>{{ alarm_labels[alarm] }}</option>
+                    {% endfor %}
+                </select>
+                <div class="form-text">
+                    What the pager plays. The siren loops until someone acknowledges; the ka-ching plays every 5
+                    seconds for the first minute, then every 10.
+                </div>
+            </div>
             <div class="mb-3 form-check form-switch">
                 <input class="form-check-input"
                        type="checkbox"
@@ -188,7 +200,7 @@
                        name="is_active"
                        {% if policy.is_active %}checked{% endif %}>
                 <label class="form-check-label" for="policy-active">
-                    Paging enabled (off = DOWN events are posted but nobody is paged)
+                    Paging enabled (off = alerts are posted but nobody is paged)
                 </label>
             </div>
             <button type="submit" class="btn btn-primary">Save settings</button>

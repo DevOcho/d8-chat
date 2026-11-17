@@ -1057,3 +1057,532 @@ def test_admin_edit_user_sets_local_groups(admin_client, oncall):
     assert names == {"director", "ceo"}
     page = admin_client.get(f"/admin/users/edit/{user.id}").get_data(as_text=True)
     assert "director, ceo" in page or "ceo, director" in page
+
+
+# --- Website leads: D8 page requests through internal notify ---
+
+NOTIFY_HEADERS = {"X-Internal-Key": "test-internal-notify-key"}
+
+
+@pytest.fixture
+def leads(oncall):
+    """#website-leads with the "Website leads" policy (ka-ching: group sdr,
+    then group ceo after 15 minutes), two SDRs, and the default outage setup
+    from ``oncall`` (whose ceo is also the leads policy's level 2)."""
+    workspace = Workspace.get(name="DevOcho")
+    channel, policy = oncall_service.ensure_leads_paging(workspace)
+    return SimpleNamespace(
+        channel=channel,
+        policy=policy,
+        bot=User.get(User.username == oncall_service.D8_BOT_USERNAME),
+        sam=_user("sam", ["sdr"]),
+        ana=_user("ana", ["SDR"]),
+        ceo=oncall.ceo,
+        oncall=oncall,
+    )
+
+
+def _lead_page(client, key="d8-lead:101", channel="website-leads", **page):
+    body = {
+        "channel_name": channel,
+        "message": "💰 **New website lead**: Dana Whitfield at Meridian Health",
+        "page": {
+            "key": key,
+            "title": "New website lead: Dana Whitfield at Meridian Health",
+            "details": "Filled in the Contact page form. Sam has it.",
+            "url": "https://new-d8.devocho.com/marketing/leads/12",
+            **page,
+        },
+    }
+    return client.post("/api/v1/internal/notify", json=body, headers=NOTIFY_HEADERS)
+
+
+def test_leads_policy_is_ka_ching_sdrs_then_ceo_after_15_minutes(leads):
+    levels = oncall_service.sorted_levels(leads.policy)
+    assert leads.policy.alarm == "ka-ching"
+    assert leads.policy.no_oncall_start_level is None
+    assert [
+        (lv.level, lv.target_type, lv.target_group, lv.delay_minutes) for lv in levels
+    ] == [
+        (1, "group", "sdr", 0),
+        (2, "group", "ceo", 15),
+    ]
+    assert leads.bot.display_name == "D8" and leads.bot.is_active is False
+    # Idempotent, and an admin's edits survive a second run.
+    leads.policy.alarm = "siren"
+    leads.policy.save()
+    _channel, again = oncall_service.ensure_leads_paging(Workspace.get(name="DevOcho"))
+    assert again.id == leads.policy.id and again.alarm == "siren"
+
+
+def test_a_lead_page_pages_every_sdr_with_the_ka_ching(client, leads):
+    res = _lead_page(client)
+
+    assert res.status_code == 200
+    body = res.get_json()
+    assert body["ok"] is True and body["repeat"] is False
+    incident = Incident.get_by_id(body["incident_id"])
+    assert (incident.source, incident.dedupe_key) == ("d8", "d8:d8-lead:101")
+    assert incident.title == "New website lead: Dana Whitfield at Meridian Health"
+    assert incident.source_url == "https://new-d8.devocho.com/marketing/leads/12"
+    assert incident.message.user == leads.bot
+    assert _paged_ids(incident) == {leads.sam.id, leads.ana.id}
+    assert incident.next_escalation_at == NOW + 15 * MINUTE
+    (frame,) = _frames(leads.sam.id, "page")
+    assert frame["incident"]["alarm"] == "ka-ching"
+    assert frame["incident"]["id"] == incident.id
+    # Nobody outside the policy is paged.
+    assert _frames(leads.ceo.id, "page") == []
+    assert _frames(leads.oncall.eng.id, "page") == []
+
+
+def test_nobody_acknowledges_and_the_ceo_is_paged_at_15_minutes(client, leads):
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+
+    assert oncall_service.run_escalations(NOW + 14 * MINUTE) == []
+    oncall_service.run_escalations(NOW + 15 * MINUTE)
+
+    assert _paged_ids(incident) == {leads.sam.id, leads.ana.id, leads.ceo.id}
+    escalated = Message.select().order_by(Message.id.desc()).first()
+    assert escalated.user == leads.bot
+    assert "Escalated" in escalated.content and "Ceo" in escalated.content
+    # Cumulative: the SDRs keep ringing alongside the CEO.
+    resent = oncall_service.resend_pages(NOW + 16 * MINUTE)
+    assert [i.id for i in resent] == [incident.id]
+    assert len(_frames(leads.sam.id, "page")) == 2
+
+
+def test_with_no_sdrs_the_ceo_is_paged_at_once(client, leads):
+    UserGroup.delete().where(UserGroup.name == "sdr").execute()
+
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+
+    assert _paged_ids(incident) == {leads.ceo.id}
+
+
+def test_an_sdr_acknowledges_and_d8_says_so(client, leads):
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+    _login(client, leads.ana)
+
+    res = client.post(f"/oncall/incidents/{incident.id}/ack")
+
+    assert res.get_json()["ok"] is True
+    incident = Incident.get_by_id(incident.id)
+    assert (incident.state, incident.acknowledged_by) == ("acknowledged", leads.ana)
+    assert incident.next_escalation_at is None
+    assert _frames(leads.sam.id, "page_cleared")
+    acked = Message.select().order_by(Message.id.desc()).first()
+    assert acked.user == leads.bot and "Acknowledged" in acked.content
+    assert oncall_service.run_escalations(NOW + 20 * MINUTE) == []
+
+
+def test_the_same_key_while_open_posts_but_pages_nobody_again(client, leads):
+    first = _lead_page(client).get_json()
+    again = _lead_page(client).get_json()
+
+    assert again == {"ok": True, "incident_id": first["incident_id"], "repeat": True}
+    assert Incident.select().count() == 1
+    assert len(_frames(leads.sam.id, "page")) == 1
+    assert Message.select().where(Message.user == leads.bot).count() == 2  # both posted
+    kinds = [e.kind for e in IncidentEvent.select().order_by(IncidentEvent.id)]
+    assert "repeat_page" in kinds
+
+
+def test_a_different_key_is_a_new_page(client, leads):
+    _lead_page(client, key="d8-lead:101")
+    _lead_page(client, key="d8-lead:104")
+
+    assert Incident.select().count() == 2
+
+
+@pytest.mark.parametrize("paging", ["no policy", "paging off"])
+def test_without_active_paging_a_lead_is_only_posted(client, leads, paging):
+    if paging == "no policy":
+        leads.policy.delete_instance(recursive=True)
+    else:
+        leads.policy.is_active = False
+        leads.policy.save()
+
+    res = _lead_page(client)
+
+    assert res.get_json() == {"ok": True, "incident_id": None, "repeat": False}
+    assert Incident.select().count() == 0
+    assert Message.select().where(Message.user == leads.bot).count() == 1
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        "not an object",
+        {"title": "no key"},
+        {"key": "", "title": "empty key"},
+        {"key": "k" * 201, "title": "key too long"},
+        {"key": "d8-lead:1"},
+        {"key": "d8-lead:1", "title": "   "},
+        {"key": "d8-lead:1", "title": "t", "details": 5},
+        {"key": "d8-lead:1", "title": "t", "url": "javascript:alert(1)"},
+    ],
+)
+def test_a_malformed_page_request_is_refused(client, leads, page):
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={"channel_name": "website-leads", "message": "hi", "page": page},
+        headers=NOTIFY_HEADERS,
+    )
+
+    assert res.status_code == 400
+    assert Message.select().count() == 0
+
+
+def test_a_page_request_needs_the_shared_secret(client, leads):
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={
+            "channel_name": "website-leads",
+            "message": "hi",
+            "page": {"key": "d8-lead:1", "title": "t"},
+        },
+        headers={"X-Internal-Key": "wrong"},
+    )
+
+    assert res.status_code == 401
+    assert Incident.select().count() == 0
+
+
+def test_a_page_request_without_the_d8_bot_is_an_error(client, leads):
+    leads.bot.delete_instance(recursive=True)
+
+    res = _lead_page(client)
+
+    assert res.status_code == 500
+    assert "d8-bot" in res.get_json()["error"]
+
+
+def test_a_lead_card_has_no_resolve_button(client, leads):
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+    ChannelMember.create(user=leads.sam, channel=leads.channel)
+    _login(client, leads.sam)
+
+    html = client.get(f"/chat/channel/{leads.channel.id}").get_data(as_text=True)
+
+    assert f"incident-card-{incident.id}" in html and "Acknowledge" in html
+    assert f"/oncall/incidents/{incident.id}/resolve" not in html
+
+
+def test_an_outage_card_keeps_its_resolve_button(client, oncall):
+    res = client.post(
+        "/api/v1/integrations/uptime-kuma", json=_kuma(0), headers=KUMA_HEADERS
+    )
+    incident_id = res.get_json()["incident_id"]
+    ChannelMember.create(user=oncall.eng, channel=oncall.channel)
+    _login(client, oncall.eng)
+
+    html = client.get(f"/chat/channel/{oncall.channel.id}").get_data(as_text=True)
+
+    assert f"/oncall/incidents/{incident_id}/resolve" in html
+
+
+def test_a_lead_push_is_worded_as_a_lead(client, leads, mocker):
+    send_page = mocker.patch.object(oncall_service.push_service, "send_page")
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+    send_page.reset_mock()
+
+    oncall_service._push_pages(incident.id, [leads.sam.id])
+
+    kwargs = send_page.call_args.kwargs
+    assert kwargs["title"] == "💰 New website lead: Dana Whitfield at Meridian Health"
+    assert kwargs["body"] == "Filled in the Contact page form. Sam has it."
+    assert kwargs["data"]["alarm"] == "ka-ching"
+
+
+def test_an_outage_push_is_still_worded_as_an_outage(oncall, mocker):
+    send_page = mocker.patch.object(oncall_service.push_service, "send_page")
+    _trigger(oncall)
+
+    kwargs = send_page.call_args.kwargs
+    assert kwargs["title"] == "🚨 DOWN: Acme site"
+    assert kwargs["data"]["alarm"] == "siren"
+
+
+def test_an_incident_whose_policy_is_gone_rings_the_siren(client, leads):
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+    leads.policy.delete_instance(recursive=True)
+
+    assert (
+        oncall_service.serialize_incident(Incident.get_by_id(incident.id))["alarm"]
+        == "siren"
+    )
+
+
+def test_the_test_page_rings_the_alarms_i_can_be_paged_with(client, leads):
+    both = _user("both", ["sdr", "director"])
+    outsider = _user("outsider")
+    cases = {
+        leads.sam: ["ka-ching"],
+        leads.oncall.eng: ["siren"],
+        both: ["siren", "ka-ching"],
+        outsider: ["siren"],
+    }
+    for user, alarms in cases.items():
+        _login(client, user)
+        assert client.post("/oncall/test-page").status_code == 204
+        frames = _frames(user.id, "page")
+        assert [f["incident"]["alarm"] for f in frames] == alarms, user.username
+        assert all(f["test"] for f in frames)
+        assert len({f["incident"]["id"] for f in frames}) == len(frames)
+    assert Incident.select().count() == 0
+
+
+def test_an_admin_sets_a_policys_alarm(admin_client, leads):
+    url = f"/admin/oncall/policies/{leads.oncall.policy.id}/settings"
+    page = admin_client.get(f"/admin/oncall/policies/{leads.policy.id}")
+    assert 'value="ka-ching" selected' in page.get_data(as_text=True)
+
+    admin_client.post(
+        url, data={"name": "DevOps Uptime", "is_active": "on", "alarm": "ka-ching"}
+    )
+    assert (
+        oncall_service.EscalationPolicy.get_by_id(leads.oncall.policy.id).alarm
+        == "ka-ching"
+    )
+
+    admin_client.post(
+        url, data={"name": "DevOps Uptime", "is_active": "on", "alarm": "kazoo"}
+    )
+    assert (
+        oncall_service.EscalationPolicy.get_by_id(leads.oncall.policy.id).alarm
+        == "ka-ching"
+    )
+
+    # A form without the field (an older page) keeps the alarm.
+    admin_client.post(url, data={"name": "DevOps Uptime", "is_active": "on"})
+    assert (
+        oncall_service.EscalationPolicy.get_by_id(leads.oncall.policy.id).alarm
+        == "ka-ching"
+    )
+
+
+def test_the_helpdesk_post_is_unchanged_without_a_page(client, leads):
+    from tests.test_api_v1 import _seed_helpdesk
+
+    helpdesk_bot, channel = _seed_helpdesk()
+
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={"channel_name": channel.name, "message": "[NEW] Ticket #1"},
+        headers=NOTIFY_HEADERS,
+    )
+
+    assert res.get_json() == {"ok": True}
+    assert Message.get(Message.content == "[NEW] Ticket #1").user == helpdesk_bot
+    assert Incident.select().count() == 0
+
+
+# --- The interview day: the website's page requests naming who has to act ---
+
+
+@pytest.fixture
+def interview(leads):
+    """#interview-day with the "Interview day" policy (chime: whoever a page
+    names, else group hr, then group engineering-manager after 10 minutes),
+    two graders, an HR coordinator and an engineering manager."""
+    workspace = Workspace.get(name="DevOcho")
+    channel, policy = oncall_service.ensure_interview_paging(workspace)
+    return SimpleNamespace(
+        channel=channel,
+        policy=policy,
+        bot=leads.bot,
+        g1=_user("grader1"),
+        g2=_user("grader2"),
+        hr=_user("hrc", ["hr"]),
+        em=_user("emgr", ["engineering-manager"]),
+        leads=leads,
+    )
+
+
+def _interview_page(client, key="iv-grade:20:grader1@example.com", **page):
+    body = {
+        "channel_name": "interview-day",
+        "message": "🔔 **Please grade** Jose Pasante's Developer internship exercise.",
+        "page": {
+            "key": key,
+            "title": "Please grade Jose Pasante's exercise",
+            "details": "He finished the Developer internship exercise at 10:47.",
+            "url": "https://interview.local/admin/sessions/20/grade",
+            "to": ["grader1@example.com"],
+            **page,
+        },
+    }
+    return client.post("/api/v1/internal/notify", json=body, headers=NOTIFY_HEADERS)
+
+
+def test_interview_policy_is_a_private_chime_then_the_engineering_managers(interview):
+    levels = oncall_service.sorted_levels(interview.policy)
+    assert interview.policy.alarm == "chime"
+    assert interview.channel.is_private is True
+    assert [
+        (lv.level, lv.target_type, lv.target_group, lv.delay_minutes) for lv in levels
+    ] == [
+        (1, "group", "hr", 0),
+        (2, "group", "engineering-manager", 10),
+    ]
+    assert ChannelMember.get_or_none(user=interview.bot, channel=interview.channel)
+    # Idempotent, and an admin's edits survive a second run.
+    interview.policy.alarm = "ka-ching"
+    interview.policy.save()
+    _channel, again = oncall_service.ensure_interview_paging(
+        Workspace.get(name="DevOcho")
+    )
+    assert again.id == interview.policy.id and again.alarm == "ka-ching"
+
+
+def test_a_page_naming_people_pages_exactly_them_with_the_chime(client, interview):
+    res = _interview_page(
+        client, to=["grader1@example.com", "GRADER2@Example.com", "nobody@example.com"]
+    )
+
+    body = res.get_json()
+    assert res.status_code == 200
+    assert body["repeat"] is False and body["unmatched"] == ["nobody@example.com"]
+    incident = Incident.get_by_id(body["incident_id"])
+    assert _paged_ids(incident) == {interview.g1.id, interview.g2.id}
+    assert incident.current_level == 1
+    assert incident.next_escalation_at == NOW + 10 * MINUTE
+    (frame,) = _frames(interview.g1.id, "page")
+    assert frame["incident"]["alarm"] == "chime"
+    # HR (the first level) and the engineering manager are not paged yet.
+    assert _frames(interview.hr.id, "page") == []
+    assert _frames(interview.em.id, "page") == []
+
+
+def test_nobody_named_acknowledges_and_the_engineering_manager_is_paged(
+    client, interview
+):
+    incident = Incident.get_by_id(_interview_page(client).get_json()["incident_id"])
+
+    assert oncall_service.run_escalations(NOW + 9 * MINUTE) == []
+    oncall_service.run_escalations(NOW + 10 * MINUTE)
+
+    assert _paged_ids(incident) == {interview.g1.id, interview.em.id}
+    assert _frames(interview.hr.id, "page") == []
+
+
+def test_a_named_person_acknowledges_their_own_page(client, interview):
+    first = _interview_page(client).get_json()
+    second = _interview_page(
+        client, key="iv-grade:20:grader2@example.com", to=["grader2@example.com"]
+    ).get_json()
+    _login(client, interview.g1)
+
+    res = client.post(f"/oncall/incidents/{first['incident_id']}/ack")
+
+    assert res.get_json()["ok"] is True
+    assert Incident.get_by_id(first["incident_id"]).state == "acknowledged"
+    # Each grader has a page of their own: the other is still ringing.
+    assert Incident.get_by_id(second["incident_id"]).state == "triggered"
+
+
+def test_a_page_naming_nobody_known_pages_hr(client, interview):
+    res = _interview_page(client, to=["stranger@example.com"])
+
+    body = res.get_json()
+    assert body["unmatched"] == ["stranger@example.com"]
+    assert _paged_ids(Incident.get_by_id(body["incident_id"])) == {interview.hr.id}
+
+
+def test_an_inactive_person_is_not_paged(client, interview):
+    interview.g1.is_active = False
+    interview.g1.save()
+
+    body = _interview_page(client).get_json()
+
+    assert body["unmatched"] == ["grader1@example.com"]
+    assert _paged_ids(Incident.get_by_id(body["incident_id"])) == {interview.hr.id}
+
+
+def test_a_repeat_of_an_open_page_still_reports_who_matched_nobody(client, interview):
+    first = _interview_page(client, to=["grader1@example.com", "x@example.com"])
+    again = _interview_page(client, to=["grader1@example.com", "x@example.com"])
+
+    assert again.get_json() == {
+        "ok": True,
+        "incident_id": first.get_json()["incident_id"],
+        "repeat": True,
+        "unmatched": ["x@example.com"],
+    }
+    assert len(_frames(interview.g1.id, "page")) == 1
+
+
+@pytest.mark.parametrize(
+    "to",
+    [
+        "grader1@example.com",
+        [],
+        ["not an email"],
+        [5],
+        ["a@example.com"] * 11,
+        ["a" * 250 + "@example.com"],
+    ],
+)
+def test_a_malformed_to_is_refused(client, interview, to):
+    res = _interview_page(client, to=to)
+
+    assert res.status_code == 400
+    assert Incident.select().count() == 0
+
+
+def test_a_chime_sends_one_ordinary_notification_not_the_phone_alarm(
+    client, interview, mocker
+):
+    send_page = mocker.patch.object(oncall_service.push_service, "send_page")
+    send_to_user = mocker.patch.object(oncall_service.push_service, "send_to_user")
+    incident = Incident.get_by_id(_interview_page(client).get_json()["incident_id"])
+    send_to_user.reset_mock()
+
+    oncall_service._push_pages(incident.id, [interview.g1.id])
+
+    send_page.assert_not_called()
+    kwargs = send_to_user.call_args.kwargs
+    assert kwargs["title"] == "🔔 Please grade Jose Pasante's exercise"
+    assert kwargs["body"] == "He finished the Developer internship exercise at 10:47."
+    assert kwargs["data"]["type"] == "page_notice"
+    assert kwargs["data"]["conversation_id_str"] == f"channel_{interview.channel.id}"
+
+    # The minute's re-send rings the browser again, not the phone.
+    send_to_user.reset_mock()
+    oncall_service._push_pages(incident.id, [interview.g1.id], repeat=True)
+    send_to_user.assert_not_called()
+
+
+def test_the_test_page_chimes_for_someone_in_the_interview_channel(
+    client, interview, mocker
+):
+    send_page = mocker.patch.object(oncall_service.push_service, "send_page")
+    send_to_user = mocker.patch.object(oncall_service.push_service, "send_to_user")
+    ChannelMember.create(user=interview.g1, channel=interview.channel)
+    _login(client, interview.g1)
+
+    assert client.post("/oncall/test-page").status_code == 204
+
+    frames = _frames(interview.g1.id, "page")
+    assert [f["incident"]["alarm"] for f in frames] == ["chime"]
+    send_page.assert_not_called()
+    assert send_to_user.call_args.kwargs["title"] == "🔔 Test page"
+
+
+def test_an_admin_can_choose_the_chime(admin_client, interview):
+    page = admin_client.get(f"/admin/oncall/policies/{interview.policy.id}")
+    assert 'value="chime" selected' in page.get_data(as_text=True)
+
+
+def test_acknowledging_a_chime_sends_the_phone_nothing_more(client, interview, mocker):
+    send_page_cleared = mocker.patch.object(
+        oncall_service.push_service, "send_page_cleared"
+    )
+    incident = Incident.get_by_id(_interview_page(client).get_json()["incident_id"])
+    _login(client, interview.g1)
+
+    client.post(f"/oncall/incidents/{incident.id}/ack")
+
+    assert _frames(interview.g1.id, "page_cleared")
+    send_page_cleared.assert_not_called()

@@ -12,6 +12,7 @@ import {
 } from './helpers/fixtures.js';
 
 const RESYNC_MS = 30000;
+const KACHING_TOPUP_MS = 15000;
 
 /**
  * @param {object} o
@@ -599,5 +600,279 @@ describe('incident timestamps', () => {
         </div>`);
         await env.tick(0);
         expect(env.$('#incident-card-42 .incident-time').textContent).toBe(localTime(env, '2026-10-17T14:05:00'));
+    });
+});
+
+describe('ka-ching (website leads from D8)', () => {
+    const BELL_HZ = 2093;
+    const lead = (overrides = {}) => incident({
+        id: 77,
+        title: 'New website lead: Dana Whitfield at Meridian Health Systems',
+        details: 'Filled in the Contact page form. Sam SDR has it.',
+        source: 'd8',
+        source_url: 'https://new-d8.local/marketing/leads/12',
+        alarm: 'ka-ching',
+        channel_name: 'website-leads',
+        message_id: 901,
+        ...overrides,
+    });
+    const ctxOf = (env) => env.state.audioContexts[0];
+    // When each scheduled ka-ching plays, from its bell's start (struck 0.09 s
+    // after the "ka"), relative to when the alarm started (`from`, plus the
+    // 0.05 s the first one is held back).
+    const kachings = (env, from = 0, sinceIndex = 0) => ctxOf(env).oscillators.slice(sinceIndex)
+        .filter((o) => o.frequency.value === BELL_HZ)
+        .map((o) => Math.round((o.startAt - 0.09 - 0.05 - from) * 1000) / 1000);
+    const masters = (env) => ctxOf(env).gains.filter((g) => g.gain.value === 0.5
+        && g.connect.mock.calls.some(([dest]) => dest === ctxOf(env).destination));
+    const liveMasters = (env) => masters(env).filter((g) => g.disconnect.mock.calls.length === 0);
+    const ringingLead = async (inc = lead()) => {
+        const env = await pagerEnv();
+        await env.openSocket();
+        await env.frame(pageFrame(inc));
+        return env;
+    };
+
+    it('plays every 5 s for the first minute, then every 10 s, on the audio clock', async () => {
+        const env = await ringingLead();
+
+        const fast = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
+        // Scheduled 180 s ahead: the one due at 180 s goes on the next top-up.
+        const slow = [70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170];
+        expect(kachings(env)).toEqual([...fast, ...slow]);
+        expect(sirenOn(env)).toBe(false);
+        expect(ctxOf(env).oscillators.some((o) => o.type === 'square')).toBe(false);
+        expect(ctxOf(env).bufferSources.map((s) => Math.round((s.startAt - 0.05) * 1000) / 1000))
+            .toEqual([...fast, ...slow]);
+        expect(env.eval('[0, 12, 13, 14].map(PagerManager.kachingOffset)')).toEqual([0, 60, 70, 80]);
+    });
+
+    it('tops the schedule up as the audio clock runs, without repeating one', async () => {
+        const env = await ringingLead();
+        ctxOf(env).currentTime = 100;
+        await env.tick(15000);
+
+        const times = kachings(env);
+        expect(times.at(-1)).toBe(270);
+        expect(new Set(times).size).toBe(times.length);
+    });
+
+    it('skips the ka-chings a sleeping tab missed instead of playing them all at once', async () => {
+        const env = await ringingLead();
+        ctxOf(env).currentTime = 500;
+        await env.tick(15000);
+
+        const late = kachings(env).filter((t) => t > 180);
+        expect(late.length).toBeGreaterThan(0);
+        expect(late.every((t) => t >= 500 - 0.05)).toBe(true);
+    });
+
+    it('a new lead starts the fast minute again; a repeat of the same one does not', async () => {
+        const env = await ringingLead();
+        ctxOf(env).currentTime = 120;
+        await env.frame(pageFrame(lead(), { repeat: true }));
+        expect(liveMasters(env)).toHaveLength(1);
+        expect(masters(env)).toHaveLength(1);
+
+        const before = ctxOf(env).oscillators.length;
+        await env.frame(pageFrame(lead({ id: 78, title: 'New website lead: Luis Ortega' })));
+
+        expect(masters(env)).toHaveLength(2);
+        expect(liveMasters(env)).toHaveLength(1);
+        expect(kachings(env, 120, before).slice(0, 4)).toEqual([0, 5, 10, 15]);
+    });
+
+    it('stops when the page is cleared, including the ka-chings already scheduled', async () => {
+        const env = await ringingLead();
+        await env.frame(pageClearedFrame(lead()));
+
+        expect(overlay(env).hidden).toBe(true);
+        expect(liveMasters(env)).toHaveLength(0);
+        const sources = [...ctxOf(env).oscillators, ...ctxOf(env).bufferSources];
+        expect(sources.every((s) => s.stop.mock.calls.length >= 1)).toBe(true);
+        const scheduled = kachings(env).length;
+        ctxOf(env).currentTime = 200;
+        await env.tick(KACHING_TOPUP_MS * 2);
+        expect(kachings(env)).toHaveLength(scheduled);
+    });
+
+    it('Acknowledge silences it at once, offline too, until the server re-sends it', async () => {
+        const env = await pagerEnv({
+            fetchRoutes: [{ match: '/oncall/incidents/77/ack', reply: new TypeError('Failed to fetch') }],
+        });
+        await env.openSocket();
+        await env.frame(pageFrame(lead()));
+        expect(liveMasters(env)).toHaveLength(1);
+
+        env.$('[data-pager-ack="77"]').click();
+        await env.flush();
+
+        expect(overlay(env).hidden).toBe(false);
+        expect(liveMasters(env)).toHaveLength(0);
+        expect(env.$('[data-incident-id="77"] .pager-incident-silenced')).not.toBeNull();
+
+        await env.frame(pageFrame(lead(), { repeat: true }));
+        expect(liveMasters(env)).toHaveLength(1);
+    });
+
+    it('reads as a lead and links to it in D8', async () => {
+        const env = await ringingLead();
+        const [row] = rows(env);
+
+        expect(row.querySelector('.pager-incident-title').textContent)
+            .toBe('💰 New website lead: Dana Whitfield at Meridian Health Systems');
+        const metas = [...row.querySelectorAll('.pager-incident-meta')].map((m) => m.textContent);
+        expect(metas[0]).toBe(`#website-leads · since ${localTime(env, '2026-10-17T13:58:00')}`);
+        const open = row.querySelector('a.btn');
+        expect(open.textContent).toBe('Open the lead in D8');
+        expect(open.href).toBe('https://new-d8.local/marketing/leads/12');
+        expect(open.target).toBe('_blank');
+        expect(open.rel).toBe('noopener noreferrer');
+        expect(env.notifications[0].title).toBe('💰 New website lead: Dana Whitfield at Meridian Health Systems');
+        await env.tick(1000);
+        expect(env.document.title).toBe('💰 LEAD: New website lead: Dana Whitfield at Meridian Health Systems');
+    });
+
+    it('does not link a URL that is not http(s)', async () => {
+        const env = await ringingLead(lead({ source_url: 'javascript:alert(1)' }));
+        expect(rows(env)[0].querySelector('a.btn')).toBeNull();
+    });
+
+    it('plays both alarms for a lead and an outage, and keeps the ka-ching when the outage clears', async () => {
+        const env = await ringingLead();
+        await env.frame(pageFrame(incident()));
+        expect(sirenOn(env)).toBe(true);
+        expect(liveMasters(env)).toHaveLength(1);
+
+        await env.frame(pageClearedFrame(incident()));
+        expect(sirenOn(env)).toBe(false);
+        expect(liveMasters(env)).toHaveLength(1);
+        expect(overlay(env).hidden).toBe(false);
+    });
+
+    it('plays the ka-ching for a test page that asks for it', async () => {
+        const env = await pagerEnv();
+        await env.openSocket();
+        const frame = testPageFrame('test-1792245600-ka-ching');
+        frame.incident.alarm = 'ka-ching';
+        await env.frame(frame);
+
+        expect(kachings(env).slice(0, 3)).toEqual([0, 5, 10]);
+        expect(sirenOn(env)).toBe(false);
+    });
+
+    it('shows the "click to start the alarm" hint while autoplay is blocked', async () => {
+        const env = await pagerEnv({ autoplayBlocked: true });
+        await env.openSocket();
+        await env.frame(pageFrame(lead()));
+        expect(env.$('#pager-sound-hint').hidden).toBe(false);
+    });
+});
+
+describe('chime (the interview day)', () => {
+    const CHIME_HZ = 988;
+    const call = (overrides = {}) => incident({
+        id: 91,
+        title: "Please grade Jose Pasante's exercise",
+        details: 'He finished the Developer internship exercise at 10:47.',
+        source: 'd8',
+        source_url: 'https://interview.local/admin/sessions/20/grade',
+        alarm: 'chime',
+        channel_name: 'interview-day',
+        message_id: 950,
+        ...overrides,
+    });
+    const ctxOf = (env) => env.state.audioContexts[0];
+    // When each scheduled chime starts (its first beep), relative to the alarm.
+    const chimes = (env) => ctxOf(env).oscillators
+        .filter((o) => o.frequency.value === CHIME_HZ)
+        .map((o) => Math.round((o.startAt - 0.05) * 1000) / 1000)
+        .filter((_, i) => i % 4 === 0);
+    const masters = (env, gain) => ctxOf(env).gains.filter((g) => g.gain.value === gain
+        && g.connect.mock.calls.some(([dest]) => dest === ctxOf(env).destination));
+    const ringingCall = async (inc = call()) => {
+        const env = await pagerEnv();
+        await env.openSocket();
+        await env.frame(pageFrame(inc));
+        return env;
+    };
+
+    it('is a banner in the corner, not the full screen', async () => {
+        const env = await ringingCall();
+
+        expect(overlay(env).hidden).toBe(false);
+        expect(overlay(env).classList.contains('pager-overlay--banner')).toBe(true);
+        expect(overlay(env).getAttribute('aria-modal')).toBe('false');
+        expect(env.$('#pager-heading-text').textContent).toBe("You're needed");
+        expect(env.$('#pager-footer').textContent).toContain('stops the chime');
+    });
+
+    it('chimes every 10 s for the first minute, then every 20 s, quietly and with no siren', async () => {
+        const env = await ringingCall();
+
+        // Scheduled 180 s ahead: the one due at 180 s goes on the next top-up.
+        expect(chimes(env)).toEqual([0, 10, 20, 30, 40, 50, 60, 80, 100, 120, 140, 160]);
+        expect(env.eval('[0, 6, 7, 8].map((n) => PagerManager.cueOffset("chime", n))')).toEqual([0, 60, 80, 100]);
+        expect(masters(env, 0.16)).toHaveLength(1);
+        expect(masters(env, 0.5)).toHaveLength(0);
+        expect(ctxOf(env).oscillators.every((o) => o.type === 'sine')).toBe(true);
+        expect(ctxOf(env).bufferSources).toHaveLength(0);
+    });
+
+    it('reads as a call and links what it is about', async () => {
+        const env = await ringingCall();
+        const [row] = rows(env);
+
+        expect(row.querySelector('.pager-incident-title').textContent).toBe("🔔 Please grade Jose Pasante's exercise");
+        const open = row.querySelector('a.btn');
+        expect(open.textContent).toBe('Open');
+        expect(open.href).toBe('https://interview.local/admin/sessions/20/grade');
+        expect(row.querySelector('[data-pager-ack]').className).toContain('btn-primary');
+        expect(env.notifications[0].title).toBe("🔔 Please grade Jose Pasante's exercise");
+    });
+
+    it('goes full screen when an outage rings alongside it, and back to a banner after', async () => {
+        const env = await ringingCall();
+        await env.frame(pageFrame(incident()));
+
+        expect(overlay(env).classList.contains('pager-overlay--banner')).toBe(false);
+        expect(overlay(env).getAttribute('aria-modal')).toBe('true');
+        expect(env.$('#pager-heading-text').textContent).toBe('You are being paged');
+        expect(sirenOn(env)).toBe(true);
+        expect(masters(env, 0.16)).toHaveLength(1);
+
+        await env.frame(pageClearedFrame(incident()));
+        expect(overlay(env).classList.contains('pager-overlay--banner')).toBe(true);
+        expect(sirenOn(env)).toBe(false);
+    });
+
+    it('stops when acknowledged elsewhere, including the chimes already scheduled', async () => {
+        const env = await ringingCall();
+        await env.frame(pageClearedFrame(call()));
+
+        expect(overlay(env).hidden).toBe(true);
+        const [master] = masters(env, 0.16);
+        expect(master.disconnect.mock.calls.length).toBeGreaterThanOrEqual(1);
+        expect(ctxOf(env).oscillators.every((s) => s.stop.mock.calls.length >= 1)).toBe(true);
+    });
+
+    it('Acknowledge silences it at once, offline too, until the server re-sends it', async () => {
+        const env = await pagerEnv({
+            fetchRoutes: [{ match: '/oncall/incidents/91/ack', reply: new TypeError('Failed to fetch') }],
+        });
+        await env.openSocket();
+        await env.frame(pageFrame(call()));
+        const live = () => masters(env, 0.16).filter((g) => g.disconnect.mock.calls.length === 0);
+        expect(live()).toHaveLength(1);
+
+        env.$('[data-pager-ack="91"]').click();
+        await env.flush();
+
+        expect(overlay(env).hidden).toBe(false);
+        expect(live()).toHaveLength(0);
+        expect(env.$('[data-incident-id="91"] .pager-incident-silenced')).not.toBeNull();
+
+        await env.frame(pageFrame(call(), { repeat: true }));
+        expect(live()).toHaveLength(1);
     });
 });

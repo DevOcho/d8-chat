@@ -3,8 +3,16 @@
  *
  * Rings on `page` WebSocket frames (dispatched from chat.js) until the page
  * is acknowledged here, from another tab/device (`page_cleared` frame), or
- * the monitor recovers. While ringing: a full-screen alert, a looping siren,
- * a flashing tab title and a sticky desktop notification.
+ * the monitor recovers. While ringing: a full-screen alert, the incident's
+ * alarm, a flashing tab title and a sticky desktop notification.
+ *
+ * Each incident carries its policy's alarm: the looping `siren` (outages),
+ * the `ka-ching` (website leads from D8), which plays every 5 seconds for the
+ * first minute and every 10 seconds after that, or the `chime` (the interview
+ * day), a soft alarm clock every 10 seconds for the first minute and every 20
+ * after that. A new page starts its alarm's fast minute again. When only
+ * chimes are ringing the alert is a banner in the corner, not the full screen:
+ * the person is at work and only needs to know they are wanted.
  *
  * Acknowledge silences this tab at once, before the request. If it fails
  * (e.g. the connection dropped) the page stays up, silenced: the server never
@@ -15,9 +23,14 @@
  * GET /oncall/pages/active on load, on every WebSocket (re)connect, and every
  * RESYNC_MS while ringing, so a lost `page_cleared` can't leave the siren on.
  *
- * The siren is synthesized with Web Audio (no asset). Its two-tone wail comes
- * from a square-wave LFO modulating the oscillator's frequency on the audio
- * thread, so it keeps going in a background tab where JS timers are throttled.
+ * Every alarm is synthesized with Web Audio (no asset). The siren's two-tone
+ * wail comes from a square-wave LFO modulating the oscillator's frequency on
+ * the audio thread, so it keeps going in a background tab where JS timers are
+ * throttled. The ka-ching is a burst of filtered noise (the drawer) and a bell
+ * (a few inharmonic partials that ring out); the chime is two soft pairs of
+ * sine beeps. For the same reason each of those is scheduled on the audio
+ * clock minutes ahead, and a timer only tops the schedule up, so a tab whose
+ * timers run once a minute still rings on time.
  * Browsers only allow audio after a user gesture on the page; until then the
  * alert shows a "click to start the alarm" hint.
  */
@@ -29,6 +42,42 @@
     const SIREN_SWING_HZ = 175;
     const SIREN_RATE_HZ = 1.6;      // tone changes per second / 2
     const RESYNC_MS = 30000;        // while ringing, re-check what's still active
+
+    const CUE_LOOKAHEAD_S = 180;        // repeating alarms are scheduled this far ahead on the audio clock
+    const CUE_TOPUP_MS = 15000;         // how often their schedule is extended
+    // The alarms that repeat a short sound rather than loop: how loud, and when.
+    const CUES = {
+        // A ka-ching every 5 s for the first minute, then every 10 s.
+        'ka-ching': { gain: 0.5, fastEvery: 5, fastFor: 60, slowEvery: 10, play: 'playKaching' },
+        // The chime: every 10 s for the first minute, then every 20 s, and quieter.
+        chime: { gain: 0.16, fastEvery: 10, fastFor: 60, slowEvery: 20, play: 'playChime' },
+    };
+    const KACHING_BELL_HZ = 2093;       // C7, the bell's fundamental
+    // [frequency ratio, peak gain, ring-out seconds]: bell-like inharmonic partials.
+    const KACHING_PARTIALS = [[1, 0.32, 1.1], [2.0, 0.16, 0.7], [2.76, 0.14, 0.55], [5.4, 0.07, 0.35], [8.93, 0.04, 0.2]];
+    const CHIME_HZ = 988;               // B5: an alarm clock's beep, as a sine, not a buzzer
+    const CHIME_BEEPS = [0, 0.16, 0.55, 0.71];  // "beep-beep ... beep-beep", seconds from the cue
+    const CHIME_BEEP_S = 0.1;
+
+    // How each alarm is worded: the overlay row, the flashing tab title, the
+    // desktop notification and its fallback body.
+    const ALARM_TEXT = {
+        siren: { row: '🔴 DOWN: ', flash: '🚨 PAGE: ', notify: '🚨 DOWN: ', body: 'You are being paged. Open D8-Chat to acknowledge.' },
+        'ka-ching': { row: '💰 ', flash: '💰 LEAD: ', notify: '💰 ', body: 'Someone wants to talk to us. Open D8-Chat to acknowledge.' },
+        chime: { row: '🔔 ', flash: '🔔 ', notify: '🔔 ', body: "You're needed. Open D8-Chat to acknowledge." },
+    };
+
+    const alarmOf = (incident) => (incident && ALARM_TEXT[incident.alarm] ? incident.alarm : 'siren');
+
+    // Seconds after the alarm started that its n-th cue (from 0) plays.
+    function cueOffset(alarm, n) {
+        const { fastEvery, fastFor, slowEvery } = CUES[alarm];
+        const fastCount = fastFor / fastEvery;
+        if (n <= fastCount) return n * fastEvery;
+        return fastFor + (n - fastCount) * slowEvery;
+    }
+
+    const kachingOffset = (n) => cueOffset('ka-ching', n);
 
     const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.content || '';
 
@@ -47,6 +96,8 @@
         clearedAt: new Map(),       // incident id → when it was cleared here (ms)
         audioCtx: null,
         siren: null,
+        cues: new Map(),            // alarm → its repeating schedule (ka-ching, chime)
+        noise: null,
         titleTimer: null,
         resyncTimer: null,
         originalTitle: document.title,
@@ -55,6 +106,8 @@
             this.overlay = document.getElementById('pager-overlay');
             this.list = document.getElementById('pager-incidents');
             this.soundHint = document.getElementById('pager-sound-hint');
+            this.heading = document.getElementById('pager-heading-text');
+            this.footer = document.getElementById('pager-footer');
             if (!this.overlay || !this.list) return;
 
             // Any click unlocks/resumes audio (browser autoplay policy). Cheap
@@ -110,7 +163,7 @@
             this.render();
             this.overlay.hidden = false;
             document.body.classList.add('pager-active');
-            this.syncSiren();
+            this.syncAlarms(isNew ? alarmOf(incident) : null);
             this.startTitleFlash();
             this.startResync();
             this.notify(incident, !isNew);
@@ -124,12 +177,13 @@
             this.notifications.delete(id);
             if (this.entries.size) {
                 this.render();
-                this.syncSiren();
+                this.syncAlarms(null);
                 return;
             }
             this.overlay.hidden = true;
             document.body.classList.remove('pager-active');
             this.stopSiren();
+            this.stopCues();
             this.stopTitleFlash();
             this.stopResync();
         },
@@ -158,7 +212,7 @@
             // to fail.
             Object.assign(entry, { acking: true, silenced: true, error: null });
             this.render();
-            this.syncSiren();
+            this.syncAlarms(null);
             try {
                 const response = await fetch(`/oncall/incidents/${encodeURIComponent(id)}/ack`, {
                     method: 'POST',
@@ -227,7 +281,25 @@
             }
         },
 
+        // Only chimes ringing: a banner in the corner instead of the full screen.
+        isBanner() {
+            return [...this.entries.values()].every(({ incident }) => alarmOf(incident) === 'chime');
+        },
+
+        setPresentation(banner) {
+            this.overlay.classList.toggle('pager-overlay--banner', banner);
+            this.overlay.setAttribute('aria-modal', banner ? 'false' : 'true');
+            if (this.heading) this.heading.textContent = banner ? "You're needed" : 'You are being paged';
+            if (this.footer) {
+                this.footer.textContent = banner
+                    ? 'Acknowledging stops the chime and tells the others you have it.'
+                    : "Acknowledging stops the alarm for everyone and tells the team you're on it.";
+            }
+        },
+
         render() {
+            const banner = this.isBanner();
+            this.setPresentation(banner);
             this.list.replaceChildren();
             for (const [id, { incident, test, acking, silenced, error }] of this.entries) {
                 const row = document.createElement('div');
@@ -236,11 +308,17 @@
 
                 const title = document.createElement('div');
                 title.className = 'pager-incident-title';
-                title.textContent = test ? `🧪 ${incident.title}` : `🔴 DOWN: ${incident.title}`;
+                title.textContent = test
+                    ? `🧪 ${incident.title}`
+                    : `${ALARM_TEXT[alarmOf(incident)].row}${incident.title}`;
                 row.appendChild(title);
 
+                // A page request (a D8 lead, the interview day) links what it is
+                // about instead of showing the URL.
+                const leadLink = incident.source === 'd8' && /^https?:\/\//.test(incident.source_url || '')
+                    ? incident.source_url : null;
                 const meta = [];
-                if (incident.source_url) meta.push(incident.source_url);
+                if (incident.source_url && !leadLink) meta.push(incident.source_url);
                 if (incident.channel_name) meta.push(`#${incident.channel_name}`);
                 if (incident.triggered_at) meta.push(`since ${formatTime(incident.triggered_at)}`);
                 if (meta.length) {
@@ -271,15 +349,24 @@
                 actions.className = 'pager-incident-actions';
                 const ack = document.createElement('button');
                 ack.type = 'button';
-                ack.className = 'btn btn-light btn-lg fw-bold';
+                ack.className = banner ? 'btn btn-primary fw-bold' : 'btn btn-light btn-lg fw-bold';
                 ack.dataset.pagerAck = id;
                 ack.disabled = !!acking;
                 ack.textContent = test ? 'Stop test' : 'Acknowledge';
                 actions.appendChild(ack);
+                if (leadLink) {
+                    const open = document.createElement('a');
+                    open.className = banner ? 'btn btn-outline-primary' : 'btn btn-outline-light';
+                    open.href = leadLink;
+                    open.target = '_blank';
+                    open.rel = 'noopener noreferrer';
+                    open.textContent = alarmOf(incident) === 'ka-ching' ? 'Open the lead in D8' : 'Open';
+                    actions.appendChild(open);
+                }
                 if (incident.message_id) {
                     const view = document.createElement('button');
                     view.type = 'button';
-                    view.className = 'btn btn-outline-light';
+                    view.className = banner ? 'btn btn-outline-secondary' : 'btn btn-outline-light';
                     view.dataset.pagerView = incident.message_id;
                     view.dataset.pagerChannel = incident.channel_id || '';
                     view.textContent = 'View in channel';
@@ -306,13 +393,6 @@
         },
 
         // --- Sound ---
-
-        // The siren plays while any page isn't silenced here.
-        syncSiren() {
-            const ringing = [...this.entries.values()].some((entry) => !entry.silenced);
-            if (ringing) this.startSiren();
-            else this.stopSiren();
-        },
 
         ensureAudio() {
             const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -366,9 +446,155 @@
             this.updateSoundHint();
         },
 
+        // Play every alarm a ringing incident asks for, and stop the others.
+        // `restart`: the alarm of a page that just arrived, whose fast first
+        // minute starts again.
+        syncAlarms(restart) {
+            // A page silenced here (Acknowledge tapped, the request still out or
+            // failed) makes no sound until its next re-send.
+            const alarms = new Set(
+                [...this.entries.values()]
+                    .filter((entry) => !entry.silenced)
+                    .map(({ incident }) => alarmOf(incident)),
+            );
+            if (alarms.has('siren')) this.startSiren();
+            else this.stopSiren();
+            for (const alarm of Object.keys(CUES)) {
+                if (alarms.has(alarm)) this.startCue(alarm, restart === alarm);
+                else this.stopCue(alarm);
+            }
+        },
+
+        startCue(alarm, restart) {
+            const ctx = this.ensureAudio();
+            if (!ctx || (this.cues.has(alarm) && !restart)) {
+                this.updateSoundHint();
+                return;
+            }
+            this.stopCue(alarm);
+            const master = ctx.createGain();
+            master.gain.value = CUES[alarm].gain;
+            master.connect(ctx.destination);
+            this.cues.set(alarm, {
+                master,
+                origin: ctx.currentTime + 0.05,
+                next: 0,
+                sources: new Set(),
+                timer: setInterval(() => this.scheduleCue(alarm), CUE_TOPUP_MS),
+            });
+            this.scheduleCue(alarm);
+            this.updateSoundHint();
+        },
+
+        // Schedule every cue due before the lookahead horizon. One whose time
+        // has already passed (the tab slept past it) is skipped, so the alarm
+        // never plays a backlog all at once.
+        scheduleCue(alarm) {
+            const cue = this.cues.get(alarm);
+            if (!cue) return;
+            const now = this.audioCtx.currentTime;
+            const horizon = now + CUE_LOOKAHEAD_S;
+            while (cue.origin + cueOffset(alarm, cue.next) <= horizon) {
+                const at = cue.origin + cueOffset(alarm, cue.next);
+                if (at >= now) this[CUES[alarm].play](at, cue);
+                cue.next += 1;
+            }
+        },
+
+        noiseBuffer(ctx) {
+            if (!this.noise) {
+                const length = Math.round(ctx.sampleRate * 0.08);
+                this.noise = ctx.createBuffer(1, length, ctx.sampleRate);
+                const data = this.noise.getChannelData(0);
+                // Audio noise, not a secret.
+                for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
+            }
+            return this.noise;
+        },
+
+        // Start `source` at `start`, stop it at `stop`, and keep it in the
+        // cue's set until it ends, so stopping the alarm can free it.
+        trackSource(cue, source, start, stop) {
+            cue.sources.add(source);
+            source.onended = () => cue.sources.delete(source);
+            source.start(start);
+            source.stop(stop);
+        },
+
+        playKaching(at, cue) {
+            const ctx = this.audioCtx;
+
+            // "ka": a short burst of band-passed noise.
+            const noise = ctx.createBufferSource();
+            noise.buffer = this.noiseBuffer(ctx);
+            const band = ctx.createBiquadFilter();
+            band.type = 'bandpass';
+            band.frequency.value = 2400;
+            band.Q.value = 0.8;
+            const clack = ctx.createGain();
+            clack.gain.setValueAtTime(0.0001, at);
+            clack.gain.exponentialRampToValueAtTime(0.6, at + 0.004);
+            clack.gain.exponentialRampToValueAtTime(0.0001, at + 0.06);
+            noise.connect(band).connect(clack).connect(cue.master);
+            this.trackSource(cue, noise, at, at + 0.08);
+
+            // "ching": the bell, struck just after.
+            const strike = at + 0.09;
+            for (const [ratio, peak, ringOut] of KACHING_PARTIALS) {
+                const osc = ctx.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.value = KACHING_BELL_HZ * ratio;
+                const envelope = ctx.createGain();
+                envelope.gain.setValueAtTime(0.0001, strike);
+                envelope.gain.exponentialRampToValueAtTime(peak, strike + 0.003);
+                envelope.gain.exponentialRampToValueAtTime(0.0001, strike + ringOut);
+                osc.connect(envelope).connect(cue.master);
+                this.trackSource(cue, osc, strike, strike + ringOut + 0.05);
+            }
+        },
+
+        // Two pairs of short sine beeps, eased in and out so none of them clicks.
+        playChime(at, cue) {
+            const ctx = this.audioCtx;
+            for (const offset of CHIME_BEEPS) {
+                const start = at + offset;
+                const osc = ctx.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.value = CHIME_HZ;
+                const envelope = ctx.createGain();
+                envelope.gain.setValueAtTime(0.0001, start);
+                envelope.gain.exponentialRampToValueAtTime(1, start + 0.015);
+                envelope.gain.setValueAtTime(1, start + CHIME_BEEP_S - 0.03);
+                envelope.gain.exponentialRampToValueAtTime(0.0001, start + CHIME_BEEP_S);
+                osc.connect(envelope).connect(cue.master);
+                this.trackSource(cue, osc, start, start + CHIME_BEEP_S + 0.02);
+            }
+        },
+
+        stopCue(alarm) {
+            const cue = this.cues.get(alarm);
+            if (!cue) return;
+            clearInterval(cue.timer);
+            // Disconnecting the master silences everything already scheduled;
+            // stopping the sources frees them.
+            cue.master.disconnect();
+            for (const source of cue.sources) {
+                try {
+                    source.stop();
+                } catch (err) { /* already stopped */ }
+            }
+            this.cues.delete(alarm);
+            this.updateSoundHint();
+        },
+
+        stopCues() {
+            for (const alarm of [...this.cues.keys()]) this.stopCue(alarm);
+        },
+
         updateSoundHint() {
             if (!this.soundHint) return;
-            const blocked = !!this.siren && (!this.audioCtx || this.audioCtx.state !== 'running');
+            const sounding = !!this.siren || this.cues.size > 0;
+            const blocked = sounding && (!this.audioCtx || this.audioCtx.state !== 'running');
             this.soundHint.hidden = !blocked;
         },
 
@@ -380,7 +606,9 @@
             this.titleTimer = setInterval(() => {
                 on = !on;
                 const first = this.entries.values().next().value;
-                document.title = on && first ? `🚨 PAGE: ${first.incident.title}` : this.baseTitle();
+                document.title = on && first
+                    ? `${ALARM_TEXT[alarmOf(first.incident)].flash}${first.incident.title}`
+                    : this.baseTitle();
             }, 1000);
         },
 
@@ -399,9 +627,10 @@
         notify(incident, renotify) {
             if (!('Notification' in window) || Notification.permission !== 'granted') return;
             const id = String(incident.id);
+            const text = ALARM_TEXT[alarmOf(incident)];
             try {
-                const notification = new Notification(`🚨 DOWN: ${incident.title}`, {
-                    body: incident.details || 'You are being paged. Open D8-Chat to acknowledge.',
+                const notification = new Notification(`${text.notify}${incident.title}`, {
+                    body: incident.details || text.body,
                     tag: `incident-${id}`,
                     requireInteraction: true,
                     renotify,
@@ -430,6 +659,8 @@
         },
     };
 
+    PagerManager.kachingOffset = kachingOffset;
+    PagerManager.cueOffset = cueOffset;
     window.PagerManager = PagerManager;
     document.addEventListener('DOMContentLoaded', () => PagerManager.init());
 })();

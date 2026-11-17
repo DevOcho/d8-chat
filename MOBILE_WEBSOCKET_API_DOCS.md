@@ -804,6 +804,12 @@ escalates every 10 minutes (team lead → director → CEO). Pages are cumulativ
 everyone paged so far keeps being paged until someone **acknowledges**. The
 monitor's **UP** event resolves the incident automatically.
 
+D8 pages the same way for a website lead: each contact form fill on
+devocho.com opens an incident in `#website-leads` (`source` `"d8"`) that pages
+every SDR, then the CEO after 15 minutes. Its `alarm` is `"ka-ching"`: the web
+pager plays a cash-register sound every 5 s for the first minute and every
+10 s after that. A lead has nothing to resolve: acknowledging it ends it.
+
 The phone is the real pager, so the app should alert as loudly as the OS
 allows, keep alerting until the page is acknowledged or cleared, and let the
 user acknowledge from the alert.
@@ -814,8 +820,9 @@ user acknowledge from the alert.
   "id": 17,
   "title": "Acme Portal",                      // monitor name
   "details": "connect ECONNREFUSED 10.0.0.5:443",
-  "source": "uptime-kuma",
-  "source_url": "https://portal.acme.example",
+  "source": "uptime-kuma",                      // "d8" for a website lead
+  "source_url": "https://portal.acme.example",  // a lead: its page in D8
+  "alarm": "siren",                             // "siren" | "ka-ching" (the policy's)
   "state": "triggered",                         // "triggered" | "acknowledged" | "resolved"
   "current_level": 2,                           // last escalation level paged
   "triggered_at": "2026-10-10T16:00:52.784415", // naive UTC, like every API timestamp
@@ -901,7 +908,9 @@ automatically. Same permissions as acknowledge. `409` if it's already resolved.
 `POST /api/v1/oncall/test-page` → `204`
 
 Rings the caller's own pager: a `page` WS frame with `"test": true` on every
-socket, plus a page push to every registered device. No incident is created
+socket, plus a page push to every registered device, once per alarm the
+caller can be paged with (an SDR gets a `"ka-ching"` test, someone in both
+chains one of each, everyone else the `"siren"`). No incident is created
 and nobody else is paged, so acknowledging a test page is purely local (don't
 call `/ack`, since its `id` is a string, not an incident). Rate limited to 6 per minute.
 
@@ -954,8 +963,11 @@ escalating. The next re-send (a `page` frame or push for that incident, which
 only arrives once the device is back online) rings it again. A re-sync via
 `GET /api/v1/oncall/incidents/active` does not.
 
-- `data`: `{ "type": "page", "incident_id": "17", "conversation_id_str": "channel_4", "message_id": "123", "title": "🚨 DOWN: <monitor>", "body": "<details>" }`
-  (a test page has `"test": "1"` and a string `incident_id`). There is no
+- `data`: `{ "type": "page", "incident_id": "17", "conversation_id_str": "channel_4", "message_id": "123", "alarm": "siren", "title": "🚨 DOWN: <monitor>", "body": "<details>" }`
+  (a test page has `"test": "1"` and a string `incident_id`). A website lead
+  has `"alarm": "ka-ching"` and the title `"💰 New website lead: <who>"`. The
+  app can play a different sound for it; until it does, a lead rings with the
+  pager sound like an outage (iOS: `pager.caf`, chosen by the server). There is no
   top-level `notification`: iOS gets its alert from `aps`, and Android
   posts nothing until the app does.
 - **Lifetime:** a page that can't be delivered expires after **120 s** (Android
@@ -981,6 +993,19 @@ only arrives once the device is back online) rings it again. A re-sync via
   `POST /api/v1/oncall/incidents/<id>/ack`. Until the app registers it, iOS ignores the category. A critical alert plays through silent mode and Do Not Disturb, but
   **only once Apple grants the app the Critical Alerts entitlement**. Request it
   from Apple early, because approval is manual. Without it, iOS delivers the page as a normal alert.
+
+### Push: page notice (the chime)
+An incident whose `alarm` is **`chime`** (the website's interview day: "please
+grade", "take them to the interview") is meant to be gentle. Its phone push is
+one ordinary notification, sent once, not the page push above, and no "page
+cleared" push follows it:
+
+- `title` `"🔔 <title>"`, `body` the details, and `data`:
+  `{ "type": "page_notice", "incident_id": "17", "conversation_id_str": "channel_9", "message_id": "123" }`.
+  Open the conversation on tap, as for a chat message.
+- The WS `page` frame still arrives while the app is open, with
+  `incident.alarm` `"chime"`. Show it as a quiet banner with Acknowledge, not
+  the full-screen pager, and don't loop the pager sound.
 
 ### Push: page cleared
 `data`: `{ "type": "page_cleared", "incident_id": "17", "state": "acknowledged" }`

@@ -548,10 +548,10 @@ ${dmItems}
         ${composer}
         <div id="pager-overlay" class="pager-overlay" role="alertdialog" aria-modal="true" aria-labelledby="pager-heading" hidden>
             <div class="pager-panel">
-                <div class="pager-heading" id="pager-heading">You are being paged</div>
+                <div class="pager-heading" id="pager-heading"><span id="pager-heading-text">You are being paged</span></div>
                 <div id="pager-sound-hint" class="pager-sound-hint" hidden>Your browser blocked the alarm sound. Click anywhere to start it.</div>
                 <div id="pager-incidents"></div>
-                <div class="pager-footer">Acknowledging stops the alarm for everyone and tells the team you're on it.</div>
+                <div class="pager-footer" id="pager-footer">Acknowledging stops the alarm for everyone and tells the team you're on it.</div>
             </div>
         </div>
         <div id="search-results-overlay" class="is-hidden"></div>

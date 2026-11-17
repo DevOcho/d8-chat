@@ -1,4 +1,6 @@
-{# Incident card under an Uptime Kuma DOWN message. Viewer-agnostic: the same
+{# Incident card under an Uptime Kuma DOWN message or a D8 page (a website
+   lead: source 'd8', which has nothing to resolve once someone has it, so no
+   Resolve button). Viewer-agnostic: the same
    HTML is broadcast to the whole channel as an OOB swap whenever the incident
    changes, so buttons show for everyone and the server enforces who may act. #}
 <div id="incident-card-{{ incident.id }}"
@@ -46,7 +48,7 @@
                   data-timestamp="{{ incident.resolved_at.isoformat() }}Z">{{ incident.resolved_at.strftime("%H:%M") }} UTC</span>
         {% endif %}
     </div>
-    {% if incident.state != 'resolved' %}
+    {% if incident.state == 'triggered' or (incident.state != 'resolved' and incident.source != 'd8') %}
         <div class="mt-2 d-flex gap-2">
             {% if incident.state == 'triggered' %}
                 <button type="button"
@@ -56,11 +58,13 @@
                     <i class="bi bi-hand-thumbs-up me-1"></i>Acknowledge
                 </button>
             {% endif %}
-            <button type="button"
-                    class="btn btn-sm btn-outline-secondary"
-                    hx-post="{{ url_for('oncall.resolve_incident', incident_id=incident.id) }}"
-                    hx-confirm="Resolve incident #{{ incident.id }}? Normally it resolves itself when the monitor comes back up."
-                    hx-swap="none">Resolve</button>
+            {% if incident.source != 'd8' %}
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        hx-post="{{ url_for('oncall.resolve_incident', incident_id=incident.id) }}"
+                        hx-confirm="Resolve incident #{{ incident.id }}? Normally it resolves itself when the monitor comes back up."
+                        hx-swap="none">Resolve</button>
+            {% endif %}
         </div>
     {% endif %}
 </div>
