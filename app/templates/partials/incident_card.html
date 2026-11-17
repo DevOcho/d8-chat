@@ -30,7 +30,7 @@
                           data-timestamp="{{ incident.next_escalation_at.isoformat() }}Z">{{ incident.next_escalation_at.strftime("%H:%M") }} UTC</span>
                 {% endif %}
             {% else %}
-                Nobody could be paged — check the escalation policy.
+                Nobody could be paged. Check the escalation policy.
             {% endif %}
         {% elif incident.state == 'acknowledged' %}
             Acknowledged by <strong>{{ oncall_display_name(incident.acknowledged_by) }}</strong>

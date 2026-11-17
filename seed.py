@@ -37,7 +37,7 @@ def seed_data():
         admin.save()
         print("Updated admin password.")
     else:
-        print("WARNING: admin user not found — run `auto init` first.")
+        print("WARNING: admin user not found. Run `auto init` first.")
 
     # Get default channels
     general = Channel.get_or_none(

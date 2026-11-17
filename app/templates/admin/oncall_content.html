@@ -40,7 +40,7 @@
                     {% if row.on_call %}
                         <strong>{{ oncall_display_name(row.on_call) }}</strong>
                     {% else %}
-                        <span class="badge bg-warning text-dark">Nobody — pages start at the no-on-call level</span>
+                        <span class="badge bg-warning text-dark">Nobody, so pages start at the no-on-call level</span>
                     {% endif %}
                     {% if row.override %}<span class="badge bg-info text-dark ms-1">override</span>{% endif %}
                 </td>
@@ -107,7 +107,7 @@
                         </span>
                     </li>
                 {% else %}
-                    <li class="text-muted">No levels — DOWN events will page workspace admins.</li>
+                    <li class="text-muted">No levels. DOWN events will page workspace admins.</li>
                 {% endfor %}
             </ol>
         </div>
@@ -163,8 +163,8 @@
                     {% endif %}
                 </td>
                 <td>{{ incident.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-                <td>{{ oncall_display_name(incident.acknowledged_by) if incident.acknowledged_by else '—' }}</td>
-                <td>{{ incident.resolved_at.strftime("%Y-%m-%d %H:%M") if incident.resolved_at else '—' }}</td>
+                <td>{{ oncall_display_name(incident.acknowledged_by) if incident.acknowledged_by else 'Nobody' }}</td>
+                <td>{{ incident.resolved_at.strftime("%Y-%m-%d %H:%M") if incident.resolved_at else 'Not yet' }}</td>
             </tr>
         {% else %}
             <tr>

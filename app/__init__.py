@@ -369,7 +369,7 @@ def _validate_config(app):
     if any(oidc_fields) and not all(oidc_fields):
         raise RuntimeError(
             "OIDC config is partial. Set all three of OIDC_CLIENT_ID, "
-            "OIDC_CLIENT_SECRET, OIDC_ISSUER_URL — or none."
+            "OIDC_CLIENT_SECRET, OIDC_ISSUER_URL, or none."
         )
 
     if app.debug and os.environ.get("FLASK_ENV", "").lower() in {"production", "prod"}:
