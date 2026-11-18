@@ -78,7 +78,21 @@ class TestSniffMatches:
 class TestNewExtensions:
     @pytest.mark.parametrize(
         "ext",
-        ["sql", "csv", "yaml", "yml", "toml", "log", "go", "cs", "tsx", "ts", "js", "css", "html"],
+        [
+            "sql",
+            "csv",
+            "yaml",
+            "yml",
+            "toml",
+            "log",
+            "go",
+            "cs",
+            "tsx",
+            "ts",
+            "js",
+            "css",
+            "html",
+        ],
     )
     def test_text_extension_accepted(self, tmp_path, ext):
         payload = b"SELECT 1;\n" if ext == "sql" else b"some plain text\n"

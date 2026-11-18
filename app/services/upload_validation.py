@@ -42,9 +42,13 @@ EXTENSION_MIME_MAP: dict[str, frozenset[str]] = {
     "pdf": frozenset({"application/pdf"}),
     "json": frozenset({"application/json"}),
     "doc": frozenset({"application/msword"}),
-    "docx": frozenset({"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}),
+    "docx": frozenset(
+        {"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+    ),
     "xls": frozenset({"application/vnd.ms-excel"}),
-    "xlsx": frozenset({"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}),
+    "xlsx": frozenset(
+        {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
+    ),
     "zip": frozenset({"application/zip", "application/x-zip-compressed"}),
 }
 
@@ -52,7 +56,26 @@ EXTENSION_MIME_MAP: dict[str, frozenset[str]] = {
 # here (``text/x-python`` on one box, ``text/plain`` on another for the same
 # file), so we accept any ``text/*``. Source files masquerading as something
 # binary still get caught.
-TEXT_EXTENSIONS: frozenset[str] = frozenset({"txt", "md", "py", "html", "csv", "css", "js", "yaml", "yml", "toml", "log", "tsx", "ts", "cs", "go", "sql"})
+TEXT_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        "txt",
+        "md",
+        "py",
+        "html",
+        "csv",
+        "css",
+        "js",
+        "yaml",
+        "yml",
+        "toml",
+        "log",
+        "tsx",
+        "ts",
+        "cs",
+        "go",
+        "sql",
+    }
+)
 
 # The complete set of extensions accepted on upload. Everything callers see
 # should derive from this constant — don't maintain parallel lists in the
