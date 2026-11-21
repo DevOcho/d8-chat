@@ -878,17 +878,27 @@ emoji-picker {
     background-color: rgba(0, 0, 0, 0.85);
 }
 
-#image-carousel-modal .carousel-item {
-    height: calc(100vh - 56px); /* Full viewport height minus header */
-    text-align: center;
+#image-carousel-modal .carousel-inner {
+    height: 100%;
+    width: 100%;
 }
 
-#image-carousel-modal .carousel-inner,
+#image-carousel-modal .carousel-item {
+    height: 100%;
+}
+
+#image-carousel-modal .carousel-item.active,
+#image-carousel-modal .carousel-item-next,
+#image-carousel-modal .carousel-item-prev {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 #image-carousel-modal .carousel-item img {
     max-height: 100%;
     max-width: 100%;
     object-fit: contain; /* This prevents images from being stretched or cropped */
-    margin: auto; /* Center the image vertically and horizontally */
 }
 
 #image-carousel-modal .carousel-control-prev,
