@@ -146,7 +146,7 @@ form[id^="message-form"] {
 }
 
 .codehilite.expanded {
-    max-height: 5000px; /* Arbitrary large max-height for expansion transition */
+    max-height: 50000px; /* Arbitrary large max-height for expansion transition */
 }
 
 .codehilite.short {

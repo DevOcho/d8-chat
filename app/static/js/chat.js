@@ -1991,7 +1991,7 @@ const ImageCarouselManager = { /* ... */ };
             itemDiv.appendChild(img);
             carouselInner.appendChild(itemDiv);
         });
-        const carouselHTML = `<div id="messageImageCarousel" class="carousel slide h-100 w-100" data-bs-ride="carousel" data-bs-keyboard="true" tabindex="-1"> ${carouselInner.outerHTML} <button class="carousel-control-prev" type="button" data-bs-target="#messageImageCarousel" data-bs-slide="prev"><span class="carousel-control-prev-icon" aria-hidden="true"></span><span class="visually-hidden">Previous</span></button><button class="carousel-control-next" type="button" data-bs-target="#messageImageCarousel" data-bs-slide="next"><span class="carousel-control-next-icon" aria-hidden="true"></span><span class="visually-hidden">Next</span></button></div>`;
+        const carouselHTML = `<div id="messageImageCarousel" class="carousel slide h-100 w-100" data-bs-interval="false" data-bs-keyboard="true" tabindex="-1"> ${carouselInner.outerHTML} <button class="carousel-control-prev" type="button" data-bs-target="#messageImageCarousel" data-bs-slide="prev"><span class="carousel-control-prev-icon" aria-hidden="true"></span><span class="visually-hidden">Previous</span></button><button class="carousel-control-next" type="button" data-bs-target="#messageImageCarousel" data-bs-slide="next"><span class="carousel-control-next-icon" aria-hidden="true"></span><span class="visually-hidden">Next</span></button></div>`;
         mgr.modalEl.querySelector('.modal-body').innerHTML = carouselHTML;
         const carouselEl = mgr.modalEl.querySelector('#messageImageCarousel');
         new bootstrap.Carousel(carouselEl);
@@ -2779,7 +2779,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     block.appendChild(toggler);
                     toggler.addEventListener('click', () => {
                         block.classList.toggle('expanded');
-                        toggler.innerText = block.classList.contains('expanded') ? 'Show less' : 'Show more...';
+                        isExpanded = block.classList.contains('expanded')
+                        if(!isExpanded) {
+                            toggler.innerText = 'Show more...';
+                            block.style.maxHeight = ''
+                        } else {
+                            toggler.innerText = 'Show less';
+                            block.style.maxHeight = block.scrollHeight + 'px'
+                        }
                     });
                 } else {
                     // It's a short block, remove the 300px constraint so it flexes naturally
