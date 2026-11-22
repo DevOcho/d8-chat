@@ -388,3 +388,30 @@ def test_mention_in_a_thread_still_badges(logged_in_client, general):
         1
     ][:120]
     assert "bg-danger" in badge
+
+
+def test_deleted_message_has_no_context_menu(logged_in_client, general):
+    parent, replies = _thread(general["conv"], general["me"], 1)
+
+    channel_html = logged_in_client.get(
+        f"/chat/channel/{general['channel'].id}"
+    ).get_data(as_text=True)
+    assert 'x-data="messageContextMenu"' in channel_html
+    assert "message-context-menu" in channel_html
+
+    assert logged_in_client.delete(f"/chat/message/{parent.id}").status_code == 204
+    thread_html = logged_in_client.get(f"/chat/thread/{parent.id}").get_data(
+        as_text=True
+    )
+    assert "This message was deleted." in thread_html
+
+    # Split out the deleted parent message block before the non-deleted reply.
+    parent_section = thread_html.split(f'id="message-{parent.id}"', 1)[1].split(
+        f'id="message-{replies[0].id}"', 1
+    )[0]
+    assert 'x-data="messageContextMenu"' not in parent_section
+    assert "message-context-menu" not in parent_section
+
+    reply_section = thread_html.split(f'id="message-{replies[0].id}"', 1)[1]
+    assert 'x-data="messageContextMenu"' in reply_section
+    assert "message-context-menu" in reply_section

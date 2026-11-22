@@ -1353,6 +1353,10 @@ const createEditor = function(idSuffix = '') {
             });
             const isHidden = !isShown(emojiPickerContainer);
             emojiPickerContainer.style.display = isHidden ? 'block' : 'none';
+            if (isHidden) {
+                syncEmojiPickerTheme(emojiPicker);
+                focusEmojiPickerSearch(emojiPicker);
+            }
         });
         emojiPicker.addEventListener('emoji-click', event => {
             insertText(event.detail.unicode);
@@ -1748,10 +1752,33 @@ const emojiPickerReady = customElements.whenDefined('emoji-picker');
 // initial fetch points at our local bundle.
 const LOCAL_EMOJI_DATA_SOURCE = '/js/local/emoji.json';
 
+function syncEmojiPickerTheme(picker) {
+    if (!picker) return;
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    picker.classList.toggle('dark', isDark);
+    picker.classList.toggle('light', !isDark);
+}
+
+function syncAllEmojiPickerThemes(root = document) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('emoji-picker').forEach(syncEmojiPickerTheme);
+}
+
+function focusEmojiPickerSearch(picker) {
+    if (!picker) return;
+    requestAnimationFrame(() => {
+        const input = picker.shadowRoot && picker.shadowRoot.querySelector('input.search');
+        if (input) input.focus({ preventScroll: true });
+    });
+}
+
 function _ensureLocalEmojiDataSource(node) {
     if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
-    if (node.tagName === 'EMOJI-PICKER' && !node.hasAttribute('data-source')) {
-        node.setAttribute('data-source', LOCAL_EMOJI_DATA_SOURCE);
+    if (node.tagName === 'EMOJI-PICKER') {
+        if (!node.hasAttribute('data-source')) {
+            node.setAttribute('data-source', LOCAL_EMOJI_DATA_SOURCE);
+        }
+        syncEmojiPickerTheme(node);
     }
     // Also fix up any descendants — covers HTMX swaps that bring in a
     // template fragment containing a picker.
@@ -1759,11 +1786,17 @@ function _ensureLocalEmojiDataSource(node) {
         node.querySelectorAll('emoji-picker:not([data-source])').forEach((el) => {
             el.setAttribute('data-source', LOCAL_EMOJI_DATA_SOURCE);
         });
+        syncAllEmojiPickerThemes(node);
     }
 }
 
 // Patch any pickers already in the DOM at script load time.
 _ensureLocalEmojiDataSource(document.body);
+
+// Keep all emoji pickers synced when the app theme toggles.
+new MutationObserver(() => {
+    syncAllEmojiPickerThemes(document);
+}).observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
 
 // Watch for new pickers added by HTMX swaps, popover injections, etc.
 new MutationObserver((mutations) => {
@@ -1914,8 +1947,8 @@ document.body.addEventListener('click', (evt) => {
     navigator.clipboard.writeText(source.value).then(() => {
         const icon = btn.querySelector('i');
         if (!icon) return;
-        icon.className = 'bi bi-check2';
-        setTimeout(() => { icon.className = 'bi bi-clipboard'; }, 2000);
+        icon.classList.replace('bi-clipboard', 'bi-check2');
+        setTimeout(() => { icon.classList.replace('bi-check2', 'bi-clipboard'); }, 2000);
     }).catch(() => ToastManager.show('Copy failed', 'Your browser blocked access to the clipboard.', 'danger'));
 });
 
@@ -2745,7 +2778,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (popoverTriggerEl.dataset.popoverInitialized) return;
             const messageId = popoverTriggerEl.dataset.messageId;
             if (!messageId) return;
-            const popoverOptions = { html: true, sanitize: false, content: `<emoji-picker class="light" data-source="/js/local/emoji.json"></emoji-picker>`, placement: 'top', customClass: 'emoji-popover' };
+            const themeClass = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'dark' : 'light';
+            const popoverOptions = { html: true, sanitize: false, content: `<emoji-picker class="${themeClass}" data-source="/js/local/emoji.json"></emoji-picker>`, placement: 'top', customClass: 'emoji-popover' };
             if (popoverTriggerEl.closest('#right-panel-offcanvas')) {
                 popoverOptions.container = '#right-panel-offcanvas';
             }
@@ -2753,6 +2787,8 @@ document.addEventListener('DOMContentLoaded', () => {
             popoverTriggerEl.addEventListener('shown.bs.popover', () => {
                 const picker = document.querySelector(`.popover[role="tooltip"] emoji-picker`);
                 if (picker) {
+                    syncEmojiPickerTheme(picker);
+                    focusEmojiPickerSearch(picker);
                     const pickerListener = event => {
                         htmx.ajax('POST', `/chat/message/${messageId}/react`, {
                             values: { emoji: event.detail.unicode }, swap: 'none'
@@ -2921,12 +2957,19 @@ document.addEventListener('DOMContentLoaded', () => {
             formatLocalTimes(target);
 
             // If the swapped content is the main chat container,
-            // also handle highlighting any new mentions.
+            // also handle highlighting any new mentions and focusing the composer.
             if (target.id === 'chat-messages-container') {
                 const conversationDiv = target.querySelector('[data-conversation-db-id]');
                 if (conversationDiv) {
                     const conversationId = conversationDiv.dataset.conversationDbId;
                     handleMentionHighlights(target, conversationId);
+                }
+                const editor = window.mainEditor;
+                const activeInput = editor?.state?.isMarkdownMode
+                    ? editor.state.markdownView
+                    : editor?.state?.editor;
+                if (activeInput && activeInput.isConnected) {
+                    activeInput.focus({ preventScroll: true });
                 }
             }
         }
@@ -3395,4 +3438,113 @@ document.addEventListener('DOMContentLoaded', () => {
         // set immediately; a manually-away user is left as-is (no ping).
         if (manualStatus !== 'away') send('active');
     })();
+});
+
+// --- Shared Floating Emoji Picker for Context Menu ---
+const ContextMenuEmojiPicker = (() => {
+    let activeMessageId = null;
+    let bound = false;
+
+    const getElements = () => {
+        const container = document.getElementById('context-menu-emoji-picker');
+        const picker = container ? container.querySelector('emoji-picker') : null;
+        return { container, picker };
+    };
+
+    const close = () => {
+        const { container } = getElements();
+        if (container) container.classList.add('is-hidden');
+        activeMessageId = null;
+    };
+
+    const bindOnce = () => {
+        if (bound) return;
+        const { container, picker } = getElements();
+        if (!container || !picker) return;
+        bound = true;
+
+        picker.addEventListener('emoji-click', (event) => {
+            if (!activeMessageId) return;
+            const messageId = activeMessageId;
+            close();
+            htmx.ajax('POST', `/chat/message/${messageId}/react`, {
+                values: { emoji: event.detail.unicode },
+                swap: 'none',
+            });
+        });
+
+        document.addEventListener('click', (event) => {
+            if (!activeMessageId) return;
+            if (!container.contains(event.target)) close();
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && activeMessageId) close();
+        });
+    };
+
+    const open = (messageId, x, y) => {
+        bindOnce();
+        const { container, picker } = getElements();
+        if (!container || !picker) return;
+
+        activeMessageId = messageId;
+        syncEmojiPickerTheme(picker);
+
+        container.classList.remove('is-hidden');
+        const rect = container.getBoundingClientRect();
+        const pad = 8;
+        const maxLeft = Math.max(pad, window.innerWidth - rect.width - pad);
+        const maxTop = Math.max(pad, window.innerHeight - rect.height - pad);
+        container.style.left = `${Math.min(Math.max(pad, x), maxLeft)}px`;
+        container.style.top = `${Math.min(Math.max(pad, y), maxTop)}px`;
+        focusEmojiPickerSearch(picker);
+    };
+
+    return { open, close };
+})();
+
+// --- Alpine.js CSP Components ---
+document.addEventListener('alpine:init', () => {
+    Alpine.data('messageContextMenu', () => ({
+        open: false,
+        id: null,
+        menuX: 0,
+        menuY: 0,
+        openMenu(e) {
+            ContextMenuEmojiPicker.close();
+            this.id = this.$el.dataset.messageId;
+            this.menuX = e.clientX;
+            this.menuY = e.clientY;
+            this.open = true;
+            window.dispatchEvent(new CustomEvent('context-menu-open', { detail: { id: this.id } }));
+            this.$nextTick(() => {
+                const menu = this.$refs.menu;
+                if (!menu) return;
+                const rect = menu.getBoundingClientRect();
+                const pad = 8;
+                const maxLeft = Math.max(pad, window.innerWidth - rect.width - pad);
+                const maxTop = Math.max(pad, window.innerHeight - rect.height - pad);
+                this.menuX = Math.min(Math.max(pad, this.menuX), maxLeft);
+                this.menuY = Math.min(Math.max(pad, this.menuY), maxTop);
+                menu.style.left = `${this.menuX}px`;
+                menu.style.top = `${this.menuY}px`;
+            });
+        },
+        onOtherMenuOpen(e) {
+            if (e.detail && e.detail.id !== this.id) {
+                this.open = false;
+            }
+        },
+        openEmojiPicker() {
+            const targetId = this.id || this.$el.dataset.messageId;
+            this.open = false;
+            if (targetId) {
+                ContextMenuEmojiPicker.open(targetId, this.menuX, this.menuY);
+            }
+        },
+        closeMenu() {
+            this.open = false;
+        },
+    }));
 });
