@@ -1,4 +1,4 @@
-Authlib==1.7.2
+Authlib==1.9.10
 bcrypt
 bleach
 boto3
