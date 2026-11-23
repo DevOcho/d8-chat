@@ -103,3 +103,25 @@ def test_sso_login_redirect(client, mocker):
     assert response.status_code == 302
     # The URL will be the Authentik authorize URL
     assert "response_type=code" in response.headers["Location"]
+
+
+def test_index_redirects_authenticated_user_to_chat(client):
+    """Logged-in users hitting '/' should go straight to '/chat'."""
+    user = User.get_by_id(1)
+    user.set_password("mypassword")
+    user.save()
+
+    login_res = client.post(
+        "/login", data={"username": "testuser", "password": "mypassword"}
+    )
+    assert login_res.status_code == 302
+
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/chat")
+
+
+def test_index_renders_login_for_anonymous_user(client):
+    """Anonymous visitors hitting '/' get the login page."""
+    response = client.get("/")
+    assert response.status_code == 200

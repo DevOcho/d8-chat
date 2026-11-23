@@ -190,6 +190,21 @@ describe('copy button', () => {
         await env.tick(2000);
         expect(env.$('#copy i').className).toBe('bi bi-clipboard');
     });
+
+    it('preserves extra utility classes (such as me-2) on the copy icon', async () => {
+        const env = await chatEnv();
+        const writeText = vi.fn(() => Promise.resolve());
+        Object.defineProperty(env.window.navigator, 'clipboard', { configurable: true, value: { writeText } });
+        env.$('#message-list').insertAdjacentHTML('beforeend', `
+            <button id="copy-ctx" data-copy-message><i class="bi bi-clipboard me-2"></i>Copy Text
+                <input type="hidden" class="copy-source" value="context text"></button>`);
+        env.$('#copy-ctx').click();
+        await env.flush();
+        expect(writeText).toHaveBeenCalledWith('context text');
+        expect(env.$('#copy-ctx i').className).toBe('bi bi-check2 me-2');
+        await env.tick(2000);
+        expect(env.$('#copy-ctx i').className).toBe('bi bi-clipboard me-2');
+    });
 });
 
 describe('new-message modal', () => {

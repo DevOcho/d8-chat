@@ -11,7 +11,7 @@ from flask import (
     session,
     url_for,
 )
-from flask_login import login_user, logout_user
+from flask_login import current_user, login_user, logout_user
 
 from app import (
     external_url_for,
@@ -23,13 +23,16 @@ from app import (
 from app.auth_tokens import make_password_reset_token, verify_password_reset_token
 from app.models import User
 from app.password_policy import validate_password
-from app.sso import oauth
+from app.sso import handle_auth_callback, oauth
 
 auth_bp = Blueprint("auth", __name__)
 
 
 @auth_bp.route("/")
 def index():
+    if current_user.is_authenticated:
+        return redirect(url_for("main.chat_interface"))
+
     return render_template("index.html")
 
 
@@ -74,7 +77,6 @@ def sso_login():
 @auth_bp.route("/auth")
 def authorize():
     """The callback route for the SSO provider."""
-    from app.sso import handle_auth_callback
 
     return handle_auth_callback()
 

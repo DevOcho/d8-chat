@@ -19,6 +19,7 @@ const HOOKS = {
         'id="toast-header"',
         'id="toast-title"',
         'id="toast-body-content"',
+        "static_url('js/local/alpine-csp.min.js')",
     ],
     'app/static/js/csrf.js': ["evt.detail.headers['X-CSRFToken'] = token"],
     'app/templates/chat.html': [
@@ -61,6 +62,7 @@ const HOOKS = {
         'id="pager-sound-hint"',
         'id="pager-heading-text"',
         'id="pager-footer"',
+        'id="context-menu-emoji-picker"',
         'id="right-panel-offcanvas"',
         'id="enable-notifications-banner"',
         'id="enable-notifications-btn"',
@@ -120,6 +122,12 @@ const HOOKS = {
     ],
     'app/templates/partials/message.html': [
         'message-container',
+        'data-message-id="{{ message.id }}"',
+        'x-data="messageContextMenu"',
+        '@contextmenu.prevent.stop="openMenu"',
+        'x-ref="menu"',
+        'message-context-menu',
+        '@click.stop="openEmojiPicker"',
         '{% if client_id %}data-client-id="{{ client_id }}"{% endif %}',
         'id="message-{{ message.id }}"',
         'data-user-id="{{ message.user.id }}"',

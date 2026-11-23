@@ -79,6 +79,12 @@ export function message({ id, user, createdAt, content = 'hello', sameSender = f
         : `<div class="flex-shrink-0 cursor-pointer" hx-get="/chat/dm/${user.id}/details?context=channel" hx-target="#right-panel-offcanvas" title="View user details">${avatar(user, 40)}</div>`;
     return `<div class="d-flex mb-1 message-container ${sameSender ? 'grouped-message' : ''} ${mentioned ? 'mentioned-message' : ''}"
          id="message-${id}"
+         data-message-id="${id}"
+         x-data="messageContextMenu"
+         @contextmenu.prevent.stop="openMenu"
+         @click.outside="closeMenu"
+         @keydown.escape.window="closeMenu"
+         @context-menu-open.window="onOtherMenuOpen"
          data-user-id="${user.id}"
          ${clientId ? `data-client-id="${esc(clientId)}"` : ''}
          ${createdAt ? `data-created-at="${createdAt}Z"` : ''}
@@ -92,6 +98,23 @@ export function message({ id, user, createdAt, content = 'hello', sameSender = f
             <div id="reactions-container-${id}" class="mt-1 d-flex flex-wrap gap-1"></div>
         </div>
         ${messageToolbar(id)}
+        <div x-ref="menu"
+             x-show="open"
+             x-cloak
+             x-transition
+             class="dropdown-menu show position-fixed shadow-lg message-context-menu"
+             @click="closeMenu">
+            <div class="context-menu-quick-reactions">
+                <button type="button" class="context-menu-quick-emoji" hx-post="/chat/message/${id}/react" hx-vals='{"emoji": "👍"}' hx-swap="none" aria-label="React with 👍">👍</button>
+            </div>
+            <button type="button" class="dropdown-item d-flex align-items-center justify-content-between" @click.stop="openEmojiPicker" title="Add Reaction">
+                <span><i class="bi bi-emoji-smile me-2"></i>Add Reaction</span>
+            </button>
+            <button type="button" class="dropdown-item" data-message-id="${id}" data-copy-message title="Copy to clipboard">
+                <i class="bi bi-clipboard me-2"></i>Copy Text
+                <input type="hidden" class="copy-source" value="${esc(content)}">
+            </button>
+        </div>
     </div>`;
 }
 
@@ -555,6 +578,9 @@ ${dmItems}
             </div>
         </div>
         <div id="search-results-overlay" class="is-hidden"></div>
+        <div id="context-menu-emoji-picker" class="context-menu-emoji-picker is-hidden">
+            <emoji-picker class="light" data-source="/js/local/emoji.json"></emoji-picker>
+        </div>
         <div class="offcanvas offcanvas-end" tabindex="-1" id="right-panel-offcanvas">
             <div class="offcanvas-body" id="right-panel-body"></div>
         </div>
