@@ -1586,3 +1586,319 @@ def test_acknowledging_a_chime_sends_the_phone_nothing_more(client, interview, m
 
     assert _frames(interview.g1.id, "page_cleared")
     send_page_cleared.assert_not_called()
+
+
+# --- Directed pages: D8 runs its own "accept the lead" rotation ---
+#
+# D8 pages one SDR with page.escalate false, gives them 5 minutes to accept the
+# lead in D8, then resolves that page by key and pages the next SDR, and
+# finally the CEO. D8-Chat only rings whoever each request names.
+
+RESOLVE_URL = "/api/v1/internal/page/resolve"
+
+
+def _directed_page(client, to=("sam@example.com",), key="d8-lead:101", **page):
+    return _lead_page(client, key=key, to=list(to), escalate=False, **page)
+
+
+def _resolve_page(client, key="d8-lead:101", reason="accepted", **body):
+    return client.post(
+        RESOLVE_URL,
+        json={"key": key, "reason": reason, **body},
+        headers=NOTIFY_HEADERS,
+    )
+
+
+def test_a_directed_page_rings_only_who_it_names_and_never_escalates(client, leads):
+    body = _directed_page(client).get_json()
+
+    incident = Incident.get_by_id(body["incident_id"])
+    assert body["repeat"] is False and body["unmatched"] == []
+    assert _paged_ids(incident) == {leads.sam.id}
+    assert incident.next_escalation_at is None
+    (frame,) = _frames(leads.sam.id, "page")
+    assert frame["incident"]["alarm"] == "ka-ching"
+    assert frame["incident"]["next_escalation_at"] is None
+    # Long past the policy's 15 minutes: no level fires, the CEO never rings.
+    for minutes in (15, 16, 60, 24 * 60):
+        assert oncall_service.run_escalations(NOW + minutes * MINUTE) == []
+    assert _paged_ids(Incident.get_by_id(incident.id)) == {leads.sam.id}
+    assert _frames(leads.ana.id, "page") == []
+    assert _frames(leads.ceo.id, "page") == []
+    # It keeps ringing Sam until it stops, like any page.
+    assert oncall_service.resend_pages(NOW + 2 * MINUTE) == [incident]
+    assert len(_frames(leads.sam.id, "page")) == 2
+    triggered = IncidentEvent.get(
+        (IncidentEvent.incident == incident) & (IncidentEvent.kind == "triggered")
+    )
+    assert json.loads(triggered.details)["escalate"] is False
+
+
+def test_a_directed_page_never_falls_back_to_the_admins(client, leads):
+    admin = _user("boss", admin=True)
+    EscalationLevel.delete().where(EscalationLevel.policy == leads.policy).execute()
+
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+
+    assert _paged_ids(incident) == {leads.sam.id}
+    assert oncall_service.run_escalations(NOW + DAY) == []
+    assert _frames(admin.id, "page") == []
+    kinds = {e.kind for e in IncidentEvent.select()}
+    assert "fallback_admins" not in kinds and "escalated" not in kinds
+
+
+def test_a_directed_page_without_a_policy_still_rings_who_it_names(client, leads):
+    leads.policy.delete_instance(recursive=True)
+
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+
+    assert incident.policy is None
+    assert _paged_ids(incident) == {leads.sam.id}
+    assert oncall_service.run_escalations(NOW + DAY) == []
+    # No policy to choose the alarm: the default.
+    assert _frames(leads.sam.id, "page")[0]["incident"]["alarm"] == "siren"
+
+
+def test_a_directed_page_with_paging_switched_off_is_only_posted(client, leads):
+    leads.policy.is_active = False
+    leads.policy.save()
+
+    res = _directed_page(client)
+
+    assert res.get_json() == {
+        "ok": True,
+        "incident_id": None,
+        "repeat": False,
+        "unmatched": [],
+    }
+    assert Incident.select().count() == 0
+    assert Message.select().where(Message.user == leads.bot).count() == 1
+
+
+def test_a_directed_page_naming_nobody_known_pages_nobody(client, leads):
+    admin = _user("boss", admin=True)
+
+    res = _directed_page(client, to=["stranger@example.com"])
+
+    assert res.get_json() == {
+        "ok": True,
+        "incident_id": None,
+        "repeat": False,
+        "unmatched": ["stranger@example.com"],
+    }
+    assert Incident.select().count() == 0
+    assert Message.select().where(Message.user == leads.bot).count() == 1
+    for user in (leads.sam, leads.ana, leads.ceo, admin):
+        assert _frames(user.id, "page") == []
+
+
+def test_a_directed_repeat_while_open_pages_nobody_again(client, leads):
+    first = _directed_page(client).get_json()
+    again = _directed_page(client, to=["ana@example.com"]).get_json()
+
+    assert again == {
+        "ok": True,
+        "incident_id": first["incident_id"],
+        "repeat": True,
+        "unmatched": [],
+    }
+    assert Incident.select().count() == 1
+    assert _paged_ids(Incident.get_by_id(first["incident_id"])) == {leads.sam.id}
+    assert _frames(leads.ana.id, "page") == []
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        {"escalate": False},
+        {"escalate": "false"},
+        {"escalate": 0},
+        {"escalate": False, "to": []},
+    ],
+)
+def test_a_malformed_escalate_is_refused(client, leads, page):
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={
+            "channel_name": "website-leads",
+            "message": "hi",
+            "page": {"key": "d8-lead:1", "title": "t", **page},
+        },
+        headers=NOTIFY_HEADERS,
+    )
+
+    assert res.status_code == 400
+    assert "escalate" in res.get_json()["error"]
+    assert Message.select().count() == 0
+
+
+def test_escalate_true_or_null_is_todays_page(client, leads):
+    explicit = _lead_page(client, key="d8-lead:1", escalate=True).get_json()
+    null = _lead_page(client, key="d8-lead:2", escalate=None).get_json()
+
+    for body in (explicit, null):
+        incident = Incident.get_by_id(body["incident_id"])
+        assert _paged_ids(incident) == {leads.sam.id, leads.ana.id}
+        assert incident.next_escalation_at == NOW + 15 * MINUTE
+
+
+def test_d8_resolves_its_page_and_every_pager_stops(client, leads, mocker):
+    cleared = mocker.patch.object(oncall_service.push_service, "send_page_cleared")
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+    posts = Message.select().count()
+
+    res = _resolve_page(client, by="Sam@Example.com")
+
+    assert (res.status_code, res.get_json()) == (200, {"resolved": True})
+    incident = Incident.get_by_id(incident.id)
+    assert (incident.state, incident.resolved_by) == ("resolved", leads.sam)
+    assert incident.resolved_at == NOW
+    # Stopped on every socket and on the phone, with D8's reason.
+    assert _frames(leads.sam.id, "page_cleared")[-1]["state"] == "resolved"
+    assert cleared.call_args.args[0] == leads.sam.id
+    assert cleared.call_args.kwargs["alert"] == (
+        "✅ New website lead: Dana Whitfield at Meridian Health: Accepted in D8"
+    )
+    assert oncall_service.active_pages_for(leads.sam) == []
+    assert oncall_service.resend_pages(NOW + 5 * MINUTE) == []
+    # Who and why on the timeline; nothing posted in the channel.
+    resolved = IncidentEvent.get(
+        (IncidentEvent.incident == incident) & (IncidentEvent.kind == "resolved")
+    )
+    assert resolved.user == leads.sam
+    assert json.loads(resolved.details) == {
+        "detail": "Accepted in D8",
+        "reason": "accepted",
+        "by": "Sam@Example.com",
+    }
+    assert Message.select().count() == posts
+
+
+def test_resolving_twice_or_an_unknown_key_is_harmless(client, leads):
+    _directed_page(client)
+
+    assert _resolve_page(client, reason="expired").get_json() == {"resolved": True}
+    assert _resolve_page(client, reason="expired").get_json() == {"resolved": False}
+    assert _resolve_page(client, key="d8-lead:999").get_json() == {"resolved": False}
+    assert IncidentEvent.select().where(IncidentEvent.kind == "resolved").count() == 1
+
+
+def test_resolve_by_someone_unknown_still_resolves(client, leads):
+    incident_id = _directed_page(client).get_json()["incident_id"]
+
+    res = _resolve_page(client, reason="cancelled", by="gone@example.com")
+
+    assert res.get_json() == {"resolved": True}
+    incident = Incident.get_by_id(incident_id)
+    assert incident.state == "resolved" and incident.resolved_by is None
+    resolved = IncidentEvent.get(IncidentEvent.kind == "resolved")
+    assert resolved.user is None
+    assert json.loads(resolved.details)["by"] == "gone@example.com"
+
+
+def test_the_rotation_pages_the_next_sdr_after_an_expired_page(client, leads):
+    """D8's whole flow on one key: Sam, then Ana, then the CEO."""
+    ChannelMember.create(user=leads.sam, channel=leads.channel)
+    first = _directed_page(client).get_json()["incident_id"]
+
+    assert _resolve_page(client, reason="expired").get_json() == {"resolved": True}
+    second = _directed_page(client, to=["ana@example.com"]).get_json()
+    assert second["repeat"] is False and second["incident_id"] != first
+    assert _paged_ids(Incident.get_by_id(second["incident_id"])) == {leads.ana.id}
+
+    assert _resolve_page(client, reason="rejected", by="ana@example.com").get_json()
+    third = _directed_page(client, to=["ceo@example.com"]).get_json()
+    assert _paged_ids(Incident.get_by_id(third["incident_id"])) == {leads.ceo.id}
+    assert _resolve_page(client, reason="accepted", by="ceo@example.com").get_json()
+
+    assert oncall_service.run_escalations(NOW + DAY) == []
+    assert [len(_frames(u.id, "page")) for u in (leads.sam, leads.ana, leads.ceo)] == [
+        1,
+        1,
+        1,
+    ]
+    # Each card says how D8 ended that page.
+    _login(client, leads.sam)
+    html = client.get(f"/chat/channel/{leads.channel.id}").get_data(as_text=True)
+    assert "Expired in D8" in html
+    assert "Rejected in D8" in html and "<strong>Ana</strong>" in html
+    assert "Accepted in D8" in html and "<strong>Ceo</strong>" in html
+    assert "monitor back up" not in html
+
+
+def test_the_admin_timeline_says_who_paged_and_why_d8_stopped_it(admin_client, leads):
+    incident_id = _directed_page(admin_client).get_json()["incident_id"]
+    _resolve_page(admin_client, reason="rejected", by="sam@example.com")
+
+    html = admin_client.get(f"/admin/oncall/incidents/{incident_id}").get_data(
+        as_text=True
+    )
+
+    assert oncall_service.NO_ESCALATION in html
+    assert "Rejected in D8" in html
+
+
+def test_resolve_also_stops_an_escalating_lead(client, leads):
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+
+    assert _resolve_page(client, reason="cancelled").get_json() == {"resolved": True}
+
+    assert Incident.get_by_id(incident.id).state == "resolved"
+    assert _frames(leads.sam.id, "page_cleared") and _frames(
+        leads.ana.id, "page_cleared"
+    )
+    assert oncall_service.run_escalations(NOW + 15 * MINUTE) == []
+    assert _frames(leads.ceo.id, "page") == []
+
+
+def test_resolve_after_an_acknowledge_closes_it_quietly(client, leads, mocker):
+    cleared = mocker.patch.object(oncall_service.push_service, "send_page_cleared")
+    incident_id = _directed_page(client).get_json()["incident_id"]
+    _login(client, leads.sam)
+    client.post(f"/oncall/incidents/{incident_id}/ack")
+    cleared.reset_mock()
+
+    assert _resolve_page(client, by="sam@example.com").get_json() == {"resolved": True}
+
+    assert Incident.get_by_id(incident_id).state == "resolved"
+    # The pager already stopped at the acknowledge: nothing more to clear.
+    cleared.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        ["d8-lead:101", "accepted"],
+        {"reason": "accepted"},
+        {"key": "", "reason": "accepted"},
+        {"key": "k" * 201, "reason": "accepted"},
+        {"key": 101, "reason": "accepted"},
+        {"key": "d8-lead:101"},
+        {"key": "d8-lead:101", "reason": "done"},
+        {"key": "d8-lead:101", "reason": ["accepted"]},
+        {"key": "d8-lead:101", "reason": "accepted", "by": "not an email"},
+        {"key": "d8-lead:101", "reason": "accepted", "by": 5},
+    ],
+)
+def test_a_malformed_resolve_is_refused(client, leads, body):
+    incident_id = _directed_page(client).get_json()["incident_id"]
+
+    res = client.post(RESOLVE_URL, json=body, headers=NOTIFY_HEADERS)
+
+    assert res.status_code == 400
+    assert "reason" in res.get_json()["error"]
+    assert Incident.get_by_id(incident_id).state == "triggered"
+
+
+def test_resolve_needs_the_shared_secret(client, leads):
+    incident_id = _directed_page(client).get_json()["incident_id"]
+
+    for headers in ({}, {"X-Internal-Key": "wrong"}):
+        res = client.post(
+            RESOLVE_URL,
+            json={"key": "d8-lead:101", "reason": "accepted"},
+            headers=headers,
+        )
+        assert res.status_code == 401
+
+    assert Incident.get_by_id(incident_id).state == "triggered"

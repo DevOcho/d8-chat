@@ -99,6 +99,21 @@ LEADS_POLICY_NAME = "Website leads"
 LEADS_LEVELS = ((1, "sdr", 0), (2, "ceo", 15))
 LEADS_SOURCE = "d8"
 
+# Why D8 stopped one of its pages (``POST /api/v1/internal/page/resolve``), as
+# the incident card, the timeline and the phone's cleared notice word it. D8
+# runs its own "accept the lead" rotation: it pages one SDR with
+# ``page.escalate`` false, and resolves that page when the SDR accepts or
+# rejects the lead in D8, when the minutes it gives them run out, or when it
+# no longer needs anyone (ONCALL_PLAN.md, "Directed pages").
+PAGE_RESOLVE_REASONS = {
+    "accepted": "Accepted in D8",
+    "expired": "Expired in D8",
+    "rejected": "Rejected in D8",
+    "cancelled": "Cancelled in D8",
+}
+# The timeline's note on a page request that turned escalation off.
+NO_ESCALATION = "only the people named, no escalation (D8 escalates)"
+
 # The in-person interview day (ONCALL_PLAN.md, "Interview day"). The website
 # relays the interview platform's events as page requests naming who has to act
 # (``page.to``): the two graders, a tie-breaker, the HR person who booked the
@@ -763,11 +778,13 @@ def _push_pages(incident_id, user_ids, repeat=False):
         )
 
 
-def _deliver_page_cleared(incident, user_ids, state=None):
+def _deliver_page_cleared(incident, user_ids, state=None, note=None):
     """Silence ``user_ids``' pagers for ``incident`` (web + mobile).
 
     ``state`` overrides the incident's own state in the frame and push, for
     ``"paused"`` (paging switched off while the incident stays triggered).
+    ``note`` words the phone's cleared notice instead of the state (D8's
+    reason for stopping its page, e.g. "Expired in D8").
     """
     state = state or incident.state
     frame = {
@@ -795,11 +812,16 @@ def _deliver_page_cleared(incident, user_ids, state=None):
             if incident.acknowledged_by_id
             else None
         ),
+        note=note,
     )
 
 
-def _push_page_cleared(incident_id, state, user_ids, *, title, acknowledged_by=None):
-    if state == "acknowledged" and acknowledged_by:
+def _push_page_cleared(  # pylint: disable=too-many-arguments
+    incident_id, state, user_ids, *, title, acknowledged_by=None, note=None
+):
+    if note:
+        alert = f"✅ {title}: {note}"
+    elif state == "acknowledged" and acknowledged_by:
         alert = f"✅ {title} acknowledged by {acknowledged_by}"
     elif state == "paused":
         alert = f"🔕 {title}: paging switched off"
@@ -1009,15 +1031,17 @@ def fire_level(incident, level_number, now):
     return new_users
 
 
-def _page_named(incident, levels, users, now):
+def _page_named(incident, levels, users, now, escalate=True):
     """Page ``users`` as the incident's first level, in place of the policy's
-    own; the levels after it escalate as usual. Returns ``users``."""
+    own; the levels after it escalate as usual, unless ``escalate`` is False
+    (then no ``next_escalation_at`` is set, so the ticker never picks the
+    incident up). Returns ``users``."""
     first = levels[0].level if levels else 1
     incident.current_level = first
     for user in users:
         IncidentPage.create(incident=incident, user=user, level=first)
         _record(incident, "paged", user=user, level=first)
-    later = [lvl for lvl in levels if lvl.level > first]
+    later = [lvl for lvl in levels if lvl.level > first] if escalate else []
     incident.next_escalation_at = (
         now + datetime.timedelta(minutes=later[0].delay_minutes) if later else None
     )
@@ -1046,11 +1070,17 @@ def trigger_incident(  # pylint: disable=too-many-arguments
     now=None,
     source="uptime-kuma",
     named=None,
+    escalate=True,
 ):
     """Open an incident and page level 1. Returns the incident.
 
     ``named`` (users) are paged in place of the policy's first level, which
     then escalates to its second as usual (a page request's ``to``).
+
+    ``escalate=False`` (a page request's ``escalate``: D8 runs the escalation
+    itself) pages only ``named``: no level of ``policy`` ever fires for the
+    incident, nor the workspace-admin fallback. ``policy`` may be ``None``
+    then; it only chooses the alarm and carries the "Paging enabled" switch.
 
     Returns ``None`` when another worker opened one for ``dedupe_key`` first
     (the unique index on open incidents rejects the second).
@@ -1069,10 +1099,13 @@ def trigger_incident(  # pylint: disable=too-many-arguments
                 message=message,
                 last_page_sent_at=now,
             )
-            _record(incident, "triggered")
+            if escalate:
+                _record(incident, "triggered")
+            else:
+                _record(incident, "triggered", escalate=False, detail=NO_ESCALATION)
             levels = sorted_levels(policy)
-            if named:
-                newly_paged = _page_named(incident, levels, named, now)
+            if named or not escalate:
+                newly_paged = _page_named(incident, levels, named or [], now, escalate)
             else:
                 newly_paged = fire_level(
                     incident, levels[0].level if levels else 1, now
@@ -1211,8 +1244,13 @@ def acknowledge_incident(incident, user, now=None):
     return True
 
 
-def resolve_incident(incident, user=None, now=None, announce=True):
+def resolve_incident(incident, user=None, now=None, announce=True, resolution=None):
     """Close an open incident. ``user`` None means auto-resolved (monitor UP).
+
+    ``resolution`` is D8's ``{"reason": <a PAGE_RESOLVE_REASONS key>, "by":
+    <email or None>}`` when D8 stopped its page (``resolve_page``): the
+    timeline records it in place of "automatic", and the phones' cleared
+    notice says why.
 
     Returns the refreshed incident, or ``None`` if it was already resolved.
     """
@@ -1231,9 +1269,16 @@ def resolve_incident(incident, user=None, now=None, announce=True):
     if not won:
         return None
     incident = Incident.get_by_id(incident.id)
-    _record(incident, "resolved", user=user, auto=user is None)
+    note = None
+    if resolution is None:
+        _record(incident, "resolved", user=user, auto=user is None)
+    else:
+        note = PAGE_RESOLVE_REASONS[resolution["reason"]]
+        _record(incident, "resolved", user=user, detail=note, **resolution)
     if was_triggered:
-        _deliver_page_cleared(incident, [u.id for u, _ in paged_users(incident)])
+        _deliver_page_cleared(
+            incident, [u.id for u, _ in paged_users(incident)], note=note
+        )
     broadcast_incident_update(incident)
     if announce and user is not None:
         post_bot_message(
@@ -1401,17 +1446,54 @@ def page_recipients(emails):
     return users, unmatched
 
 
+def page_dedupe_key(key):
+    """The incident ``dedupe_key`` for a page request's ``key``."""
+    return f"{LEADS_SOURCE}:{key}"
+
+
+def _escalates(page):
+    """A page request's ``escalate``: true unless it says false."""
+    return page.get("escalate") is not False
+
+
+def _page_policy(channel, page, named):
+    """``(pages, policy)`` for a new ``page`` request on ``channel``.
+
+    Paging switched off on the channel's policy means posted only, both ways.
+    With escalation, the policy is what pages, so without one nothing does.
+    Without escalation only ``named`` are paged, with or without a policy (its
+    only part is the alarm; without one the siren), and nobody named that
+    D8-Chat knows means nobody is paged: an incident nobody is paged for and
+    nothing escalates would ring for no one.
+    """
+    policy = EscalationPolicy.get_or_none(EscalationPolicy.channel == channel)
+    if policy is not None and not policy.is_active:
+        return False, None
+    if _escalates(page):
+        return policy is not None, policy
+    return bool(named), policy
+
+
 def handle_page_request(channel, text, page, now=None):
     """Post ``text`` as ``d8-bot`` and page the channel's policy for it.
 
-    ``page`` is ``{"key", "title", "details"?, "url"?, "to"?}`` from
-    ``POST /api/v1/internal/notify``. ``key`` dedupes: while an incident for
-    it is open, a repeat is posted but pages nobody new. ``to`` (emails) names
-    who to page in place of the policy's first level; when it names nobody
-    D8-Chat knows, the first level is paged. A channel without an active policy
-    gets the post and no page. Returns ``{"incident_id": …, "repeat": bool}``
-    (``incident_id`` None when nothing pages), plus ``unmatched`` (the emails
-    in ``to`` that matched nobody) when ``to`` was given.
+    ``page`` is ``{"key", "title", "details"?, "url"?, "to"?, "escalate"?}``
+    from ``POST /api/v1/internal/notify``. ``key`` dedupes: while an incident
+    for it is open, a repeat is posted but pages nobody new. ``to`` (emails)
+    names who to page in place of the policy's first level; when it names
+    nobody D8-Chat knows, the first level is paged. A channel without an
+    active policy gets the post and no page.
+
+    ``escalate`` false (``to`` required) pages only the people ``to`` names,
+    and nothing more ever: no level of the policy fires, so D8 can run its own
+    rotation (page one SDR, then the next) and stop each page with
+    ``resolve_page``. It pages them on a channel without a policy too, but not
+    when the policy's paging is switched off, and when ``to`` names nobody
+    D8-Chat knows it is posted only (``_page_policy``).
+
+    Returns ``{"incident_id": …, "repeat": bool}`` (``incident_id`` None when
+    nothing pages), plus ``unmatched`` (the emails in ``to`` that matched
+    nobody) when ``to`` was given.
     """
     now = now or utc_now()
     bot = d8_bot()
@@ -1419,17 +1501,15 @@ def handle_page_request(channel, text, page, now=None):
         raise LookupError("d8-bot user not provisioned")
     named, unmatched = page_recipients(page.get("to") or [])
     extra = {"unmatched": unmatched} if page.get("to") else {}
-    dedupe_key = f"{LEADS_SOURCE}:{page['key']}"
+    dedupe_key = page_dedupe_key(page["key"])
     existing = open_incident_for(dedupe_key)
     if existing is not None:
         _record(existing, "repeat_page")
         post_bot_message(channel, text, bot=bot)
         return {"incident_id": existing.id, "repeat": True, **extra}
 
-    policy = EscalationPolicy.get_or_none(
-        (EscalationPolicy.channel == channel) & (EscalationPolicy.is_active)
-    )
-    if policy is None:
+    pages, policy = _page_policy(channel, page, named)
+    if not pages:
         post_bot_message(channel, text, bot=bot)
         return {"incident_id": None, "repeat": False, **extra}
 
@@ -1447,6 +1527,7 @@ def handle_page_request(channel, text, page, now=None):
             now=now,
             source=LEADS_SOURCE,
             named=named,
+            escalate=_escalates(page),
         )
 
     post_bot_message(channel, text, on_created=_open, bot=bot)
@@ -1461,6 +1542,54 @@ def handle_page_request(channel, text, page, now=None):
             **extra,
         }
     return {"incident_id": incident.id, "repeat": False, **extra}
+
+
+def resolve_page(key, reason, by=None, now=None):
+    """D8 stopped its page for ``key`` (``POST /api/v1/internal/page/resolve``).
+
+    Resolves the open incident for the page request's ``key`` the way any
+    resolve does: everyone still ringing gets ``page_cleared`` on every socket
+    and phone, and the card updates live. ``reason`` (a
+    ``PAGE_RESOLVE_REASONS`` key) and ``by`` (the email of whoever accepted,
+    rejected or cancelled it in D8) go on the timeline; ``by`` is also the
+    incident's ``resolved_by`` when it is an active user. No message is posted:
+    D8's rotation posts its next page itself. Returns True if an open incident
+    was resolved, False when none was open (already resolved, or never
+    paged), so repeating it is harmless.
+    """
+    users = page_recipients([by])[0] if by else []
+    user = users[0] if users else None
+    resolved = False
+    for incident in open_incidents_for(page_dedupe_key(key)):
+        done = resolve_incident(
+            incident,
+            user=user,
+            now=now,
+            announce=False,
+            resolution={"reason": reason, "by": by},
+        )
+        resolved = resolved or done is not None
+    return resolved
+
+
+def resolution_note(incident):
+    """How D8 stopped ``incident`` ("Accepted in D8", …), for its card; None
+    for anything else (an outage, a page resolved by hand)."""
+    if incident.state != "resolved" or incident.source != LEADS_SOURCE:
+        return None
+    event = (
+        IncidentEvent.select()
+        .where(
+            (IncidentEvent.incident == incident) & (IncidentEvent.kind == "resolved")
+        )
+        .order_by(IncidentEvent.id.desc())
+        .first()
+    )
+    try:
+        details = json.loads(event.details) if event and event.details else {}
+    except ValueError:
+        details = {}
+    return PAGE_RESOLVE_REASONS.get(details.get("reason"))
 
 
 # --- Ticker ---

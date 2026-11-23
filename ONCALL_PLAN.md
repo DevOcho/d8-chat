@@ -431,6 +431,59 @@ Production setup:
    `interview-day`). The production website runs on its own droplet: check it
    can reach `/api/v1/internal/notify`.
 
+## Directed pages: D8's "accept the lead" rotation, 2026-11-23
+
+D8 is taking website-lead routing over: it pages ONE SDR, gives them 5 minutes
+to accept the lead in D8, then stops that page and pages the next SDR, and
+finally the CEO. D8 drives the escalation, so D8-Chat must only ring whoever
+each request names, and let D8 stop a page.
+
+- **`page.escalate`** (on `POST /api/v1/internal/notify`, optional, default
+  `true`, which is everything above). `false` needs `to` (400 without it, or
+  when `escalate` isn't a boolean; `null` counts as absent). Only the people
+  `to` names are paged, and nothing more ever: no level of the channel's
+  policy fires for that incident (it never gets a `next_escalation_at`, so the
+  ticker never escalates it), and there is no "page the admins when nobody
+  was paged" fallback. The page still repeats every minute until it stops,
+  and `key` dedupes while it is open, as for any page. The timeline's
+  `triggered` row says "no escalation (D8 escalates)".
+- **Which channels page.** With `escalate: false` the named people are paged
+  whether or not the channel has a policy: D8 decides who rings, the policy
+  only picks the alarm (`#website-leads`' "Website leads" policy plays the
+  ka-ching; a channel with no policy plays the default siren, and a policy
+  with no levels is enough to choose one). Two cases page nobody and only
+  post, answering `incident_id: null`: the policy's **Paging enabled** is
+  switched off (the admins' kill switch keeps meaning "nobody is paged"), and
+  `to` matches no active user (`unmatched` lists the emails; there is nobody
+  to ring and no escalation to fall back on, so D8 should move on to its next
+  person straight away).
+- **`POST /api/v1/internal/page/resolve`**: D8 stops a page. Same
+  `X-Internal-Key` secret and rate limit (120 per minute per IP) as notify.
+  Body `{"key": "<the page key>", "reason": "accepted" | "expired" |
+  "rejected" | "cancelled", "by": "<email>"?}`; `key` is the `page.key` D8
+  sent (the same dedupe, `d8:<key>`). It resolves the open incident for that
+  key like any resolve: `page_cleared` to everyone paged on every socket and
+  the cleared push to their phones (`✅ <title>: Expired in D8`), and the card
+  updates live, reading "Accepted in D8 by Sam", "Expired in D8" and so on in
+  place of "Resolved automatically". The timeline's `resolved` row records
+  `reason` and `by`; `by` is also `resolved_by` when it is an active user's
+  email (case does not matter), and an unknown email is only recorded. Nothing
+  is posted in the channel. Answers `200 {"resolved": true}`, or
+  `200 {"resolved": false}` when no incident for the key is open (already
+  resolved, never paged, or paged nobody), so retries are harmless; 400 for a
+  bad key, reason or `by`; 401 without the secret. It resolves acknowledged
+  incidents too, and works for escalating pages (`cancelled` stops the
+  "Website leads" escalation before the CEO is paged).
+- **One key for the whole rotation works.** Once D8 resolves a page, the
+  same `key` opens a new incident on the next notify, so D8 can page SDR 1,
+  resolve `expired`, page SDR 2 with the same key, and so on. A distinct key
+  per step works too.
+- **Acknowledge is not accept.** The pager's Acknowledge button only silences
+  that person's pager (and posts "Acknowledged" in the channel); it does not
+  tell D8. The SDR accepts in D8 (`page.url` is the pager's "Open the lead in
+  D8" link), and D8 resolves the page then; an acknowledged page D8 never
+  hears about runs out like any other and D8 resolves it `expired`.
+
 ## Open questions
 None blocking. Possible follow-ups: self-service swaps, re-paging stale
 acknowledged incidents, a Telegram/SMS fallback channel, and a pager on admin pages

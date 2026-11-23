@@ -1550,7 +1550,12 @@ def update_avatar():
 HELPDESK_BOT_USERNAME = "helpdesk-bot"
 _PAGE_REQUEST_ERROR = (
     "page needs a key (up to 200 characters) and a title; details, an "
-    "http(s) url and to (a list of 1 to 10 emails) are optional"
+    "http(s) url, to (a list of 1 to 10 emails) and escalate (true or false; "
+    "false needs to) are optional"
+)
+_PAGE_RESOLVE_ERROR = (
+    "key (up to 200 characters) and reason (accepted, expired, rejected or "
+    "cancelled) are required; by (an email) is optional"
 )
 
 
@@ -1570,22 +1575,46 @@ def _valid_page_to(to):
     )
 
 
+def _valid_page_key(key):
+    """A page request's ``key``, as notify and resolve take it."""
+    return isinstance(key, str) and 0 < len(key) <= 200
+
+
+def _valid_page_escalate(page):
+    """``page.escalate``: absent (or null) or a boolean, and false only with
+    ``to``."""
+    escalate = page.get("escalate")
+    if escalate is None:
+        return True
+    if not isinstance(escalate, bool):
+        return False
+    return escalate or page.get("to") is not None
+
+
 def _valid_page_request(page):
     """The ``page`` object of an internal notify, as handle_page_request reads it."""
     if not isinstance(page, dict):
         return False
-    key, title = page.get("key"), page.get("title")
-    if not (isinstance(key, str) and 0 < len(key) <= 200):
+    title = page.get("title")
+    if not _valid_page_key(page.get("key")):
         return False
     if not (isinstance(title, str) and title.strip()):
         return False
     details, url = page.get("details"), page.get("url")
     if details is not None and not isinstance(details, str):
         return False
-    if not _valid_page_to(page.get("to")):
+    if not _valid_page_to(page.get("to")) or not _valid_page_escalate(page):
         return False
     return url is None or (
         isinstance(url, str) and url.startswith(("https://", "http://"))
+    )
+
+
+def _internal_key_ok():
+    """The request carries ``INTERNAL_NOTIFY_KEY`` in ``X-Internal-Key``."""
+    return _keys_match(
+        current_app.config.get("INTERNAL_NOTIFY_KEY"),
+        request.headers.get("X-Internal-Key", ""),
     )
 
 
@@ -1627,13 +1656,22 @@ def internal_notify():
     Body:
         ``{"channel_name": "<name>", "message": "<text>"}``, plus optionally
         ``"page": {"key": "<id>", "title": "<text>", "details": "<text>",
-        "url": "https://…", "to": ["<email>", …]}`` to page the channel's
-        escalation policy (D8's website leads, the website's interview day). A
-        page request is posted as ``d8-bot`` and opens an incident
-        (``oncall_service.handle_page_request``); ``key`` dedupes while that
-        incident is open. ``to`` pages those people in place of the policy's
-        first level, and the answer lists the emails that matched nobody
-        (``unmatched``). Without a policy it is only posted.
+        "url": "https://…", "to": ["<email>", …], "escalate": false}`` to page
+        the channel's escalation policy (D8's website leads, the website's
+        interview day). A page request is posted as ``d8-bot`` and opens an
+        incident (``oncall_service.handle_page_request``); ``key`` dedupes
+        while that incident is open. ``to`` pages those people in place of the
+        policy's first level, and the answer lists the emails that matched
+        nobody (``unmatched``). Without a policy it is only posted.
+
+        ``escalate`` (default true) false means D8 escalates, not the policy:
+        ``to`` is required (400 without it), only those people are paged, and
+        no level of the policy ever fires for the incident, nor the
+        workspace-admin fallback. They are paged even when the channel has no
+        policy (with the siren; a policy, levels or not, picks the alarm), but
+        not when its policy's paging is switched off, and a ``to`` that
+        matches nobody active is posted only (``incident_id`` null). D8 stops
+        the page with ``POST /api/v1/internal/page/resolve``.
 
         Or ``{"to": "<email>", "message": "<text>"}``: a DM to that person
         from the ``chief-of-staff`` bot (D8's morning brief), never a page.
@@ -1648,9 +1686,7 @@ def internal_notify():
     from app.chat_manager import chat_manager
     from app.services import chat_service, oncall_service
 
-    expected_key = current_app.config.get("INTERNAL_NOTIFY_KEY")
-    provided_key = request.headers.get("X-Internal-Key", "")
-    if not _keys_match(expected_key, provided_key):
+    if not _internal_key_ok():
         return jsonify({"error": "Unauthorized"}), 401
 
     data = request.get_json(silent=True) or {}
@@ -1724,6 +1760,48 @@ def internal_notify():
     chat_service.send_notifications_for_new_message(new_message, bot_user)
 
     return jsonify({"ok": True}), 200
+
+
+@api_v1_bp.route("/internal/page/resolve", methods=["POST"])
+@limiter.limit("120 per minute", key_func=get_remote_address)
+def internal_page_resolve():
+    """Service-to-service hook: D8 stops one of its pages.
+
+    Auth: the ``X-Internal-Key`` shared secret, as ``internal_notify``.
+
+    Body: ``{"key": "<the page key>", "reason": "accepted" | "expired" |
+    "rejected" | "cancelled", "by": "<email>"}`` (``by`` optional: who
+    accepted, rejected or cancelled it in D8). Resolves the open incident that
+    ``POST /api/v1/internal/notify`` opened for that page ``key`` (the same
+    dedupe), which stops the ringing on every device like any resolve, and
+    records the reason and ``by`` on the incident's timeline; ``by`` is its
+    ``resolved_by`` when it is an active user's email. Nothing is posted in
+    the channel. See ``oncall_service.resolve_page``.
+
+    Answers ``200 {"resolved": true}``, or ``200 {"resolved": false}`` when no
+    incident for the key is open (already resolved, or never paged), so a
+    retry is harmless. 400 on a bad key, reason or ``by``; 401 without the
+    secret.
+    """
+    from app.services import oncall_service
+
+    if not _internal_key_ok():
+        return jsonify({"error": "Unauthorized"}), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": _PAGE_RESOLVE_ERROR}), 400
+    key, reason, by = data.get("key"), data.get("reason"), data.get("by")
+    if (
+        not _valid_page_key(key)
+        or not isinstance(reason, str)
+        or reason not in oncall_service.PAGE_RESOLVE_REASONS
+        or (by is not None and not _valid_email(by))
+    ):
+        return jsonify({"error": _PAGE_RESOLVE_ERROR}), 400
+
+    resolved = oncall_service.resolve_page(key, reason, by=by)
+    return jsonify({"resolved": resolved}), 200
 
 
 @api_v1_bp.route("/integrations/uptime-kuma", methods=["POST"])

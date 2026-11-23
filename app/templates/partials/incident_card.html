@@ -1,6 +1,7 @@
 {# Incident card under an Uptime Kuma DOWN message or a D8 page (a website
    lead: source 'd8', which has nothing to resolve once someone has it, so no
-   Resolve button). Viewer-agnostic: the same
+   Resolve button; D8 resolves its own pages, and the card says why, e.g.
+   "Expired in D8"). Viewer-agnostic: the same
    HTML is broadcast to the whole channel as an OOB swap whenever the incident
    changes, so buttons show for everyone and the server enforces who may act. #}
 <div id="incident-card-{{ incident.id }}"
@@ -38,7 +39,11 @@
             <span class="incident-time"
                   data-timestamp="{{ incident.acknowledged_at.isoformat() }}Z">{{ incident.acknowledged_at.strftime("%H:%M") }} UTC</span>
         {% else %}
-            {% if incident.resolved_by %}
+            {% set d8_note = incident_resolution_note(incident) %}
+            {% if d8_note %}
+                {{ d8_note }}
+                {% if incident.resolved_by %}by <strong>{{ oncall_display_name(incident.resolved_by) }}</strong>{% endif %}
+            {% elif incident.resolved_by %}
                 Resolved by <strong>{{ oncall_display_name(incident.resolved_by) }}</strong>
             {% else %}
                 Resolved automatically (monitor back up)
