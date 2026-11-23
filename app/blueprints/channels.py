@@ -10,6 +10,7 @@ from flask import (
     request,
     url_for,
 )
+from markupsafe import escape
 from peewee import JOIN, IntegrityError
 
 from app import external_url_for
@@ -329,32 +330,122 @@ def get_channel_about_form(channel_id):
 @login_required
 def update_channel_about(channel_id):
     """Processes the submission of the channel details edit form."""
-    channel = Channel.get_by_id(channel_id)
+    channel = Channel.get_or_none(id=channel_id)
+    if not channel:
+        return "Channel not found", 404
+
     membership = ChannelMember.get_or_none(user=g.user, channel=channel)
     if not membership or membership.role != "admin":
         return "Unauthorized", 403
 
-    channel.topic = request.form.get("topic")
-    channel.description = request.form.get("description")
-    channel.save()
+    old_name = channel.name
+    raw_name = request.form.get("name", "")
+    raw_topic = request.form.get("topic")
+    raw_description = request.form.get("description")
 
-    current_user_membership = ChannelMember.get_or_none(user=g.user, channel=channel)
+    if "name" in request.form and old_name not in ("general", "announcements"):
+        normalized_name = re.sub(r"\s+", "-", raw_name.strip())
+        normalized_name = re.sub(r"[^a-zA-Z0-9_-]", "", normalized_name)
+        normalized_name = re.sub(r"-{2,}", "-", normalized_name).strip("-").lower()
+        if len(normalized_name) < 3 or len(normalized_name) > 80:
+            return render_template(
+                "partials/channel_details_about_form.html",
+                channel=channel,
+                error="Channel name must be 3–80 characters (letters, numbers, hyphens, or underscores).",
+                name=raw_name,
+                topic=raw_topic if raw_topic is not None else channel.topic,
+                description=(
+                    raw_description
+                    if raw_description is not None
+                    else channel.description
+                ),
+            )
+        channel.name = normalized_name
+
+    channel.topic = raw_topic
+    channel.description = raw_description
+
+    try:
+        channel.save()
+    except IntegrityError:
+        existing = Channel.get_by_id(channel_id)
+        return render_template(
+            "partials/channel_details_about_form.html",
+            channel=existing,
+            error=f"A channel named '#{channel.name}' already exists.",
+            name=raw_name,
+            topic=raw_topic if raw_topic is not None else existing.topic,
+            description=(
+                raw_description if raw_description is not None else existing.description
+            ),
+        )
+
+    renamed = channel.name != old_name
+
     display_html = render_template(
         "partials/channel_details_about_display.html",
         channel=channel,
-        current_user_membership=current_user_membership,
+        current_user_membership=membership,
     )
 
     members_count = (
         ChannelMember.select().where(ChannelMember.channel == channel).count()
     )
-    header_html = render_template(
+    editor_header_html = render_template(
+        "partials/channel_header.html",
+        channel=channel,
+        members_count=members_count,
+        current_user_membership=membership,
+    )
+    broadcast_header_html = render_template(
         "partials/channel_header.html", channel=channel, members_count=members_count
     )
 
-    chat_manager.broadcast(f"channel_{channel.id}", header_html)
+    if renamed:
+        details_title_oob = oob_by_id(
+            f"channel-details-title-{channel.id}",
+            "innerHTML",
+            f"#{escape(channel.name)}",
+            tag="h5",
+        )
+        sidebar_link_oob = oob_by_id(
+            f"link-channel_{channel.id}",
+            "innerHTML",
+            f"# {escape(channel.name)}",
+            tag="span",
+        )
+        conv_id_str = f"channel_{channel.id}"
+        conversation, _ = Conversation.get_or_create(
+            conversation_id_str=conv_id_str, defaults={"type": "channel"}
+        )
+        rename_msg = Message.create(
+            user=None,
+            conversation=conversation,
+            content=(
+                f"{g.user.display_name or g.user.username} renamed the channel "
+                f"from #{old_name} to #{channel.name}."
+            ),
+        )
+        rename_msg_html = render_template("partials/message.html", message=rename_msg)
+        rename_msg_oob = date_separator_oob(
+            rename_msg, previous_visible_message(rename_msg), conv_id_str
+        ) + message_list_append_oob(conv_id_str, rename_msg_html)
 
-    return display_html
+        chat_manager.broadcast(
+            conv_id_str, broadcast_header_html + details_title_oob + rename_msg_oob
+        )
+        for member in ChannelMember.select().where(ChannelMember.channel == channel):
+            try:
+                chat_manager.send_to_user(member.user_id, sidebar_link_oob)
+            except Exception:
+                current_app.logger.exception(
+                    f"Could not send channel rename update to user {member.user_id}"
+                )
+
+        return display_html + editor_header_html + details_title_oob + sidebar_link_oob
+
+    chat_manager.broadcast(f"channel_{channel.id}", broadcast_header_html)
+    return display_html + editor_header_html
 
 
 @channels_bp.route("/chat/channel/<int:channel_id>/members", methods=["POST"])

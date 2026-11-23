@@ -1,7 +1,14 @@
 import pytest
 
 from app.chat_manager import chat_manager
-from app.models import Channel, ChannelMember, Conversation, User, WorkspaceMember
+from app.models import (
+    Channel,
+    ChannelMember,
+    Conversation,
+    Message,
+    User,
+    WorkspaceMember,
+)
 
 
 @pytest.fixture
@@ -199,6 +206,150 @@ def test_non_admin_cannot_update_channel_about(
         f"/chat/channel/{channel.id}/about", data={"topic": "A new topic"}
     )
     assert response.status_code == 403
+
+
+def test_admin_can_rename_channel(
+    logged_in_client, setup_channel_with_admin_and_member
+):
+    """Covers: `update_channel_about` saving the new channel name, OOB swaps, and system notice."""
+    channel = setup_channel_with_admin_and_member["channel"]
+    old_name = channel.name
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/about",
+        data={"name": "renamed-channel", "topic": "t", "description": "d"},
+    )
+
+    assert response.status_code == 200
+    updated = Channel.get_by_id(channel.id)
+    assert updated.name == "renamed-channel"
+    assert updated.topic == "t"
+    assert updated.description == "d"
+
+    html = response.data.decode("utf-8")
+    assert f'id="channel-details-title-{channel.id}"' in html
+    assert f'id="link-channel_{channel.id}"' in html
+    assert 'id="chat-header-container"' in html
+
+    conv = Conversation.get_or_none(conversation_id_str=f"channel_{channel.id}")
+    assert conv is not None
+    sys_msg = (
+        Message.select()
+        .where((Message.conversation == conv) & (Message.user.is_null(True)))
+        .order_by(Message.id.desc())
+        .first()
+    )
+    assert sys_msg is not None
+    assert f"#{old_name} to #renamed-channel" in sys_msg.content
+
+
+def test_rename_channel_normalizes_name(
+    logged_in_client, setup_channel_with_admin_and_member
+):
+    """Covers: `update_channel_about` normalizing spaces and invalid characters."""
+    channel = setup_channel_with_admin_and_member["channel"]
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/about",
+        data={"name": "  Team Alpha!  ", "topic": "", "description": ""},
+    )
+
+    assert response.status_code == 200
+    assert Channel.get_by_id(channel.id).name == "team-alpha"
+
+
+def test_rename_channel_rejects_short_name(
+    logged_in_client, setup_channel_with_admin_and_member
+):
+    """Covers: `update_channel_about` inline error on too-short channel name."""
+    channel = setup_channel_with_admin_and_member["channel"]
+    original_name = channel.name
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/about",
+        data={"name": "ab", "topic": "t", "description": "d"},
+    )
+
+    assert response.status_code == 200
+    assert b"Channel name must be 3" in response.data
+    assert Channel.get_by_id(channel.id).name == original_name
+
+
+def test_rename_channel_rejects_duplicate_name(
+    logged_in_client, setup_channel_with_admin_and_member
+):
+    """Covers: `update_channel_about` inline error when another channel uses that name."""
+    channel = setup_channel_with_admin_and_member["channel"]
+    admin = setup_channel_with_admin_and_member["admin"]
+    Channel.create(workspace_id=1, name="taken-name", created_by=admin)
+    original_name = channel.name
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/about",
+        data={"name": "taken-name", "topic": "t", "description": "d"},
+    )
+
+    assert response.status_code == 200
+    assert b"already exists" in response.data
+    assert Channel.get_by_id(channel.id).name == original_name
+
+
+@pytest.mark.parametrize("default_name", ["general", "announcements"])
+def test_default_channels_cannot_be_renamed(logged_in_client, default_name):
+    """Covers: `update_channel_about` ignoring rename attempts for default channels."""
+    admin = User.get_by_id(1)
+    channel, _ = Channel.get_or_create(
+        workspace_id=1, name=default_name, defaults={"created_by": admin}
+    )
+    membership, _ = ChannelMember.get_or_create(
+        user=admin, channel=channel, defaults={"role": "admin"}
+    )
+    if membership.role != "admin":
+        membership.role = "admin"
+        membership.save()
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/about",
+        data={
+            "name": "something-else",
+            "topic": "New topic",
+            "description": "New desc",
+        },
+    )
+
+    assert response.status_code == 200
+    updated = Channel.get_by_id(channel.id)
+    assert updated.name == default_name
+    assert updated.topic == "New topic"
+    assert updated.description == "New desc"
+
+
+def test_update_channel_about_without_name_keeps_name_and_skips_system_message(
+    logged_in_client, setup_channel_with_admin_and_member
+):
+    """Covers: `update_channel_about` when `name` is omitted (e.g., disabled input)."""
+    channel = setup_channel_with_admin_and_member["channel"]
+    original_name = channel.name
+
+    response = logged_in_client.put(
+        f"/chat/channel/{channel.id}/about",
+        data={"topic": "Updated topic", "description": "Updated desc"},
+    )
+
+    assert response.status_code == 200
+    updated = Channel.get_by_id(channel.id)
+    assert updated.name == original_name
+    assert updated.topic == "Updated topic"
+    assert updated.description == "Updated desc"
+
+    conv = Conversation.get_or_none(conversation_id_str=f"channel_{channel.id}")
+    if conv is not None:
+        assert (
+            Message.select()
+            .where((Message.conversation == conv) & (Message.user.is_null(True)))
+            .count()
+            == 0
+        )
 
 
 def test_get_channel_details_for_nonexistent_channel(logged_in_client):

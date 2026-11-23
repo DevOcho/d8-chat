@@ -9,7 +9,7 @@
     <div id="channel-details-content">
         <!-- Header -->
         <div class="p-3 border-bottom">
-            <h5 class="mb-0">#{{ channel.name }}</h5>
+            <h5 id="channel-details-title-{{ channel.id }}" class="mb-0">#{{ channel.name }}</h5>
         </div>
         <!-- Tab Navigation -->
         <ul class="nav nav-tabs nav-fill px-3" role="tablist">
@@ -52,9 +52,9 @@
                 {# If the action is 'edit_about', show the form directly #}
                 {% if action == 'edit_about' and current_user_membership.role == 'admin' %}
                     <div class="p-3">
-                        {% include 'partials/channel_details_about_form.html' %}
+                        <div id="about-section-wrapper">{% include 'partials/channel_details_about_form.html' %}</div>
                     </div>
-                {# Otherwise, show the default display view #}
+                    {# Otherwise, show the default display view #}
                 {% else %}
                     {% include 'partials/channel_details_tab_about.html' %}
                 {% endif %}

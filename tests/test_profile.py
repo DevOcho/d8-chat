@@ -288,7 +288,9 @@ def test_upload_avatar_preserves_gif_animation(logged_in_client, mocker):
     )
 
     # Build a 3-frame animated GIF in memory.
-    frames = [Image.new("RGB", (48, 48), c) for c in ((255, 0, 0), (0, 255, 0), (0, 0, 255))]
+    frames = [
+        Image.new("RGB", (48, 48), c) for c in ((255, 0, 0), (0, 255, 0), (0, 0, 255))
+    ]
     buf = io.BytesIO()
     frames[0].save(
         buf, format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0
