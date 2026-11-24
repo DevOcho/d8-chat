@@ -128,6 +128,13 @@ class Config:
     # leads": the SDRs, then the CEO). D8's WEBSITE_LEADS_CHAT_CHANNEL must
     # name the same channel.
     WEBSITE_LEADS_CHANNEL = os.environ.get("WEBSITE_LEADS_CHANNEL", "website-leads")
+    # D8's endpoint that takes an SDR's answer to a lead offer (on new-d8,
+    # /api/d8-chat/lead-offers/respond). When set, the pager and the incident
+    # card answer D8's lead pages (source "d8", the ka-ching) with Accept and
+    # Reject instead of Acknowledge, and D8-Chat posts the answer there with
+    # INTERNAL_NOTIFY_KEY in X-Internal-Key (app/services/lead_response.py).
+    # Empty: Acknowledge and the "Open the lead in D8" link, as before.
+    D8_LEAD_RESPONSE_URL = os.environ.get("D8_LEAD_RESPONSE_URL", "").strip()
     # The website relays the interview platform's events on the in-person day
     # here, each with a page request naming who has to act ("Interview day":
     # them, then the engineering managers). The website's setting must name
@@ -244,3 +251,5 @@ class TestConfig(Config):
     UPTIME_KUMA_CHANNEL = "devops-uptime"
     WEBSITE_LEADS_CHANNEL = "website-leads"
     INTERVIEW_DAY_CHANNEL = "interview-day"
+    # Off unless a test turns it on, whatever the developer's .env says.
+    D8_LEAD_RESPONSE_URL = ""

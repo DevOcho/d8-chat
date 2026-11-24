@@ -19,6 +19,7 @@ allowlist is the reviewable list of the app's pre-auth attack surface.
 """
 
 import os
+import re
 from unittest.mock import Mock
 from urllib.parse import urlsplit
 
@@ -143,6 +144,8 @@ def _sample_url(rule):
     """Fill a rule's parameters with values that exist in the seeded test DB."""
     samples = {"conv_id_str": "channel_1", "token": "bogus", "filename": "js/chat.js"}
     url = rule.rule
+    # <any(accept, reject):action> takes its first choice.
+    url = re.sub(r"<any\(\s*([^,)\s]+)[^)]*\):\w+>", r"\1", url)
     for arg in rule.arguments:
         val = samples.get(arg, "1")
         for form in (f"<{arg}>", f"<int:{arg}>", f"<path:{arg}>", f"<string:{arg}>"):

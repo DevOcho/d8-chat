@@ -76,12 +76,13 @@ DEFAULT_NO_ONCALL_START_LEVEL = 3
 
 TARGET_TYPES = ("schedule", "group", "user")
 # What the pager plays (EscalationPolicy.alarm). The siren loops until the
-# page stops; the ka-ching plays every 5 seconds for the first minute, then
-# every 10; the chime, a soft alarm clock, every 10 seconds for the first
-# minute, then every 20 (pager.js). All three are synthesized in the browser:
-# no audio file. The siren and the ka-ching take over the screen and ring a
-# phone like an alarm; the chime shows a banner in the corner and sends the
-# phone one ordinary notification.
+# page stops; the ka-ching (a recorded cash register,
+# static/audio/ka-ching.mp3) plays every 6 seconds until the lead is answered;
+# the chime, a soft alarm clock, every 10 seconds for the first minute, then
+# every 20 (pager.js). The siren and the chime are synthesized in the browser,
+# and so is the ka-ching when its recording can't load. The siren and the
+# ka-ching take over the screen and ring a phone like an alarm; the chime shows
+# a banner in the corner and sends the phone one ordinary notification.
 ALARMS = ("siren", "ka-ching", "chime")
 ALARM_LABELS = {
     "siren": "Siren (outages)",
@@ -98,6 +99,9 @@ PAGER_PUSH_ALARMS = ("siren", "ka-ching")
 LEADS_POLICY_NAME = "Website leads"
 LEADS_LEVELS = ((1, "sdr", 0), (2, "ceo", 15))
 LEADS_SOURCE = "d8"
+# A lead page is one of D8's (LEADS_SOURCE) that plays this alarm. The
+# interview day's pages are D8's too, with the chime.
+LEAD_ALARM = "ka-ching"
 
 # Why D8 stopped one of its pages (``POST /api/v1/internal/page/resolve``), as
 # the incident card, the timeline and the phone's cleared notice word it. D8
@@ -567,10 +571,27 @@ def incident_alarm(incident):
     return alarm if alarm in ALARMS else "siren"
 
 
+def is_lead_page(incident):
+    """True for D8's website-lead pages: source ``d8`` with the ka-ching."""
+    return incident.source == LEADS_SOURCE and incident_alarm(incident) == LEAD_ALARM
+
+
+def lead_response_enabled(incident):
+    """True when the web pager and the incident card answer ``incident`` with
+    Accept and Reject (``lead_response``): a lead page, on a D8-Chat that knows
+    D8's answer endpoint (``D8_LEAD_RESPONSE_URL``)."""
+    config = current_app.config
+    if not (config.get("D8_LEAD_RESPONSE_URL") and config.get("INTERNAL_NOTIFY_KEY")):
+        return False
+    return is_lead_page(incident)
+
+
 def serialize_incident(incident):
     """JSON shape shared by the web pager, the WS ``page`` frame and the API.
 
     Timestamps are naive-UTC ISO strings, like every other API timestamp.
+    ``lead_response`` is true when the web pager offers Accept and Reject for
+    it (``lead_response_enabled``).
     """
     channel = incident.channel
     return {
@@ -580,6 +601,7 @@ def serialize_incident(incident):
         "source": incident.source,
         "source_url": incident.source_url,
         "alarm": incident_alarm(incident),
+        "lead_response": lead_response_enabled(incident),
         "state": incident.state,
         "current_level": incident.current_level,
         "triggered_at": _iso(incident.created_at),
@@ -1217,8 +1239,13 @@ def resend_pages(now=None):
     return resent
 
 
-def acknowledge_incident(incident, user, now=None):
-    """Stop paging and escalation. Returns False if it wasn't triggered."""
+def acknowledge_incident(incident, user, now=None, announce=True):
+    """Stop paging and escalation. Returns False if it wasn't triggered.
+
+    ``announce`` False posts nothing in the channel (the card still says who
+    acknowledged): a lead D8 said there is nothing left to answer for
+    (``lead_response``).
+    """
     now = now or utc_now()
     won = (
         Incident.update(
@@ -1236,11 +1263,12 @@ def acknowledge_incident(incident, user, now=None):
     _record(incident, "acknowledged", user=user)
     _deliver_page_cleared(incident, [u.id for u, _ in paged_users(incident)])
     broadcast_incident_update(incident)
-    post_bot_message(
-        incident.channel,
-        f"✅ **Acknowledged** · {incident.title} · by **{display_name(user)}**",
-        bot=incident_bot(incident),
-    )
+    if announce:
+        post_bot_message(
+            incident.channel,
+            f"✅ **Acknowledged** · {incident.title} · by **{display_name(user)}**",
+            bot=incident_bot(incident),
+        )
     return True
 
 
@@ -1449,6 +1477,12 @@ def page_recipients(emails):
 def page_dedupe_key(key):
     """The incident ``dedupe_key`` for a page request's ``key``."""
     return f"{LEADS_SOURCE}:{key}"
+
+
+def page_key(incident):
+    """The page request's ``key`` D8 sent for ``incident`` (``page_dedupe_key``
+    undone)."""
+    return incident.dedupe_key.removeprefix(page_dedupe_key(""))
 
 
 def _escalates(page):

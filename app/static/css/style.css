@@ -1491,6 +1491,10 @@ a.hashtag-link:hover {
     border-left-color: var(--bs-danger);
 }
 
+.incident-card.incident-lead.incident-triggered {
+    border-left-color: var(--bs-success);
+}
+
 .incident-card.incident-acknowledged {
     border-left-color: var(--bs-warning);
 }
