@@ -576,14 +576,22 @@ def is_lead_page(incident):
     return incident.source == LEADS_SOURCE and incident_alarm(incident) == LEAD_ALARM
 
 
+def is_lead_offer(incident):
+    """True for a lead page D8 sent as an offer (``page.offer``): D8 offered
+    the lead to the people paged, so they can accept or reject it. D8's other
+    lead pages ("wrote in again" to the SDR who has the lead, a failed intake
+    to the CEO) have no offer behind them."""
+    return bool(incident.offer) and is_lead_page(incident)
+
+
 def lead_response_enabled(incident):
     """True when the web pager and the incident card answer ``incident`` with
-    Accept and Reject (``lead_response``): a lead page, on a D8-Chat that knows
-    D8's answer endpoint (``D8_LEAD_RESPONSE_URL``)."""
+    Accept and Reject (``lead_response``): a lead offer, on a D8-Chat that
+    knows D8's answer endpoint (``D8_LEAD_RESPONSE_URL``)."""
     config = current_app.config
     if not (config.get("D8_LEAD_RESPONSE_URL") and config.get("INTERNAL_NOTIFY_KEY")):
         return False
-    return is_lead_page(incident)
+    return is_lead_offer(incident)
 
 
 def serialize_incident(incident):
@@ -1093,6 +1101,7 @@ def trigger_incident(  # pylint: disable=too-many-arguments
     source="uptime-kuma",
     named=None,
     escalate=True,
+    offer=False,
 ):
     """Open an incident and page level 1. Returns the incident.
 
@@ -1103,6 +1112,9 @@ def trigger_incident(  # pylint: disable=too-many-arguments
     itself) pages only ``named``: no level of ``policy`` ever fires for the
     incident, nor the workspace-admin fallback. ``policy`` may be ``None``
     then; it only chooses the alarm and carries the "Paging enabled" switch.
+
+    ``offer`` (a page request's ``offer``) is kept on the incident: D8 offered
+    a lead to the people paged (``is_lead_offer``).
 
     Returns ``None`` when another worker opened one for ``dedupe_key`` first
     (the unique index on open incidents rejects the second).
@@ -1120,6 +1132,7 @@ def trigger_incident(  # pylint: disable=too-many-arguments
                 source_url=source_url,
                 message=message,
                 last_page_sent_at=now,
+                offer=offer,
             )
             if escalate:
                 _record(incident, "triggered")
@@ -1511,7 +1524,8 @@ def _page_policy(channel, page, named):
 def handle_page_request(channel, text, page, now=None):
     """Post ``text`` as ``d8-bot`` and page the channel's policy for it.
 
-    ``page`` is ``{"key", "title", "details"?, "url"?, "to"?, "escalate"?}``
+    ``page`` is ``{"key", "title", "details"?, "url"?, "to"?, "escalate"?,
+    "offer"?}``
     from ``POST /api/v1/internal/notify``. ``key`` dedupes: while an incident
     for it is open, a repeat is posted but pages nobody new. ``to`` (emails)
     names who to page in place of the policy's first level; when it names
@@ -1562,6 +1576,7 @@ def handle_page_request(channel, text, page, now=None):
             source=LEADS_SOURCE,
             named=named,
             escalate=_escalates(page),
+            offer=page.get("offer") is True,
         )
 
     post_bot_message(channel, text, on_created=_open, bot=bot)

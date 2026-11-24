@@ -96,8 +96,9 @@ def resolve_incident(incident_id):
 @limiter.limit("30 per minute")
 def answer_lead(incident_id, action):
     """Accept or reject the lead offer a D8 lead page rings for: D8-Chat sends
-    the answer to D8 (``lead_response.respond``). Only someone the page was
-    sent to may answer it.
+    the answer to D8 (``lead_response.respond``). Only a page D8 sent as an
+    offer (``page.offer``) can be answered (400 otherwise, before calling D8),
+    and only by someone it was sent to.
 
     JSON answer: ``200`` with the ``Outcome`` (``ok``, ``stopped``,
     ``message``, ``status``, ``lead_url``, ...) whenever the page is settled
@@ -109,8 +110,8 @@ def answer_lead(incident_id, action):
     incident = Incident.get_or_none(Incident.id == incident_id)
     if incident is None:
         return _error("Incident not found.", 404)
-    if not oncall_service.is_lead_page(incident):
-        return _error("Only a website lead from D8 can be accepted or rejected.", 400)
+    if not oncall_service.is_lead_offer(incident):
+        return _error("Only a lead D8 offered can be accepted or rejected.", 400)
     if not oncall_service.lead_response_enabled(incident):
         return _error(
             "Accepting leads in D8-Chat isn't set up. Open the lead in D8.", 503

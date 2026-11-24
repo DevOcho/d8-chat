@@ -3,9 +3,10 @@
 "Accept and Reject").
 
 D8 offers each website lead to one SDR at a time and pages that person here
-(``handle_page_request`` with ``escalate`` false, the ka-ching). With
-``D8_LEAD_RESPONSE_URL`` set, the web pager and the incident card answer a lead
-page with Accept and Reject instead of Acknowledge, and D8-Chat's server sends
+(``handle_page_request`` with ``escalate`` false and ``offer`` true, the
+ka-ching). With ``D8_LEAD_RESPONSE_URL`` set, the web pager and the incident
+card answer such a lead offer with Accept and Reject instead of Acknowledge
+(``oncall_service.lead_response_enabled``), and D8-Chat's server sends
 the answer to D8 (``POST /oncall/incidents/<id>/accept|reject`` calls
 ``respond``)::
 

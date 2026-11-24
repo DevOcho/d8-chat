@@ -695,6 +695,10 @@ class Incident(BaseModel):
     message = ForeignKeyField(
         Message, backref="incidents", null=True, on_delete="SET NULL"
     )
+    # D8 offered a lead to the people paged (the page request's ``offer``):
+    # with D8_LEAD_RESPONSE_URL set, they answer it with Accept and Reject
+    # (``lead_response``). D8's other lead pages leave it False.
+    offer = BooleanField(default=False)
 
 
 # At most one open incident per monitor. Two DOWN webhooks racing on different

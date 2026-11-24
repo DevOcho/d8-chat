@@ -19,9 +19,10 @@
  * (e.g. the connection dropped) the page stays up, silenced: the server never
  * heard, so it keeps escalating, and its next re-send rings here again.
  *
- * A lead page the server marks `lead_response` (D8-Chat knows D8's answer
- * endpoint) offers Accept and Reject instead: D8 offered this lead to this
- * person, and D8-Chat's server passes the answer on to D8
+ * A lead page the server marks `lead_response` (D8 sent it as an offer, and
+ * D8-Chat knows D8's answer endpoint) offers Accept and Reject instead: D8
+ * offered this lead to this person, and D8-Chat's server passes the answer
+ * on to D8
  * (POST /oncall/incidents/<id>/accept|reject). Either button silences this
  * tab at once (Reject then asks "are you sure?" in the app's modal). Once the
  * server says the page is settled (answered, or nothing left to answer) it
@@ -79,10 +80,15 @@
     const CHIME_BEEP_S = 0.1;
 
     // How each alarm is worded: the overlay row, the flashing tab title, the
-    // desktop notification and its fallback body.
+    // desktop notification and its fallback body (`answerBody` for a lead
+    // offer answered here with Accept and Reject).
     const ALARM_TEXT = {
         siren: { row: '🔴 DOWN: ', flash: '🚨 PAGE: ', notify: '🚨 DOWN: ', body: 'You are being paged. Open D8-Chat to acknowledge.' },
-        'ka-ching': { row: '💰 ', flash: '💰 LEAD: ', notify: '💰 ', body: 'Someone wants to talk to us. Open D8-Chat to accept or reject.' },
+        'ka-ching': {
+            row: '💰 ', flash: '💰 LEAD: ', notify: '💰 ',
+            body: 'Someone wants to talk to us. Open D8-Chat to acknowledge.',
+            answerBody: 'Someone wants to talk to us. Open D8-Chat to accept or reject.',
+        },
         chime: { row: '🔔 ', flash: '🔔 ', notify: '🔔 ', body: "You're needed. Open D8-Chat to acknowledge." },
     };
 
@@ -213,7 +219,7 @@
             this.syncAlarms(isNew ? alarmOf(incident) : null);
             this.startTitleFlash();
             this.startResync();
-            this.notify(incident, !isNew);
+            this.notify(incident, !isNew, isAnswerable({ incident, test: !!frame.test }));
         },
 
         clear(id) {
@@ -838,13 +844,14 @@
             return window.TitleManager ? window.TitleManager.current() : this.originalTitle;
         },
 
-        notify(incident, renotify) {
+        // `answerable`: a lead offer answered here, worded to accept or reject.
+        notify(incident, renotify, answerable = false) {
             if (!('Notification' in window) || Notification.permission !== 'granted') return;
             const id = String(incident.id);
             const text = ALARM_TEXT[alarmOf(incident)];
             try {
                 const notification = new Notification(`${text.notify}${incident.title}`, {
-                    body: incident.details || text.body,
+                    body: incident.details || (answerable && text.answerBody) || text.body,
                     tag: `incident-${id}`,
                     requireInteraction: true,
                     renotify,

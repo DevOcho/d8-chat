@@ -498,16 +498,27 @@ Kenny's walkthrough he pressed Acknowledge, the offer ran out, and the lead
 moved on to the next person. Kenny approved this change on 2026-11-24.
 
 A **lead page** is an incident with `source` `d8` and the `ka-ching` alarm
-(`oncall_service.is_lead_page`). Outages and the interview day's chime pages
-(also `source` `d8`) are unchanged.
+(`oncall_service.is_lead_page`). A **lead offer** is a lead page D8 sent with
+`"offer": true` in the page request (`oncall_service.is_lead_offer`): D8
+offered the lead to the person paged. D8 sends it on every offer page, and
+never on its two other lead pages: "wrote in again" to the SDR who has the
+lead (key `d8-lead:<id>`) and a failed website intake to the CEO
+(`d8-lead-failed:<id>`). Outages and the interview day's chime pages (also
+`source` `d8`) are unchanged.
 
-- **Accept and Reject replace Acknowledge** on a lead page, on the ringing
-  screen and on the incident card, when `D8_LEAD_RESPONSE_URL` is set (the
-  incident's `lead_response` is true). Accept is one tap. Reject asks "Reject
-  this lead? It goes to the next person." in the app's confirm dialog (raised
-  above the pager while it rings). Pressing either stops the sound on that
-  screen at once. Without the setting a lead page keeps Acknowledge and the
-  "Open the lead in D8" link.
+- **`page.offer`** on `POST /api/v1/internal/notify`: optional, a boolean
+  (anything else is a 400; `null` counts as absent; absent means false). It
+  is kept on the incident (`Incident.offer`, migration `0015`). Keys the page
+  request doesn't know are ignored, as before.
+- **Accept and Reject replace Acknowledge** on a lead offer, on the ringing
+  screen, on the incident card and in the desktop notification's wording,
+  when `D8_LEAD_RESPONSE_URL` is set (the incident's `lead_response` is
+  true). Accept is one tap. Reject asks "Reject this lead? It goes to the
+  next person." in the app's confirm dialog (raised above the pager while it
+  rings). Pressing either stops the sound on that screen at once. Every other
+  lead page, and every lead page without the setting, keeps Acknowledge and
+  the "Open the lead in D8" link; the accept and reject routes answer 400 for
+  them without calling D8.
 - **Only someone the page was sent to** (an `IncidentPage` row) may answer:
   not the other SDRs, and not admins (who can still acknowledge anything).
 - **D8-Chat's server sends the answer to D8**
@@ -535,8 +546,8 @@ A **lead page** is an incident with `source` `d8` and the `ka-ching` alarm
 - **Green, not red.** A lead's ringing screen is green (Bootstrap's success
   colour) with a slower pulse and the heading "Someone wants to talk to us";
   the card's Paging badge and border are green. An outage ringing at the same
-  time makes the screen red. The desktop notification's fallback text says
-  "Open D8-Chat to accept or reject".
+  time makes the screen red. For a lead offer the desktop notification's
+  fallback text says "Open D8-Chat to accept or reject".
 - **A recorded ka-ching.** `app/static/audio/ka-ching.mp3` (credit in
   `app/static/audio/README.md`) is fetched and decoded into Web Audio, so it
   is scheduled on the audio clock like the synthesized sound; the synthesized
@@ -545,11 +556,7 @@ A **lead page** is an incident with `source` `d8` and the `ka-ching` alarm
   old slow-down after the first minute. The siren and the chime keep their
   schedules.
 - **Not changed.** The mobile app still acknowledges (and its push body still
-  says "acknowledge"). D8 also sends two ka-ching pages with no offer behind
-  them: "wrote in again" to the SDR who has the lead (key `d8-lead:<id>`) and
-  a failed website intake to the CEO (`d8-lead-failed:<id>`). They show
-  Accept and Reject too; either gets `unknown_offer` from D8, which stops the
-  page like Acknowledge did.
+  says "acknowledge").
 - **Local development.** `.auto/deployment.yaml` sets
   `D8_LEAD_RESPONSE_URL=http://new-d8/api/d8-chat/lead-offers/respond` (the
   new-d8 service in the cluster); `example.env` documents it.

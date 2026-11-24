@@ -1926,10 +1926,11 @@ def _d8_answer(status, body=None):
 @pytest.fixture
 def offer(client, leads, app, mocker):
     """D8-Chat knows D8's answer endpoint, and D8 has offered a lead to Sam:
-    a directed page with the ka-ching. ``offer.d8`` is the mocked call to D8
-    (it answers "accepted" unless a test says otherwise)."""
+    a directed page with the ka-ching and ``offer`` true. ``offer.d8`` is the
+    mocked call to D8 (it answers "accepted" unless a test says otherwise)."""
     app.config["D8_LEAD_RESPONSE_URL"] = LEAD_RESPONSE_URL
-    incident_id = _directed_page(client, key=OFFER_KEY).get_json()["incident_id"]
+    body = _directed_page(client, key=OFFER_KEY, offer=True).get_json()
+    incident_id = body["incident_id"]
     ChannelMember.create(user=leads.sam, channel=leads.channel)
     d8 = mocker.patch(
         "app.services.lead_response.requests.post",
@@ -2278,3 +2279,58 @@ def test_a_failed_local_resolve_still_reports_the_answer(client, offer, mocker):
     res = _answer(client, offer.incident, user=offer.leads.sam)
 
     assert res.status_code == 200 and res.get_json()["ok"] is True
+
+
+def test_a_page_request_keeps_whether_it_is_an_offer(client, leads):
+    offered = _directed_page(client, key="lead-1-offer-1", offer=True).get_json()
+    absent = _directed_page(client, key="d8-lead:1").get_json()
+    null = _directed_page(client, key="d8-lead:2", offer=None).get_json()
+    false = _directed_page(client, key="d8-lead:3", offer=False).get_json()
+
+    assert Incident.get_by_id(offered["incident_id"]).offer is True
+    for body in (absent, null, false):
+        assert Incident.get_by_id(body["incident_id"]).offer is False
+
+
+@pytest.mark.parametrize("offer", ["true", 1, 0, [], {}])
+def test_a_page_request_with_a_non_boolean_offer_is_refused(client, leads, offer):
+    res = _directed_page(client, offer=offer)
+
+    assert res.status_code == 400
+    assert "offer" in res.get_json()["error"]
+    assert Message.select().count() == 0
+    assert Incident.select().count() == 0
+
+
+def test_a_page_request_ignores_keys_it_does_not_know(client, leads):
+    res = _directed_page(client, priority="high", something_new={"a": 1})
+
+    assert res.status_code == 200
+    assert Incident.get_by_id(res.get_json()["incident_id"]).offer is False
+
+
+def test_a_lead_page_without_an_offer_keeps_acknowledge(client, leads, app, mocker):
+    """D8's "wrote in again" page to the SDR who has the lead (and its failed
+    intake page to the CEO) carry no offer: Acknowledge, as without D8's
+    answer endpoint, and nothing to accept or reject."""
+    app.config["D8_LEAD_RESPONSE_URL"] = LEAD_RESPONSE_URL
+    d8 = mocker.patch("app.services.lead_response.requests.post")
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+    ChannelMember.create(user=leads.sam, channel=leads.channel)
+    _login(client, leads.sam)
+
+    html = _card(client, leads.channel)
+
+    assert oncall_service.is_lead_page(incident) and not incident.offer
+    assert f"/oncall/incidents/{incident.id}/ack" in html
+    assert f"/oncall/incidents/{incident.id}/accept" not in html
+    assert '<span class="badge bg-success"><i class="bi bi-broadcast' in html
+    assert oncall_service.serialize_incident(incident)["lead_response"] is False
+    (frame,) = _frames(leads.sam.id, "page")
+    assert frame["incident"]["lead_response"] is False
+    for action in ("accept", "reject"):
+        res = _answer(client, incident, action=action)
+        assert res.status_code == 400
+        assert "offered" in res.get_json()["error"]
+    d8.assert_not_called()
+    assert Incident.get_by_id(incident.id).state == "triggered"

@@ -1150,7 +1150,9 @@ describe('Accept and Reject (a lead D8 offered to this person)', () => {
         expect(env.$('#toast-body-content a').href).toBe('https://new-d8.local/marketing/leads/12');
     });
 
-    it('without D8\'s answer endpoint a lead keeps Acknowledge and its link, still green', async () => {
+    // The server sends lead_response false for a lead page that isn't an offer
+    // ("wrote in again", a failed intake) and when D8's endpoint isn't set.
+    it('a lead without lead_response keeps Acknowledge and its link, still green', async () => {
         const env = await offerEnv({ inc: offer({ lead_response: false }) });
         const [row] = rows(env);
 
@@ -1191,6 +1193,20 @@ describe('Accept and Reject (a lead D8 offered to this person)', () => {
         const env = await offerEnv({ inc: offer({ details: null }) });
         expect(env.notifications[0].title).toBe('💰 Website lead for you: Dana Whitfield at Meridian Health Systems');
         expect(env.notifications[0].options.body).toBe('Someone wants to talk to us. Open D8-Chat to accept or reject.');
+    });
+
+    it('for a lead without lead_response it asks to acknowledge', async () => {
+        const env = await offerEnv({ inc: offer({ details: null, lead_response: false }) });
+        expect(env.notifications[0].options.body).toBe('Someone wants to talk to us. Open D8-Chat to acknowledge.');
+    });
+
+    it('a ka-ching test page asks to acknowledge too', async () => {
+        const env = await pagerEnv();
+        await env.openSocket();
+        const frame = testPageFrame('test-1792245600-ka-ching');
+        Object.assign(frame.incident, { alarm: 'ka-ching', details: null, lead_response: true });
+        await env.frame(frame);
+        expect(env.notifications[0].options.body).toBe('Someone wants to talk to us. Open D8-Chat to acknowledge.');
     });
 
     describe('the recorded ka-ching', () => {

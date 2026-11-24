@@ -1,9 +1,10 @@
 {# Incident card under an Uptime Kuma DOWN message or a D8 page (a website
    lead: source 'd8', which has nothing to resolve once someone has it, so no
    Resolve button; D8 resolves its own pages, and the card says why, e.g.
-   "Expired in D8"). A lead page is green, not red, and, with D8's answer
-   endpoint set (D8_LEAD_RESPONSE_URL), offers Accept and Reject instead of
-   Acknowledge: oncall.answer_lead sends the answer to D8, and pager.js shows
+   "Expired in D8"). A lead page is green, not red, and a lead offer (D8's
+   page.offer), with D8's answer endpoint set (D8_LEAD_RESPONSE_URL), offers
+   Accept and Reject instead of Acknowledge: oncall.answer_lead sends the
+   answer to D8, and pager.js shows
    the outcome (the lead-response event). Viewer-agnostic: the same
    HTML is broadcast to the whole channel as an OOB swap whenever the incident
    changes, so buttons show for everyone and the server enforces who may act. #}

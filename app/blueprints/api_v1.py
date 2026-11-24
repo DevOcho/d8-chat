@@ -1550,8 +1550,8 @@ def update_avatar():
 HELPDESK_BOT_USERNAME = "helpdesk-bot"
 _PAGE_REQUEST_ERROR = (
     "page needs a key (up to 200 characters) and a title; details, an "
-    "http(s) url, to (a list of 1 to 10 emails) and escalate (true or false; "
-    "false needs to) are optional"
+    "http(s) url, to (a list of 1 to 10 emails), escalate (true or false; "
+    "false needs to) and offer (true or false) are optional"
 )
 _PAGE_RESOLVE_ERROR = (
     "key (up to 200 characters) and reason (accepted, expired, rejected or "
@@ -1591,8 +1591,14 @@ def _valid_page_escalate(page):
     return escalate or page.get("to") is not None
 
 
+def _valid_page_offer(page):
+    """``page.offer``: absent (or null) or a boolean."""
+    return page.get("offer") is None or isinstance(page.get("offer"), bool)
+
+
 def _valid_page_request(page):
-    """The ``page`` object of an internal notify, as handle_page_request reads it."""
+    """The ``page`` object of an internal notify, as handle_page_request reads
+    it. Keys it doesn't know are ignored, not refused."""
     if not isinstance(page, dict):
         return False
     title = page.get("title")
@@ -1604,6 +1610,8 @@ def _valid_page_request(page):
     if details is not None and not isinstance(details, str):
         return False
     if not _valid_page_to(page.get("to")) or not _valid_page_escalate(page):
+        return False
+    if not _valid_page_offer(page):
         return False
     return url is None or (
         isinstance(url, str) and url.startswith(("https://", "http://"))
@@ -1656,7 +1664,8 @@ def internal_notify():
     Body:
         ``{"channel_name": "<name>", "message": "<text>"}``, plus optionally
         ``"page": {"key": "<id>", "title": "<text>", "details": "<text>",
-        "url": "https://…", "to": ["<email>", …], "escalate": false}`` to page
+        "url": "https://…", "to": ["<email>", …], "escalate": false,
+        "offer": true}`` to page
         the channel's escalation policy (D8's website leads, the website's
         interview day). A page request is posted as ``d8-bot`` and opens an
         incident (``oncall_service.handle_page_request``); ``key`` dedupes
@@ -1672,6 +1681,11 @@ def internal_notify():
         not when its policy's paging is switched off, and a ``to`` that
         matches nobody active is posted only (``incident_id`` null). D8 stops
         the page with ``POST /api/v1/internal/page/resolve``.
+
+        ``offer`` (default false) true says D8 offered a lead to the people
+        paged: with ``D8_LEAD_RESPONSE_URL`` set, they answer it with Accept
+        and Reject (``lead_response``). D8's other lead pages ("wrote in
+        again", a failed intake) leave it out and keep Acknowledge.
 
         Or ``{"to": "<email>", "message": "<text>"}``: a DM to that person
         from the ``chief-of-staff`` bot (D8's morning brief), never a page.
