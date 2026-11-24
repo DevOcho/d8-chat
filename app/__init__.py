@@ -787,6 +787,9 @@ def register_template_filters(app):
 
         return {
             "incident_for_message": oncall_service.incident_for_message,
+            "incident_resolution_note": oncall_service.resolution_note,
+            "incident_is_lead": oncall_service.is_lead_page,
+            "incident_lead_response": oncall_service.lead_response_enabled,
             "oncall_status_for_user": oncall_service.oncall_status_for_user,
             "oncall_display_name": oncall_service.display_name,
             "can_manage_oncall": oncall_service.can_manage_oncall,

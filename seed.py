@@ -151,9 +151,36 @@ def seed_lead_paging(workspace, kp):
         user=sara, workspace=workspace, defaults={"role": "member"}
     )
     set_local_groups(sara, ["sdr"])
+    members = [sara, kp]
+    # D8 pages one person at a time by email (ONCALL_PLAN.md, "Directed
+    # pages"), so the people new-d8's seed routes website leads to need
+    # accounts here with the same emails, or every offer is "could not page".
+    for username, display_name, email, password, groups in D8_LEAD_USERS:
+        user, created = User.get_or_create(
+            username=username,
+            defaults={"email": email, "display_name": display_name, "is_active": True},
+        )
+        if created:
+            user.set_password(password)
+            user.save()
+            print(f"Created user '{username}' (password {password}).")
+        WorkspaceMember.get_or_create(
+            user=user, workspace=workspace, defaults={"role": "member"}
+        )
+        set_local_groups(user, groups)
+        members.append(user)
     if leads:
-        for user in (sara, kp):
+        for user in members:
             ChannelMember.get_or_create(user=user, channel=leads)
+
+
+# new-d8's demo SDRs and its final recipient for website leads, by the emails
+# new-d8's seed gives them (username, display name, email, password, groups).
+D8_LEAD_USERS = (
+    ("sdr", "D8 SDR", "sdr@devocho.com", "sdr", ["sdr"]),
+    ("sdr2", "D8 SDR Two", "sdr2@devocho.com", "sdr2", ["sdr"]),
+    ("ceo", "D8 CEO", "ceo@devocho.com", "ceo", []),
+)
 
 
 # The interview day's people, by the emails the local interview platform and

@@ -19,6 +19,7 @@ allowlist is the reviewable list of the app's pre-auth attack surface.
 """
 
 import os
+import re
 from unittest.mock import Mock
 from urllib.parse import urlsplit
 
@@ -51,6 +52,7 @@ PUBLIC_ENDPOINTS = {
     # Not decorator-guarded, but authenticated inside the view/handler.
     # Asserted separately below so they can't quietly lose their check.
     "api_v1.internal_notify": "X-Internal-Key shared secret, compared in constant time",
+    "api_v1.internal_page_resolve": "X-Internal-Key shared secret, compared in constant time",
     "api_v1.uptime_kuma_webhook": "Bearer UPTIME_KUMA_WEBHOOK_KEY, compared in constant time",
     "chat": "WebSocket: session check + Origin check inside the handler",
     "api_ws": "WebSocket: bearer token via Sec-WebSocket-Protocol",
@@ -142,6 +144,8 @@ def _sample_url(rule):
     """Fill a rule's parameters with values that exist in the seeded test DB."""
     samples = {"conv_id_str": "channel_1", "token": "bogus", "filename": "js/chat.js"}
     url = rule.rule
+    # <any(accept, reject):action> takes its first choice.
+    url = re.sub(r"<any\(\s*([^,)\s]+)[^)]*\):\w+>", r"\1", url)
     for arg in rule.arguments:
         val = samples.get(arg, "1")
         for form in (f"<{arg}>", f"<int:{arg}>", f"<path:{arg}>", f"<string:{arg}>"):
@@ -228,6 +232,26 @@ def test_internal_notify_fails_closed_when_no_key_is_configured(app, client):
     assert res.status_code == 401
 
 
+def test_internal_page_resolve_requires_the_shared_secret(client):
+    body = {"key": "d8-lead:1", "reason": "accepted"}
+    assert client.post("/api/v1/internal/page/resolve", json=body).status_code == 401
+    res = client.post(
+        "/api/v1/internal/page/resolve", json=body, headers={"X-Internal-Key": "wrong"}
+    )
+    assert res.status_code == 401
+
+
+def test_internal_page_resolve_fails_closed_when_no_key_is_configured(app, client):
+    """An unset INTERNAL_NOTIFY_KEY must lock it too, not open it."""
+    app.config["INTERNAL_NOTIFY_KEY"] = None
+    res = client.post(
+        "/api/v1/internal/page/resolve",
+        json={"key": "d8-lead:1", "reason": "accepted"},
+        headers={"X-Internal-Key": ""},
+    )
+    assert res.status_code == 401
+
+
 def test_uptime_kuma_webhook_requires_the_bearer_key(client):
     body = {"heartbeat": {"status": 0}, "monitor": {"id": 1, "name": "x"}}
     assert client.post("/api/v1/integrations/uptime-kuma", json=body).status_code == 401
@@ -259,6 +283,7 @@ def test_uptime_kuma_webhook_fails_closed_when_no_key_is_configured(app, client)
             "Authorization",
         ),
         ("/api/v1/internal/notify", "INTERNAL_NOTIFY_KEY", "X-Internal-Key"),
+        ("/api/v1/internal/page/resolve", "INTERNAL_NOTIFY_KEY", "X-Internal-Key"),
     ],
 )
 def test_shared_secret_endpoints_reject_non_ascii_keys(

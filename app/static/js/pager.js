@@ -7,30 +7,48 @@
  * alarm, a flashing tab title and a sticky desktop notification.
  *
  * Each incident carries its policy's alarm: the looping `siren` (outages),
- * the `ka-ching` (website leads from D8), which plays every 5 seconds for the
- * first minute and every 10 seconds after that, or the `chime` (the interview
- * day), a soft alarm clock every 10 seconds for the first minute and every 20
- * after that. A new page starts its alarm's fast minute again. When only
+ * the `ka-ching` (website leads from D8), which plays every 6 seconds until
+ * the lead is answered, or the `chime` (the interview day), a soft alarm
+ * clock every 10 seconds for the first minute and every 20 after that. A new
+ * page starts its alarm again (the chime's fast minute too). When only
  * chimes are ringing the alert is a banner in the corner, not the full screen:
- * the person is at work and only needs to know they are wanted.
+ * the person is at work and only needs to know they are wanted. A lead is good
+ * news, so its full screen is green, not red.
  *
  * Acknowledge silences this tab at once, before the request. If it fails
  * (e.g. the connection dropped) the page stays up, silenced: the server never
  * heard, so it keeps escalating, and its next re-send rings here again.
+ *
+ * A lead page the server marks `lead_response` (D8 sent it as an offer, and
+ * D8-Chat knows D8's answer endpoint) offers Accept and Reject instead: D8
+ * offered this lead to this person, and D8-Chat's server passes the answer
+ * on to D8
+ * (POST /oncall/incidents/<id>/accept|reject). Either button silences this
+ * tab at once (Reject then asks "are you sure?" in the app's modal). Once the
+ * server says the page is settled (answered, or nothing left to answer) it
+ * stops here and a toast says how it went, with "Open the lead in D8" after an
+ * Accept; D8 also stops the page for everyone, and `page_cleared` may arrive
+ * before or after the answer. When the answer can't reach D8 (no connection,
+ * a timeout, D8 down) the page rings again with the reason, so the lead is
+ * never lost to a failed tap. The incident card's buttons go through htmx
+ * instead, and their outcome arrives here as the `lead-response` event.
  *
  * Delivery is belt-and-braces because pub/sub is at-most-once: the server
  * re-sends every page each minute, and this file re-syncs from
  * GET /oncall/pages/active on load, on every WebSocket (re)connect, and every
  * RESYNC_MS while ringing, so a lost `page_cleared` can't leave the siren on.
  *
- * Every alarm is synthesized with Web Audio (no asset). The siren's two-tone
- * wail comes from a square-wave LFO modulating the oscillator's frequency on
- * the audio thread, so it keeps going in a background tab where JS timers are
- * throttled. The ka-ching is a burst of filtered noise (the drawer) and a bell
- * (a few inharmonic partials that ring out); the chime is two soft pairs of
- * sine beeps. For the same reason each of those is scheduled on the audio
- * clock minutes ahead, and a timer only tops the schedule up, so a tab whose
- * timers run once a minute still rings on time.
+ * Every alarm plays through Web Audio. The siren's two-tone wail comes from
+ * a square-wave LFO modulating the oscillator's frequency on the audio thread,
+ * so it keeps going in a background tab where JS timers are throttled. The
+ * ka-ching is a recording (static/audio/ka-ching.mp3, the overlay's
+ * data-kaching-src), fetched and decoded once the audio context exists; until
+ * then, or if it can't load, a synthesized one stands in: a burst of filtered
+ * noise (the drawer) and a bell (a few inharmonic partials that ring out). The
+ * chime is two soft pairs of sine beeps. For the same reason as the siren,
+ * each of those is scheduled on the audio clock minutes ahead, and a timer
+ * only tops the schedule up, so a tab whose timers run once a minute still
+ * rings on time.
  * Browsers only allow audio after a user gesture on the page; until then the
  * alert shows a "click to start the alarm" hint.
  */
@@ -46,11 +64,13 @@
     const CUE_LOOKAHEAD_S = 180;        // repeating alarms are scheduled this far ahead on the audio clock
     const CUE_TOPUP_MS = 15000;         // how often their schedule is extended
     // The alarms that repeat a short sound rather than loop: how loud, and when.
+    // `gain` is the synthesized sound's, `recordingGain` the recording's (it
+    // is already levelled).
     const CUES = {
-        // A ka-ching every 5 s for the first minute, then every 10 s.
-        'ka-ching': { gain: 0.5, fastEvery: 5, fastFor: 60, slowEvery: 10, play: 'playKaching' },
+        // A ka-ching every 6 s until the lead is answered: it never slows down.
+        'ka-ching': { gain: 0.5, recordingGain: 1, every: 6, play: 'playKaching' },
         // The chime: every 10 s for the first minute, then every 20 s, and quieter.
-        chime: { gain: 0.16, fastEvery: 10, fastFor: 60, slowEvery: 20, play: 'playChime' },
+        chime: { gain: 0.16, every: 10, slowAfter: 60, slowEvery: 20, play: 'playChime' },
     };
     const KACHING_BELL_HZ = 2093;       // C7, the bell's fundamental
     // [frequency ratio, peak gain, ring-out seconds]: bell-like inharmonic partials.
@@ -60,21 +80,45 @@
     const CHIME_BEEP_S = 0.1;
 
     // How each alarm is worded: the overlay row, the flashing tab title, the
-    // desktop notification and its fallback body.
+    // desktop notification and its fallback body (`answerBody` for a lead
+    // offer answered here with Accept and Reject).
     const ALARM_TEXT = {
         siren: { row: '🔴 DOWN: ', flash: '🚨 PAGE: ', notify: '🚨 DOWN: ', body: 'You are being paged. Open D8-Chat to acknowledge.' },
-        'ka-ching': { row: '💰 ', flash: '💰 LEAD: ', notify: '💰 ', body: 'Someone wants to talk to us. Open D8-Chat to acknowledge.' },
+        'ka-ching': {
+            row: '💰 ', flash: '💰 LEAD: ', notify: '💰 ',
+            body: 'Someone wants to talk to us. Open D8-Chat to acknowledge.',
+            answerBody: 'Someone wants to talk to us. Open D8-Chat to accept or reject.',
+        },
         chime: { row: '🔔 ', flash: '🔔 ', notify: '🔔 ', body: "You're needed. Open D8-Chat to acknowledge." },
     };
 
+    // The overlay's heading and footer: an outage (or anything else that
+    // isn't good news), a lead (`answer` when it offers Accept and Reject),
+    // and the chimes' corner banner.
+    const PRESENTATION = {
+        alarm: { heading: 'You are being paged', footer: "Acknowledging stops the alarm for everyone and tells the team you're on it." },
+        lead: { heading: 'Someone wants to talk to us', footer: "Acknowledging stops the alarm for everyone and tells the team you're on it." },
+        answer: { heading: 'Someone wants to talk to us', footer: 'Accept and the lead is yours. Reject and it goes to the next person.' },
+        banner: { heading: "You're needed", footer: 'Acknowledging stops the chime and tells the others you have it.' },
+    };
+
+    const REJECT_QUESTION = 'Reject this lead? It goes to the next person.';
+    // The server gives D8 5 s to answer; this covers that and the trip here.
+    const ANSWER_TIMEOUT_MS = 8000;
+
     const alarmOf = (incident) => (incident && ALARM_TEXT[incident.alarm] ? incident.alarm : 'siren');
+    // A website lead from D8 (a test of the ka-ching looks like one too).
+    const isLead = ({ incident, test }) => alarmOf(incident) === 'ka-ching' && (test || incident.source === 'd8');
+    // A lead this person answers here, with Accept and Reject.
+    const isAnswerable = ({ incident, test }) => !test && !!incident.lead_response;
 
     // Seconds after the alarm started that its n-th cue (from 0) plays.
     function cueOffset(alarm, n) {
-        const { fastEvery, fastFor, slowEvery } = CUES[alarm];
-        const fastCount = fastFor / fastEvery;
-        if (n <= fastCount) return n * fastEvery;
-        return fastFor + (n - fastCount) * slowEvery;
+        const { every, slowAfter, slowEvery } = CUES[alarm];
+        if (!slowAfter) return n * every;
+        const fastCount = slowAfter / every;
+        if (n <= fastCount) return n * every;
+        return slowAfter + (n - fastCount) * slowEvery;
     }
 
     const kachingOffset = (n) => cueOffset('ka-ching', n);
@@ -90,7 +134,7 @@
     }
 
     const PagerManager = {
-        // incident id (string) → { incident, test, since, acking, silenced, error }
+        // incident id (string) → { incident, test, since, acking, answering, silenced, error }
         entries: new Map(),
         notifications: new Map(),   // incident id → Notification
         clearedAt: new Map(),       // incident id → when it was cleared here (ms)
@@ -98,6 +142,8 @@
         siren: null,
         cues: new Map(),            // alarm → its repeating schedule (ka-ching, chime)
         noise: null,
+        kachingLoad: null,          // the recording's fetch + decode, once
+        kachingBuffer: null,        // the decoded recording, when it loaded
         titleTimer: null,
         resyncTimer: null,
         originalTitle: document.title,
@@ -119,10 +165,14 @@
             this.list.addEventListener('click', (e) => {
                 const ack = e.target.closest('[data-pager-ack]');
                 if (ack) this.acknowledge(ack.dataset.pagerAck);
+                const answer = e.target.closest('[data-pager-answer]');
+                if (answer) this.answerLead(answer.dataset.pagerIncident, answer.dataset.pagerAnswer);
                 const view = e.target.closest('[data-pager-view]');
                 if (view) this.viewMessage(view.dataset.pagerView, view.dataset.pagerChannel);
             });
 
+            // The incident card's Accept / Reject (htmx): the server's HX-Trigger.
+            document.body.addEventListener('lead-response', (e) => this.leadAnswered(e.detail));
             document.body.addEventListener('htmx:wsOpen', () => this.syncActive());
             // Background tabs throttle timers, so also check on coming back.
             document.addEventListener('visibilitychange', () => {
@@ -150,14 +200,17 @@
             const isNew = !prev;
             const since = isNew ? Date.now() : prev.since;
             // A re-send means nobody has acknowledged it, so a page silenced
-            // here rings again, unless our acknowledgement is still out.
+            // here rings again, unless our acknowledgement (or answer) is
+            // still out.
             const acking = !!prev?.acking;
+            const answering = !!prev?.answering;
             this.entries.set(id, {
                 incident,
                 test: !!frame.test,
                 since,
                 acking,
-                silenced: acking,
+                answering,
+                silenced: acking || answering,
                 error: null,
             });
             this.render();
@@ -166,7 +219,7 @@
             this.syncAlarms(isNew ? alarmOf(incident) : null);
             this.startTitleFlash();
             this.startResync();
-            this.notify(incident, !isNew);
+            this.notify(incident, !isNew, isAnswerable({ incident, test: !!frame.test }));
         },
 
         clear(id) {
@@ -235,6 +288,107 @@
             }
         },
 
+        // --- Accept / Reject (a lead D8 offered to this person) ---
+
+        answerLead(id, action) {
+            const entry = this.entries.get(id);
+            if (!entry || entry.answering) return;
+            // Either button stops the sound here at once, before Reject asks.
+            Object.assign(entry, { silenced: true, error: null });
+            this.render();
+            this.syncAlarms(null);
+            if (action !== 'reject') {
+                this.sendAnswer(id, action);
+                return;
+            }
+            const send = () => this.sendAnswer(id, action);
+            if (window.ConfirmDialog) window.ConfirmDialog.ask(REJECT_QUESTION, send, 'Reject');
+            else if (window.confirm(REJECT_QUESTION)) send();
+        },
+
+        async sendAnswer(id, action) {
+            const entry = this.entries.get(id);
+            if (!entry || entry.answering) return;
+            Object.assign(entry, { answering: true, silenced: true, error: null });
+            this.render();
+            this.syncAlarms(null);
+            let outcome;
+            try {
+                outcome = await this.postAnswer(id, action);
+            } catch (err) {
+                this.answerFailed(id, err.message);
+                return;
+            }
+            // Settled: answered, or nothing left to answer. D8's page_cleared
+            // may already have stopped it here; either way, stop.
+            this.clear(id);
+            this.showLeadOutcome(outcome);
+        },
+
+        // The server's outcome, or an Error worded for the person.
+        async postAnswer(id, action) {
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            let timer;
+            const timeout = new Promise((resolve, reject) => {
+                timer = setTimeout(() => {
+                    reject(new Error("D8-Chat didn't answer in time. Try again."));
+                    controller?.abort();
+                }, ANSWER_TIMEOUT_MS);
+            });
+            const request = fetch(`/oncall/incidents/${encodeURIComponent(id)}/${action}`, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'X-CSRFToken': csrfToken(), Accept: 'application/json' },
+                signal: controller?.signal,
+            }).catch((err) => {
+                throw new Error(`Couldn't reach D8-Chat (${err.message}). Try again.`);
+            });
+            try {
+                const response = await Promise.race([request, timeout]);
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(data.error || `D8-Chat had a problem (HTTP ${response.status}). Try again.`);
+                }
+                return data;
+            } finally {
+                clearTimeout(timer);
+            }
+        },
+
+        // D8 never took the answer: ring again, so the lead isn't lost.
+        answerFailed(id, message) {
+            const current = this.entries.get(id);
+            if (!current) {
+                // The page stopped meanwhile (D8 resolved it).
+                window.ToastManager?.show("Couldn't send your answer", message, 'danger');
+                return;
+            }
+            Object.assign(current, { answering: false, silenced: false, error: message });
+            this.render();
+            this.syncAlarms(null);
+        },
+
+        // An answer settled from the incident card (htmx's lead-response event).
+        leadAnswered(outcome) {
+            if (!outcome) return;
+            if (outcome.incident_id != null) this.clear(String(outcome.incident_id));
+            this.showLeadOutcome(outcome);
+        },
+
+        showLeadOutcome(outcome) {
+            const toast = window.ToastManager;
+            if (!toast) return;
+            if (outcome.ok && outcome.status === 'accepted') {
+                const link = outcome.lead_url ? { href: outcome.lead_url, text: 'Open the lead in D8' } : null;
+                // Stays up until closed, so the link is there when they want it.
+                toast.show('Lead accepted', outcome.message, 'success', false, link);
+            } else if (outcome.ok) {
+                toast.show('Lead rejected', outcome.message, 'secondary');
+            } else {
+                toast.show('Nothing to answer', outcome.message, 'secondary');
+            }
+        },
+
         viewMessage(messageId, channelId) {
             this.ensureAudio();
             const selector = `#message-${messageId}`;
@@ -281,27 +435,35 @@
             }
         },
 
-        // Only chimes ringing: a banner in the corner instead of the full screen.
-        isBanner() {
-            return [...this.entries.values()].every(({ incident }) => alarmOf(incident) === 'chime');
+        // Only chimes ringing: a banner in the corner instead of the full
+        // screen. Leads (with or without chimes): the green full screen.
+        // Anything else: the red one.
+        presentation() {
+            const entries = [...this.entries.values()];
+            const chime = (entry) => alarmOf(entry.incident) === 'chime';
+            if (entries.every(chime)) return 'banner';
+            if (entries.every((entry) => isLead(entry) || chime(entry))) return 'lead';
+            return 'alarm';
         },
 
-        setPresentation(banner) {
-            this.overlay.classList.toggle('pager-overlay--banner', banner);
-            this.overlay.setAttribute('aria-modal', banner ? 'false' : 'true');
-            if (this.heading) this.heading.textContent = banner ? "You're needed" : 'You are being paged';
-            if (this.footer) {
-                this.footer.textContent = banner
-                    ? 'Acknowledging stops the chime and tells the others you have it.'
-                    : "Acknowledging stops the alarm for everyone and tells the team you're on it.";
-            }
+        setPresentation(mode) {
+            this.overlay.classList.toggle('pager-overlay--banner', mode === 'banner');
+            this.overlay.classList.toggle('pager-overlay--lead', mode === 'lead');
+            this.overlay.setAttribute('aria-modal', mode === 'banner' ? 'false' : 'true');
+            const answer = mode === 'lead' && [...this.entries.values()].some(isAnswerable);
+            const text = PRESENTATION[answer ? 'answer' : mode];
+            if (this.heading) this.heading.textContent = text.heading;
+            if (this.footer) this.footer.textContent = text.footer;
         },
 
         render() {
-            const banner = this.isBanner();
-            this.setPresentation(banner);
+            const mode = this.presentation();
+            const banner = mode === 'banner';
+            this.setPresentation(mode);
             this.list.replaceChildren();
-            for (const [id, { incident, test, acking, silenced, error }] of this.entries) {
+            for (const [id, entry] of this.entries) {
+                const { incident, test, acking, answering, silenced, error } = entry;
+                const answerable = isAnswerable(entry);
                 const row = document.createElement('div');
                 row.className = 'pager-incident';
                 row.dataset.incidentId = id;
@@ -347,14 +509,20 @@
 
                 const actions = document.createElement('div');
                 actions.className = 'pager-incident-actions';
-                const ack = document.createElement('button');
-                ack.type = 'button';
-                ack.className = banner ? 'btn btn-primary fw-bold' : 'btn btn-light btn-lg fw-bold';
-                ack.dataset.pagerAck = id;
-                ack.disabled = !!acking;
-                ack.textContent = test ? 'Stop test' : 'Acknowledge';
-                actions.appendChild(ack);
-                if (leadLink) {
+                if (answerable) {
+                    actions.appendChild(this.answerButton(id, 'accept', 'Accept', 'btn btn-light btn-lg fw-bold', answering));
+                    actions.appendChild(this.answerButton(id, 'reject', 'Reject', 'btn btn-outline-light btn-lg', answering));
+                } else {
+                    const ack = document.createElement('button');
+                    ack.type = 'button';
+                    ack.className = banner ? 'btn btn-primary fw-bold' : 'btn btn-light btn-lg fw-bold';
+                    ack.dataset.pagerAck = id;
+                    ack.disabled = !!acking;
+                    ack.textContent = test ? 'Stop test' : 'Acknowledge';
+                    actions.appendChild(ack);
+                }
+                // Answered here, the lead's link comes with the outcome.
+                if (leadLink && !answerable) {
                     const open = document.createElement('a');
                     open.className = banner ? 'btn btn-outline-primary' : 'btn btn-outline-light';
                     open.href = leadLink;
@@ -381,15 +549,28 @@
                 row.appendChild(errorEl);
 
                 // Not while the request is out: it may still go through.
-                if (silenced && !acking) {
+                if (silenced && !acking && !answering) {
                     const note = document.createElement('div');
                     note.className = 'pager-incident-silenced';
-                    note.textContent = '🔇 Silenced in this tab. The page keeps escalating until someone acknowledges.';
+                    note.textContent = answerable
+                        ? '🔇 Silenced in this tab. It rings again until you accept or reject.'
+                        : '🔇 Silenced in this tab. The page keeps escalating until someone acknowledges.';
                     row.appendChild(note);
                 }
 
                 this.list.appendChild(row);
             }
+        },
+
+        answerButton(id, action, label, className, disabled) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = className;
+            button.dataset.pagerAnswer = action;
+            button.dataset.pagerIncident = id;
+            button.disabled = !!disabled;
+            button.textContent = label;
+            return button;
         },
 
         // --- Sound ---
@@ -400,6 +581,7 @@
             if (!this.audioCtx) {
                 this.audioCtx = new Ctx();
                 this.audioCtx.addEventListener('statechange', () => this.updateSoundHint());
+                this.loadKaching(this.audioCtx);
             }
             if (this.audioCtx.state === 'suspended') {
                 this.audioCtx.resume().catch(() => {}).finally(() => this.updateSoundHint());
@@ -465,7 +647,9 @@
             }
         },
 
-        startCue(alarm, restart) {
+        // `origin`: when the schedule's first cue was due (the audio clock),
+        // to keep a running alarm's rhythm; a new one starts now.
+        startCue(alarm, restart, origin = null) {
             const ctx = this.ensureAudio();
             if (!ctx || (this.cues.has(alarm) && !restart)) {
                 this.updateSoundHint();
@@ -473,11 +657,11 @@
             }
             this.stopCue(alarm);
             const master = ctx.createGain();
-            master.gain.value = CUES[alarm].gain;
+            master.gain.value = this.usesRecording(alarm) ? CUES[alarm].recordingGain : CUES[alarm].gain;
             master.connect(ctx.destination);
             this.cues.set(alarm, {
                 master,
-                origin: ctx.currentTime + 0.05,
+                origin: origin ?? ctx.currentTime + 0.05,
                 next: 0,
                 sources: new Set(),
                 timer: setInterval(() => this.scheduleCue(alarm), CUE_TOPUP_MS),
@@ -521,7 +705,36 @@
             source.stop(stop);
         },
 
+        usesRecording(alarm) {
+            return alarm === 'ka-ching' && !!this.kachingBuffer;
+        },
+
+        // Fetch and decode the recorded ka-ching once. Ka-chings already
+        // scheduled were synthesized, so a ringing one is rescheduled with the
+        // recording, on the same beat. If it can't load or decode, the
+        // synthesized one stays.
+        loadKaching(ctx) {
+            const src = this.overlay?.dataset.kachingSrc;
+            if (this.kachingLoad || !src || typeof ctx.decodeAudioData !== 'function') return;
+            this.kachingLoad = fetch(src, { credentials: 'same-origin' })
+                .then((response) => {
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    return response.arrayBuffer();
+                })
+                .then((bytes) => ctx.decodeAudioData(bytes))
+                .then((buffer) => {
+                    this.kachingBuffer = buffer;
+                    const cue = this.cues.get('ka-ching');
+                    if (cue) this.startCue('ka-ching', true, cue.origin);
+                })
+                .catch((err) => console.warn('Pager: playing the synthesized ka-ching; the recording failed to load:', err));
+        },
+
         playKaching(at, cue) {
+            if (this.kachingBuffer) {
+                this.playRecording(at, cue);
+                return;
+            }
             const ctx = this.audioCtx;
 
             // "ka": a short burst of band-passed noise.
@@ -551,6 +764,13 @@
                 osc.connect(envelope).connect(cue.master);
                 this.trackSource(cue, osc, strike, strike + ringOut + 0.05);
             }
+        },
+
+        playRecording(at, cue) {
+            const source = this.audioCtx.createBufferSource();
+            source.buffer = this.kachingBuffer;
+            source.connect(cue.master);
+            this.trackSource(cue, source, at, at + this.kachingBuffer.duration + 0.05);
         },
 
         // Two pairs of short sine beeps, eased in and out so none of them clicks.
@@ -624,13 +844,14 @@
             return window.TitleManager ? window.TitleManager.current() : this.originalTitle;
         },
 
-        notify(incident, renotify) {
+        // `answerable`: a lead offer answered here, worded to accept or reject.
+        notify(incident, renotify, answerable = false) {
             if (!('Notification' in window) || Notification.permission !== 'granted') return;
             const id = String(incident.id);
             const text = ALARM_TEXT[alarmOf(incident)];
             try {
                 const notification = new Notification(`${text.notify}${incident.title}`, {
-                    body: incident.details || text.body,
+                    body: incident.details || (answerable && text.answerBody) || text.body,
                     tag: `incident-${id}`,
                     requireInteraction: true,
                     renotify,

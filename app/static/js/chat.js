@@ -93,10 +93,21 @@ const ToastManager = {
         this.bodyEl = document.getElementById('toast-body-content');
         if (this.toastEl) this.bootstrapToast = new bootstrap.Toast(this.toastEl, { delay: 5000 });
     },
-    show: function(title, message, level = 'danger', autohide = true) {
+    // `link` ({ href, text }, http(s) only) adds a link under the message,
+    // opened in a new tab: "Open the lead in D8" after accepting a lead.
+    show: function(title, message, level = 'danger', autohide = true, link = null) {
         if (!this.bootstrapToast || !this.titleEl || !this.bodyEl) return;
         this.titleEl.textContent = title;
         this.bodyEl.textContent = message;
+        if (link && /^https?:\/\//.test(link.href || '')) {
+            const anchor = document.createElement('a');
+            anchor.className = 'd-block mt-1 fw-semibold';
+            anchor.href = link.href;
+            anchor.target = '_blank';
+            anchor.rel = 'noopener noreferrer';
+            anchor.textContent = link.text;
+            this.bodyEl.appendChild(anchor);
+        }
         this.headerEl.className = 'toast-header';
         this.headerEl.classList.add(`bg-${level}`, 'text-white');
         this.bootstrapToast = new bootstrap.Toast(this.toastEl, { autohide: autohide, delay: 5000 });
@@ -106,6 +117,7 @@ const ToastManager = {
         if (this.bootstrapToast) { this.bootstrapToast.hide(); }
     }
 };
+window.ToastManager = ToastManager;
 
 
 // A short, human message for a failed request: the server's own text when it

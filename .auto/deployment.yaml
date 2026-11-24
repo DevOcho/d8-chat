@@ -98,6 +98,11 @@ spec:
         # Mirrored on the new-d8 side as [helpdesk] chat_internal_key.
         - name: INTERNAL_NOTIFY_KEY
           value: "dev-helpdesk-notify-shared-secret"
+        # D8's endpoint for an SDR's Accept / Reject on a lead page (the
+        # new-d8 service in the same cluster). D8-Chat posts the answer there
+        # with INTERNAL_NOTIFY_KEY as X-Internal-Key.
+        - name: D8_LEAD_RESPONSE_URL
+          value: "http://new-d8/api/d8-chat/lead-offers/respond"
         # Bearer key for POST /api/v1/integrations/uptime-kuma. Uptime Kuma
         # sends it via the webhook's Additional Headers as
         # {"Authorization": "Bearer <key>"}.

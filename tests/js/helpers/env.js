@@ -113,6 +113,7 @@ export async function closeAllPages() {
  * @param {boolean} [opts.visible]      document.visibilityState === 'visible'
  * @param {string} [opts.notificationPermission]
  * @param {boolean} [opts.autoplayBlocked] AudioContext stays suspended until the test unblocks it
+ * @param {boolean} [opts.audioDecodeFails] AudioContext.decodeAudioData rejects
  * @param {Array} [opts.fetchRoutes]    [{ match, reply }] checked before the defaults
  * @param {Array} [opts.xhrRoutes]      [{ match, reply }] auto-answered htmx requests
  * @param {Array<{id:number}>} [opts.activePages]  what GET /oncall/pages/active returns
@@ -126,6 +127,7 @@ export async function createPage(opts = {}) {
         visible = true,
         notificationPermission = 'granted',
         autoplayBlocked = false,
+        audioDecodeFails = false,
         fetchRoutes = [],
         xhrRoutes = [],
         activePages = [],
@@ -143,6 +145,7 @@ export async function createPage(opts = {}) {
         console: [],
         notificationPermission,
         autoplayBlocked,
+        audioDecodeFails,
         focused,
         visible,
         activePages,

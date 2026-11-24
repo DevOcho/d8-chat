@@ -1,14 +1,20 @@
 {# Incident card under an Uptime Kuma DOWN message or a D8 page (a website
    lead: source 'd8', which has nothing to resolve once someone has it, so no
-   Resolve button). Viewer-agnostic: the same
+   Resolve button; D8 resolves its own pages, and the card says why, e.g.
+   "Expired in D8"). A lead page is green, not red, and a lead offer (D8's
+   page.offer), with D8's answer endpoint set (D8_LEAD_RESPONSE_URL), offers
+   Accept and Reject instead of Acknowledge: oncall.answer_lead sends the
+   answer to D8, and pager.js shows
+   the outcome (the lead-response event). Viewer-agnostic: the same
    HTML is broadcast to the whole channel as an OOB swap whenever the incident
    changes, so buttons show for everyone and the server enforces who may act. #}
+{% set lead = incident_is_lead(incident) %}
 <div id="incident-card-{{ incident.id }}"
-     class="incident-card incident-{{ incident.state }} mt-2"
+     class="incident-card incident-{{ incident.state }}{% if lead %} incident-lead{% endif %} mt-2"
      {% if oob %}hx-swap-oob="outerHTML"{% endif %}>
     <div class="d-flex align-items-center flex-wrap gap-2">
         {% if incident.state == 'triggered' %}
-            <span class="badge bg-danger"><i class="bi bi-broadcast me-1"></i>Paging</span>
+            <span class="badge {{ 'bg-success' if lead else 'bg-danger' }}"><i class="bi bi-broadcast me-1"></i>Paging</span>
         {% elif incident.state == 'acknowledged' %}
             <span class="badge bg-warning text-dark"><i class="bi bi-person-check me-1"></i>Acknowledged</span>
         {% else %}
@@ -38,7 +44,11 @@
             <span class="incident-time"
                   data-timestamp="{{ incident.acknowledged_at.isoformat() }}Z">{{ incident.acknowledged_at.strftime("%H:%M") }} UTC</span>
         {% else %}
-            {% if incident.resolved_by %}
+            {% set d8_note = incident_resolution_note(incident) %}
+            {% if d8_note %}
+                {{ d8_note }}
+                {% if incident.resolved_by %}by <strong>{{ oncall_display_name(incident.resolved_by) }}</strong>{% endif %}
+            {% elif incident.resolved_by %}
                 Resolved by <strong>{{ oncall_display_name(incident.resolved_by) }}</strong>
             {% else %}
                 Resolved automatically (monitor back up)
@@ -50,9 +60,25 @@
     </div>
     {% if incident.state == 'triggered' or (incident.state != 'resolved' and incident.source != 'd8') %}
         <div class="mt-2 d-flex gap-2">
-            {% if incident.state == 'triggered' %}
+            {% if incident.state == 'triggered' and incident_lead_response(incident) %}
                 <button type="button"
-                        class="btn btn-sm btn-danger"
+                        class="btn btn-sm btn-success"
+                        hx-post="{{ url_for('oncall.answer_lead', incident_id=incident.id, action='accept') }}"
+                        hx-disabled-elt="this"
+                        hx-swap="none">
+                    <i class="bi bi-check-lg me-1"></i>Accept
+                </button>
+                <button type="button"
+                        class="btn btn-sm btn-outline-danger"
+                        hx-post="{{ url_for('oncall.answer_lead', incident_id=incident.id, action='reject') }}"
+                        hx-confirm="Reject this lead? It goes to the next person."
+                        hx-disabled-elt="this"
+                        hx-swap="none">
+                    <i class="bi bi-x-lg me-1"></i>Reject
+                </button>
+            {% elif incident.state == 'triggered' %}
+                <button type="button"
+                        class="btn btn-sm {{ 'btn-success' if lead else 'btn-danger' }}"
                         hx-post="{{ url_for('oncall.acknowledge_incident', incident_id=incident.id) }}"
                         hx-swap="none">
                     <i class="bi bi-hand-thumbs-up me-1"></i>Acknowledge

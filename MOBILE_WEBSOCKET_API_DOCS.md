@@ -807,8 +807,11 @@ monitor's **UP** event resolves the incident automatically.
 D8 pages the same way for a website lead: each contact form fill on
 devocho.com opens an incident in `#website-leads` (`source` `"d8"`) that pages
 every SDR, then the CEO after 15 minutes. Its `alarm` is `"ka-ching"`: the web
-pager plays a cash-register sound every 5 s for the first minute and every
-10 s after that. A lead has nothing to resolve: acknowledging it ends it.
+pager plays a recorded cash register every 6 s until the lead is answered. A
+lead has nothing to resolve: acknowledging it ends it. When `lead_response` is
+true (D8 sent the page as a lead offer) the web pager answers it with Accept
+and Reject instead (D8-Chat passes the answer on to D8); the mobile endpoints
+still acknowledge.
 
 The phone is the real pager, so the app should alert as loudly as the OS
 allows, keep alerting until the page is acknowledged or cleared, and let the
@@ -823,6 +826,7 @@ user acknowledge from the alert.
   "source": "uptime-kuma",                      // "d8" for a website lead
   "source_url": "https://portal.acme.example",  // a lead: its page in D8
   "alarm": "siren",                             // "siren" | "ka-ching" (the policy's)
+  "lead_response": false,                       // true: a lead offer the web answers with Accept / Reject
   "state": "triggered",                         // "triggered" | "acknowledged" | "resolved"
   "current_level": 2,                           // last escalation level paged
   "triggered_at": "2026-10-10T16:00:52.784415", // naive UTC, like every API timestamp

@@ -352,6 +352,8 @@ to me."
   scheduled up to 3 minutes ahead on the audio clock so a background tab
   whose timers are throttled to once a minute still rings on time. A new lead
   starts the fast minute again. Outage and lead pages together play both.
+  (Since 2026-11-24 it is a recording, every 6 seconds with no slow-down: see
+  "Accept and Reject" below.)
 - **The lead's page in D8** is `source_url`; the pager shows "Open the lead in
   D8" for it. Follow-up posts (escalated, acknowledged) come from the bot
   that opened the incident, so a lead's thread is D8's. A lead card has no
@@ -430,6 +432,134 @@ Production setup:
    its channel setting matching `INTERVIEW_DAY_CHANNEL` (default
    `interview-day`). The production website runs on its own droplet: check it
    can reach `/api/v1/internal/notify`.
+
+## Directed pages: D8's "accept the lead" rotation, 2026-11-23
+
+D8 is taking website-lead routing over: it pages ONE SDR, gives them 5 minutes
+to accept the lead in D8, then stops that page and pages the next SDR, and
+finally the CEO. D8 drives the escalation, so D8-Chat must only ring whoever
+each request names, and let D8 stop a page.
+
+- **`page.escalate`** (on `POST /api/v1/internal/notify`, optional, default
+  `true`, which is everything above). `false` needs `to` (400 without it, or
+  when `escalate` isn't a boolean; `null` counts as absent). Only the people
+  `to` names are paged, and nothing more ever: no level of the channel's
+  policy fires for that incident (it never gets a `next_escalation_at`, so the
+  ticker never escalates it), and there is no "page the admins when nobody
+  was paged" fallback. The page still repeats every minute until it stops,
+  and `key` dedupes while it is open, as for any page. The timeline's
+  `triggered` row says "no escalation (D8 escalates)".
+- **Which channels page.** With `escalate: false` the named people are paged
+  whether or not the channel has a policy: D8 decides who rings, the policy
+  only picks the alarm (`#website-leads`' "Website leads" policy plays the
+  ka-ching; a channel with no policy plays the default siren, and a policy
+  with no levels is enough to choose one). Two cases page nobody and only
+  post, answering `incident_id: null`: the policy's **Paging enabled** is
+  switched off (the admins' kill switch keeps meaning "nobody is paged"), and
+  `to` matches no active user (`unmatched` lists the emails; there is nobody
+  to ring and no escalation to fall back on, so D8 should move on to its next
+  person straight away).
+- **`POST /api/v1/internal/page/resolve`**: D8 stops a page. Same
+  `X-Internal-Key` secret and rate limit (120 per minute per IP) as notify.
+  Body `{"key": "<the page key>", "reason": "accepted" | "expired" |
+  "rejected" | "cancelled", "by": "<email>"?}`; `key` is the `page.key` D8
+  sent (the same dedupe, `d8:<key>`). It resolves the open incident for that
+  key like any resolve: `page_cleared` to everyone paged on every socket and
+  the cleared push to their phones (`✅ <title>: Expired in D8`), and the card
+  updates live, reading "Accepted in D8 by Sam", "Expired in D8" and so on in
+  place of "Resolved automatically". The timeline's `resolved` row records
+  `reason` and `by`; `by` is also `resolved_by` when it is an active user's
+  email (case does not matter), and an unknown email is only recorded. Nothing
+  is posted in the channel. Answers `200 {"resolved": true}`, or
+  `200 {"resolved": false}` when no incident for the key is open (already
+  resolved, never paged, or paged nobody), so retries are harmless; 400 for a
+  bad key, reason or `by`; 401 without the secret. It resolves acknowledged
+  incidents too, and works for escalating pages (`cancelled` stops the
+  "Website leads" escalation before the CEO is paged).
+- **One key for the whole rotation works.** Once D8 resolves a page, the
+  same `key` opens a new incident on the next notify, so D8 can page SDR 1,
+  resolve `expired`, page SDR 2 with the same key, and so on. A distinct key
+  per step works too.
+- **Acknowledge is not accept.** The pager's Acknowledge button only silences
+  that person's pager (and posts "Acknowledged" in the channel); it does not
+  tell D8. The SDR accepts in D8 (`page.url` is the pager's "Open the lead in
+  D8" link), and D8 resolves the page then; an acknowledged page D8 never
+  hears about runs out like any other and D8 resolves it `expired`. (Since
+  2026-11-24, with `D8_LEAD_RESPONSE_URL` set, a lead page has Accept and
+  Reject instead: see the next section.)
+
+## Accept and Reject: answering D8's lead offers in D8-Chat, 2026-11-24
+
+**Background.** D8 offers each website lead to one SDR at a time and pages
+that person here (a directed page, previous section). Until now the pager and
+the channel's incident card offered only Acknowledge, which silences the
+pager without telling D8; the lead is accepted on D8's own offer page. In
+Kenny's walkthrough he pressed Acknowledge, the offer ran out, and the lead
+moved on to the next person. Kenny approved this change on 2026-11-24.
+
+A **lead page** is an incident with `source` `d8` and the `ka-ching` alarm
+(`oncall_service.is_lead_page`). A **lead offer** is a lead page D8 sent with
+`"offer": true` in the page request (`oncall_service.is_lead_offer`): D8
+offered the lead to the person paged. D8 sends it on every offer page, and
+never on its two other lead pages: "wrote in again" to the SDR who has the
+lead (key `d8-lead:<id>`) and a failed website intake to the CEO
+(`d8-lead-failed:<id>`). Outages and the interview day's chime pages (also
+`source` `d8`) are unchanged.
+
+- **`page.offer`** on `POST /api/v1/internal/notify`: optional, a boolean
+  (anything else is a 400; `null` counts as absent; absent means false). It
+  is kept on the incident (`Incident.offer`, migration `0015`). Keys the page
+  request doesn't know are ignored, as before.
+- **Accept and Reject replace Acknowledge** on a lead offer, on the ringing
+  screen, on the incident card and in the desktop notification's wording,
+  when `D8_LEAD_RESPONSE_URL` is set (the incident's `lead_response` is
+  true). Accept is one tap. Reject asks "Reject this lead? It goes to the
+  next person." in the app's confirm dialog (raised above the pager while it
+  rings). Pressing either stops the sound on that screen at once. Every other
+  lead page, and every lead page without the setting, keeps Acknowledge and
+  the "Open the lead in D8" link; the accept and reject routes answer 400 for
+  them without calling D8.
+- **Only someone the page was sent to** (an `IncidentPage` row) may answer:
+  not the other SDRs, and not admins (who can still acknowledge anything).
+- **D8-Chat's server sends the answer to D8**
+  (`POST /oncall/incidents/<id>/accept|reject` calls
+  `app/services/lead_response.py`): `POST {D8_LEAD_RESPONSE_URL}` with
+  `X-Internal-Key: <INTERNAL_NOTIFY_KEY>` and
+  `{"key": "<the page key D8 sent>", "email": "<the person's email>",
+  "action": "accept" | "reject"}`, allowing D8 5 seconds. What D8 answers,
+  and what happens:
+  - `200 {"ok": true, "status": "accepted" | "rejected", "lead_url"}`:
+    D8-Chat resolves that incident itself (reason `accepted` or `rejected`,
+    `by` the person), so the page stops on every screen at once and the card
+    reads "Accepted in D8 by Sam". D8 also calls `page/resolve`; whichever
+    arrives second finds nothing open. A toast says how it went; after Accept
+    it stays up with an "Open the lead in D8" link to `lead_url`.
+  - `403 not_yours`, `404 unknown_offer` or `409 offer_closed` (as
+    `{"error": <code>}`; a 404 without the code is a wrong URL, not this):
+    there is nothing left for this person to answer, so D8-Chat acknowledges
+    the incident without posting in the channel, the page stops, and the
+    toast says why (D8's `message` for a 409, when it sends one).
+  - Anything else (a 401 for a wrong key, a 5xx, no answer in 5 seconds, no
+    connection, an answer it can't read): D8 never took the answer, so the
+    page rings again with the reason and the person can try again.
+  - The answer to a page that is already resolved is not sent.
+- **Green, not red.** A lead's ringing screen is green (Bootstrap's success
+  colour) with a slower pulse and the heading "Someone wants to talk to us";
+  the card's Paging badge and border are green. An outage ringing at the same
+  time makes the screen red. For a lead offer the desktop notification's
+  fallback text says "Open D8-Chat to accept or reject".
+- **A recorded ka-ching.** `app/static/audio/ka-ching.mp3` (credit in
+  `app/static/audio/README.md`) is fetched and decoded into Web Audio, so it
+  is scheduled on the audio clock like the synthesized sound; the synthesized
+  ka-ching stays as the fallback when the file can't load or decode. It plays
+  every 6 seconds until the lead is answered or the page stops, without the
+  old slow-down after the first minute. The siren and the chime keep their
+  schedules.
+- **Not changed.** The mobile app still acknowledges (and its push body still
+  says "acknowledge").
+- **Local development.** `.auto/deployment.yaml` sets
+  `D8_LEAD_RESPONSE_URL=http://new-d8/api/d8-chat/lead-offers/respond` (the
+  new-d8 service in the cluster); `example.env` documents it.
 
 ## Open questions
 None blocking. Possible follow-ups: self-service swaps, re-paging stale

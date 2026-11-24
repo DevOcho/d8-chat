@@ -25,7 +25,7 @@ from app.models import (
     Workspace,
     WorkspaceMember,
 )
-from app.services import oncall_service
+from app.services import lead_response, oncall_service
 
 # Wednesday 2026-10-14 11:00 in Santo Domingo (UTC-4, no DST). The current
 # shift started Monday 2026-10-12 08:00 local = 12:00 UTC.
@@ -1586,3 +1586,751 @@ def test_acknowledging_a_chime_sends_the_phone_nothing_more(client, interview, m
 
     assert _frames(interview.g1.id, "page_cleared")
     send_page_cleared.assert_not_called()
+
+
+# --- Directed pages: D8 runs its own "accept the lead" rotation ---
+#
+# D8 pages one SDR with page.escalate false, gives them 5 minutes to accept the
+# lead in D8, then resolves that page by key and pages the next SDR, and
+# finally the CEO. D8-Chat only rings whoever each request names.
+
+RESOLVE_URL = "/api/v1/internal/page/resolve"
+
+
+def _directed_page(client, to=("sam@example.com",), key="d8-lead:101", **page):
+    return _lead_page(client, key=key, to=list(to), escalate=False, **page)
+
+
+def _resolve_page(client, key="d8-lead:101", reason="accepted", **body):
+    return client.post(
+        RESOLVE_URL,
+        json={"key": key, "reason": reason, **body},
+        headers=NOTIFY_HEADERS,
+    )
+
+
+def test_a_directed_page_rings_only_who_it_names_and_never_escalates(client, leads):
+    body = _directed_page(client).get_json()
+
+    incident = Incident.get_by_id(body["incident_id"])
+    assert body["repeat"] is False and body["unmatched"] == []
+    assert _paged_ids(incident) == {leads.sam.id}
+    assert incident.next_escalation_at is None
+    (frame,) = _frames(leads.sam.id, "page")
+    assert frame["incident"]["alarm"] == "ka-ching"
+    assert frame["incident"]["next_escalation_at"] is None
+    # Long past the policy's 15 minutes: no level fires, the CEO never rings.
+    for minutes in (15, 16, 60, 24 * 60):
+        assert oncall_service.run_escalations(NOW + minutes * MINUTE) == []
+    assert _paged_ids(Incident.get_by_id(incident.id)) == {leads.sam.id}
+    assert _frames(leads.ana.id, "page") == []
+    assert _frames(leads.ceo.id, "page") == []
+    # It keeps ringing Sam until it stops, like any page.
+    assert oncall_service.resend_pages(NOW + 2 * MINUTE) == [incident]
+    assert len(_frames(leads.sam.id, "page")) == 2
+    triggered = IncidentEvent.get(
+        (IncidentEvent.incident == incident) & (IncidentEvent.kind == "triggered")
+    )
+    assert json.loads(triggered.details)["escalate"] is False
+
+
+def test_a_directed_page_never_falls_back_to_the_admins(client, leads):
+    admin = _user("boss", admin=True)
+    EscalationLevel.delete().where(EscalationLevel.policy == leads.policy).execute()
+
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+
+    assert _paged_ids(incident) == {leads.sam.id}
+    assert oncall_service.run_escalations(NOW + DAY) == []
+    assert _frames(admin.id, "page") == []
+    kinds = {e.kind for e in IncidentEvent.select()}
+    assert "fallback_admins" not in kinds and "escalated" not in kinds
+
+
+def test_a_directed_page_without_a_policy_still_rings_who_it_names(client, leads):
+    leads.policy.delete_instance(recursive=True)
+
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+
+    assert incident.policy is None
+    assert _paged_ids(incident) == {leads.sam.id}
+    assert oncall_service.run_escalations(NOW + DAY) == []
+    # No policy to choose the alarm: the default.
+    assert _frames(leads.sam.id, "page")[0]["incident"]["alarm"] == "siren"
+
+
+def test_a_directed_page_with_paging_switched_off_is_only_posted(client, leads):
+    leads.policy.is_active = False
+    leads.policy.save()
+
+    res = _directed_page(client)
+
+    assert res.get_json() == {
+        "ok": True,
+        "incident_id": None,
+        "repeat": False,
+        "unmatched": [],
+    }
+    assert Incident.select().count() == 0
+    assert Message.select().where(Message.user == leads.bot).count() == 1
+
+
+def test_a_directed_page_naming_nobody_known_pages_nobody(client, leads):
+    admin = _user("boss", admin=True)
+
+    res = _directed_page(client, to=["stranger@example.com"])
+
+    assert res.get_json() == {
+        "ok": True,
+        "incident_id": None,
+        "repeat": False,
+        "unmatched": ["stranger@example.com"],
+    }
+    assert Incident.select().count() == 0
+    assert Message.select().where(Message.user == leads.bot).count() == 1
+    for user in (leads.sam, leads.ana, leads.ceo, admin):
+        assert _frames(user.id, "page") == []
+
+
+def test_a_directed_repeat_while_open_pages_nobody_again(client, leads):
+    first = _directed_page(client).get_json()
+    again = _directed_page(client, to=["ana@example.com"]).get_json()
+
+    assert again == {
+        "ok": True,
+        "incident_id": first["incident_id"],
+        "repeat": True,
+        "unmatched": [],
+    }
+    assert Incident.select().count() == 1
+    assert _paged_ids(Incident.get_by_id(first["incident_id"])) == {leads.sam.id}
+    assert _frames(leads.ana.id, "page") == []
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        {"escalate": False},
+        {"escalate": "false"},
+        {"escalate": 0},
+        {"escalate": False, "to": []},
+    ],
+)
+def test_a_malformed_escalate_is_refused(client, leads, page):
+    res = client.post(
+        "/api/v1/internal/notify",
+        json={
+            "channel_name": "website-leads",
+            "message": "hi",
+            "page": {"key": "d8-lead:1", "title": "t", **page},
+        },
+        headers=NOTIFY_HEADERS,
+    )
+
+    assert res.status_code == 400
+    assert "escalate" in res.get_json()["error"]
+    assert Message.select().count() == 0
+
+
+def test_escalate_true_or_null_is_todays_page(client, leads):
+    explicit = _lead_page(client, key="d8-lead:1", escalate=True).get_json()
+    null = _lead_page(client, key="d8-lead:2", escalate=None).get_json()
+
+    for body in (explicit, null):
+        incident = Incident.get_by_id(body["incident_id"])
+        assert _paged_ids(incident) == {leads.sam.id, leads.ana.id}
+        assert incident.next_escalation_at == NOW + 15 * MINUTE
+
+
+def test_d8_resolves_its_page_and_every_pager_stops(client, leads, mocker):
+    cleared = mocker.patch.object(oncall_service.push_service, "send_page_cleared")
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+    posts = Message.select().count()
+
+    res = _resolve_page(client, by="Sam@Example.com")
+
+    assert (res.status_code, res.get_json()) == (200, {"resolved": True})
+    incident = Incident.get_by_id(incident.id)
+    assert (incident.state, incident.resolved_by) == ("resolved", leads.sam)
+    assert incident.resolved_at == NOW
+    # Stopped on every socket and on the phone, with D8's reason.
+    assert _frames(leads.sam.id, "page_cleared")[-1]["state"] == "resolved"
+    assert cleared.call_args.args[0] == leads.sam.id
+    assert cleared.call_args.kwargs["alert"] == (
+        "✅ New website lead: Dana Whitfield at Meridian Health: Accepted in D8"
+    )
+    assert oncall_service.active_pages_for(leads.sam) == []
+    assert oncall_service.resend_pages(NOW + 5 * MINUTE) == []
+    # Who and why on the timeline; nothing posted in the channel.
+    resolved = IncidentEvent.get(
+        (IncidentEvent.incident == incident) & (IncidentEvent.kind == "resolved")
+    )
+    assert resolved.user == leads.sam
+    assert json.loads(resolved.details) == {
+        "detail": "Accepted in D8",
+        "reason": "accepted",
+        "by": "Sam@Example.com",
+    }
+    assert Message.select().count() == posts
+
+
+def test_resolving_twice_or_an_unknown_key_is_harmless(client, leads):
+    _directed_page(client)
+
+    assert _resolve_page(client, reason="expired").get_json() == {"resolved": True}
+    assert _resolve_page(client, reason="expired").get_json() == {"resolved": False}
+    assert _resolve_page(client, key="d8-lead:999").get_json() == {"resolved": False}
+    assert IncidentEvent.select().where(IncidentEvent.kind == "resolved").count() == 1
+
+
+def test_resolve_by_someone_unknown_still_resolves(client, leads):
+    incident_id = _directed_page(client).get_json()["incident_id"]
+
+    res = _resolve_page(client, reason="cancelled", by="gone@example.com")
+
+    assert res.get_json() == {"resolved": True}
+    incident = Incident.get_by_id(incident_id)
+    assert incident.state == "resolved" and incident.resolved_by is None
+    resolved = IncidentEvent.get(IncidentEvent.kind == "resolved")
+    assert resolved.user is None
+    assert json.loads(resolved.details)["by"] == "gone@example.com"
+
+
+def test_the_rotation_pages_the_next_sdr_after_an_expired_page(client, leads):
+    """D8's whole flow on one key: Sam, then Ana, then the CEO."""
+    ChannelMember.create(user=leads.sam, channel=leads.channel)
+    first = _directed_page(client).get_json()["incident_id"]
+
+    assert _resolve_page(client, reason="expired").get_json() == {"resolved": True}
+    second = _directed_page(client, to=["ana@example.com"]).get_json()
+    assert second["repeat"] is False and second["incident_id"] != first
+    assert _paged_ids(Incident.get_by_id(second["incident_id"])) == {leads.ana.id}
+
+    assert _resolve_page(client, reason="rejected", by="ana@example.com").get_json()
+    third = _directed_page(client, to=["ceo@example.com"]).get_json()
+    assert _paged_ids(Incident.get_by_id(third["incident_id"])) == {leads.ceo.id}
+    assert _resolve_page(client, reason="accepted", by="ceo@example.com").get_json()
+
+    assert oncall_service.run_escalations(NOW + DAY) == []
+    assert [len(_frames(u.id, "page")) for u in (leads.sam, leads.ana, leads.ceo)] == [
+        1,
+        1,
+        1,
+    ]
+    # Each card says how D8 ended that page.
+    _login(client, leads.sam)
+    html = client.get(f"/chat/channel/{leads.channel.id}").get_data(as_text=True)
+    assert "Expired in D8" in html
+    assert "Rejected in D8" in html and "<strong>Ana</strong>" in html
+    assert "Accepted in D8" in html and "<strong>Ceo</strong>" in html
+    assert "monitor back up" not in html
+
+
+def test_the_admin_timeline_says_who_paged_and_why_d8_stopped_it(admin_client, leads):
+    incident_id = _directed_page(admin_client).get_json()["incident_id"]
+    _resolve_page(admin_client, reason="rejected", by="sam@example.com")
+
+    html = admin_client.get(f"/admin/oncall/incidents/{incident_id}").get_data(
+        as_text=True
+    )
+
+    assert oncall_service.NO_ESCALATION in html
+    assert "Rejected in D8" in html
+
+
+def test_resolve_also_stops_an_escalating_lead(client, leads):
+    incident = Incident.get_by_id(_lead_page(client).get_json()["incident_id"])
+
+    assert _resolve_page(client, reason="cancelled").get_json() == {"resolved": True}
+
+    assert Incident.get_by_id(incident.id).state == "resolved"
+    assert _frames(leads.sam.id, "page_cleared") and _frames(
+        leads.ana.id, "page_cleared"
+    )
+    assert oncall_service.run_escalations(NOW + 15 * MINUTE) == []
+    assert _frames(leads.ceo.id, "page") == []
+
+
+def test_resolve_after_an_acknowledge_closes_it_quietly(client, leads, mocker):
+    cleared = mocker.patch.object(oncall_service.push_service, "send_page_cleared")
+    incident_id = _directed_page(client).get_json()["incident_id"]
+    _login(client, leads.sam)
+    client.post(f"/oncall/incidents/{incident_id}/ack")
+    cleared.reset_mock()
+
+    assert _resolve_page(client, by="sam@example.com").get_json() == {"resolved": True}
+
+    assert Incident.get_by_id(incident_id).state == "resolved"
+    # The pager already stopped at the acknowledge: nothing more to clear.
+    cleared.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        ["d8-lead:101", "accepted"],
+        {"reason": "accepted"},
+        {"key": "", "reason": "accepted"},
+        {"key": "k" * 201, "reason": "accepted"},
+        {"key": 101, "reason": "accepted"},
+        {"key": "d8-lead:101"},
+        {"key": "d8-lead:101", "reason": "done"},
+        {"key": "d8-lead:101", "reason": ["accepted"]},
+        {"key": "d8-lead:101", "reason": "accepted", "by": "not an email"},
+        {"key": "d8-lead:101", "reason": "accepted", "by": 5},
+    ],
+)
+def test_a_malformed_resolve_is_refused(client, leads, body):
+    incident_id = _directed_page(client).get_json()["incident_id"]
+
+    res = client.post(RESOLVE_URL, json=body, headers=NOTIFY_HEADERS)
+
+    assert res.status_code == 400
+    assert "reason" in res.get_json()["error"]
+    assert Incident.get_by_id(incident_id).state == "triggered"
+
+
+def test_resolve_needs_the_shared_secret(client, leads):
+    incident_id = _directed_page(client).get_json()["incident_id"]
+
+    for headers in ({}, {"X-Internal-Key": "wrong"}):
+        res = client.post(
+            RESOLVE_URL,
+            json={"key": "d8-lead:101", "reason": "accepted"},
+            headers=headers,
+        )
+        assert res.status_code == 401
+
+    assert Incident.get_by_id(incident_id).state == "triggered"
+
+
+# --- Accept and Reject: answering D8's lead offers from D8-Chat ---
+
+LEAD_RESPONSE_URL = "http://new-d8/api/d8-chat/lead-offers/respond"
+OFFER_KEY = "lead-12-offer-31"
+LEAD_URL = "https://new-d8.devocho.com/marketing/leads/12"
+
+
+def _d8_answer(status, body=None):
+    """What ``requests.post`` returns for D8's answer: ``body`` as its JSON,
+    or no JSON at all (an HTML error page) when None."""
+
+    def _json():
+        if body is None:
+            raise ValueError("not JSON")
+        return body
+
+    return SimpleNamespace(status_code=status, json=_json)
+
+
+@pytest.fixture
+def offer(client, leads, app, mocker):
+    """D8-Chat knows D8's answer endpoint, and D8 has offered a lead to Sam:
+    a directed page with the ka-ching and ``offer`` true. ``offer.d8`` is the
+    mocked call to D8 (it answers "accepted" unless a test says otherwise)."""
+    app.config["D8_LEAD_RESPONSE_URL"] = LEAD_RESPONSE_URL
+    body = _directed_page(client, key=OFFER_KEY, offer=True).get_json()
+    incident_id = body["incident_id"]
+    ChannelMember.create(user=leads.sam, channel=leads.channel)
+    d8 = mocker.patch(
+        "app.services.lead_response.requests.post",
+        return_value=_d8_answer(
+            200, {"ok": True, "status": "accepted", "lead_url": LEAD_URL}
+        ),
+    )
+    return SimpleNamespace(incident=Incident.get_by_id(incident_id), d8=d8, leads=leads)
+
+
+def _answer(client, incident, action="accept", user=None, htmx=False):
+    if user is not None:
+        _login(client, user)
+    headers = {"HX-Request": "true"} if htmx else {}
+    return client.post(f"/oncall/incidents/{incident.id}/{action}", headers=headers)
+
+
+def _card(client, channel):
+    return client.get(f"/chat/channel/{channel.id}").get_data(as_text=True)
+
+
+def test_a_lead_card_offers_accept_and_reject_in_green(client, offer):
+    incident = offer.incident
+    _login(client, offer.leads.sam)
+
+    html = _card(client, offer.leads.channel)
+
+    assert f"/oncall/incidents/{incident.id}/accept" in html
+    assert f"/oncall/incidents/{incident.id}/reject" in html
+    assert 'hx-confirm="Reject this lead? It goes to the next person."' in html
+    assert f"/oncall/incidents/{incident.id}/ack" not in html
+    card = html[html.index(f'id="incident-card-{incident.id}"') :]
+    assert "incident-lead" in card[:200]
+    assert '<span class="badge bg-success"><i class="bi bi-broadcast' in card
+    # The pager is told the same.
+    assert oncall_service.serialize_incident(incident)["lead_response"] is True
+    (frame,) = _frames(offer.leads.sam.id, "page")
+    assert frame["incident"]["lead_response"] is True
+
+
+def test_without_d8s_answer_endpoint_a_lead_keeps_acknowledge(client, offer, app):
+    app.config["D8_LEAD_RESPONSE_URL"] = ""
+    _login(client, offer.leads.sam)
+
+    html = _card(client, offer.leads.channel)
+
+    assert f"/oncall/incidents/{offer.incident.id}/ack" in html
+    assert f"/oncall/incidents/{offer.incident.id}/accept" not in html
+    assert '<span class="badge bg-success"><i class="bi bi-broadcast' in html
+    assert oncall_service.serialize_incident(offer.incident)["lead_response"] is False
+
+
+def test_an_outage_card_stays_red_with_acknowledge(client, offer, app):
+    oncall = offer.leads.oncall
+    res = client.post(
+        "/api/v1/integrations/uptime-kuma", json=_kuma(0), headers=KUMA_HEADERS
+    )
+    incident = Incident.get_by_id(res.get_json()["incident_id"])
+    ChannelMember.create(user=oncall.eng, channel=oncall.channel)
+    _login(client, oncall.eng)
+
+    html = _card(client, oncall.channel)
+
+    assert f"/oncall/incidents/{incident.id}/ack" in html
+    assert f"/oncall/incidents/{incident.id}/accept" not in html
+    assert '<span class="badge bg-danger"><i class="bi bi-broadcast' in html
+    assert "incident-lead" not in html
+    assert oncall_service.serialize_incident(incident)["lead_response"] is False
+
+
+def test_an_interview_day_page_is_not_a_lead(client, interview, app, mocker):
+    app.config["D8_LEAD_RESPONSE_URL"] = LEAD_RESPONSE_URL
+    d8 = mocker.patch("app.services.lead_response.requests.post")
+    incident = Incident.get_by_id(_interview_page(client).get_json()["incident_id"])
+    ChannelMember.create(user=interview.g1, channel=interview.channel)
+    _login(client, interview.g1)
+
+    html = _card(client, interview.channel)
+
+    assert incident.source == "d8"
+    assert f"/oncall/incidents/{incident.id}/ack" in html
+    assert f"/oncall/incidents/{incident.id}/accept" not in html
+    assert '<span class="badge bg-danger"><i class="bi bi-broadcast' in html
+    assert oncall_service.serialize_incident(incident)["lead_response"] is False
+    res = _answer(client, incident)
+    assert res.status_code == 400
+    d8.assert_not_called()
+
+
+def test_accept_sends_the_answer_to_d8_and_stops_the_page(client, offer, mocker):
+    cleared = mocker.patch.object(oncall_service.push_service, "send_page_cleared")
+    sam = offer.leads.sam
+    posts = Message.select().count()
+
+    res = _answer(client, offer.incident, user=sam)
+
+    assert res.status_code == 200
+    assert res.get_json() == {
+        "ok": True,
+        "stopped": True,
+        "status": "accepted",
+        "lead_url": LEAD_URL,
+        "message": "The lead is yours.",
+        "code": None,
+        "incident_id": offer.incident.id,
+    }
+    offer.d8.assert_called_once_with(
+        LEAD_RESPONSE_URL,
+        json={"key": OFFER_KEY, "email": "sam@example.com", "action": "accept"},
+        headers={"X-Internal-Key": "test-internal-notify-key"},
+        timeout=5,
+    )
+    incident = Incident.get_by_id(offer.incident.id)
+    assert (incident.state, incident.resolved_by) == ("resolved", sam)
+    assert _frames(sam.id, "page_cleared")[-1]["state"] == "resolved"
+    assert cleared.call_args.kwargs["alert"].endswith(": Accepted in D8")
+    assert oncall_service.active_pages_for(sam) == []
+    resolved = IncidentEvent.get(
+        (IncidentEvent.incident == incident) & (IncidentEvent.kind == "resolved")
+    )
+    assert json.loads(resolved.details) == {
+        "detail": "Accepted in D8",
+        "reason": "accepted",
+        "by": "sam@example.com",
+    }
+    assert "Accepted in D8" in _card(client, offer.leads.channel)
+    # Nothing posted: D8 posts its own step to the channel.
+    assert Message.select().count() == posts
+    # D8 resolves the page too; it finds nothing left open.
+    assert _resolve_page(client, key=OFFER_KEY).get_json() == {"resolved": False}
+
+
+def test_d8_resolving_first_is_harmless(client, offer):
+    """D8 resolves the page inside its answer: ours finds it closed."""
+
+    def d8_answers(*args, **kwargs):
+        oncall_service.resolve_page(OFFER_KEY, "accepted", by="sam@example.com")
+        return _d8_answer(200, {"ok": True, "status": "accepted", "lead_url": LEAD_URL})
+
+    offer.d8.side_effect = d8_answers
+
+    res = _answer(client, offer.incident, user=offer.leads.sam)
+
+    assert res.get_json()["ok"] is True
+    assert Incident.get_by_id(offer.incident.id).state == "resolved"
+    assert IncidentEvent.select().where(IncidentEvent.kind == "resolved").count() == 1
+
+
+def test_reject_sends_the_answer_and_the_lead_moves_on(client, offer):
+    offer.d8.return_value = _d8_answer(200, {"ok": True, "status": "rejected"})
+
+    res = _answer(client, offer.incident, action="reject", user=offer.leads.sam)
+
+    body = res.get_json()
+    assert (body["ok"], body["status"], body["lead_url"]) == (True, "rejected", None)
+    assert body["message"] == "It goes to the next person."
+    assert offer.d8.call_args.kwargs["json"]["action"] == "reject"
+    assert Incident.get_by_id(offer.incident.id).state == "resolved"
+    assert "Rejected in D8" in _card(client, offer.leads.channel)
+
+
+def test_a_lead_url_that_is_not_http_is_dropped(client, offer):
+    offer.d8.return_value = _d8_answer(
+        200, {"ok": True, "status": "accepted", "lead_url": "javascript:alert(1)"}
+    )
+
+    res = _answer(client, offer.incident, user=offer.leads.sam)
+
+    assert res.get_json()["lead_url"] is None
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "message"),
+    [
+        (
+            403,
+            {"error": "not_yours"},
+            "D8 says this lead was offered to someone else.",
+        ),
+        (
+            404,
+            {"error": "unknown_offer"},
+            "D8 has no offer for this page, so there is nothing to accept or reject.",
+        ),
+        (409, {"error": "offer_closed"}, "This offer has already closed in D8."),
+        (
+            409,
+            {"error": "offer_closed", "message": "Ana accepted it first."},
+            "Ana accepted it first.",
+        ),
+    ],
+)
+def test_d8_refuses_and_the_page_stops_quietly(client, offer, status, body, message):
+    offer.d8.return_value = _d8_answer(status, body)
+    sam = offer.leads.sam
+    posts = Message.select().count()
+
+    res = _answer(client, offer.incident, user=sam)
+
+    assert res.status_code == 200
+    assert res.get_json() == {
+        "ok": False,
+        "stopped": True,
+        "status": None,
+        "lead_url": None,
+        "message": message,
+        "code": body["error"],
+        "incident_id": offer.incident.id,
+    }
+    # Nothing left for Sam to answer: it stops ringing instead of ringing on.
+    incident = Incident.get_by_id(offer.incident.id)
+    assert (incident.state, incident.acknowledged_by) == ("acknowledged", sam)
+    assert _frames(sam.id, "page_cleared")
+    assert oncall_service.active_pages_for(sam) == []
+    assert Message.select().count() == posts
+    # D8's own resolve still closes it.
+    assert _resolve_page(client, key=OFFER_KEY, reason="expired").get_json() == {
+        "resolved": True
+    }
+
+
+@pytest.mark.parametrize(
+    ("answer", "fragment"),
+    [
+        (_d8_answer(401, {"error": "unauthorized"}), "D8-Chat's key"),
+        (_d8_answer(500, {"error": "boom"}), "HTTP 500"),
+        (_d8_answer(503), "HTTP 503"),
+        # A 404 without D8's code is a wrong URL, not "no such offer".
+        (_d8_answer(404), "HTTP 404"),
+        (_d8_answer(403, {"error": "forbidden"}), "HTTP 403"),
+        (_d8_answer(200, {"ok": True, "status": "maybe"}), "HTTP 200"),
+        (_d8_answer(200, {"status": "accepted"}), "HTTP 200"),
+        (_d8_answer(200, ["ok"]), "HTTP 200"),
+    ],
+)
+def test_an_answer_d8_never_took_keeps_the_page_ringing(
+    client, offer, answer, fragment
+):
+    offer.d8.return_value = answer
+
+    res = _answer(client, offer.incident, user=offer.leads.sam)
+
+    assert res.status_code == 502
+    assert fragment in res.get_json()["error"]
+    assert Incident.get_by_id(offer.incident.id).state == "triggered"
+    assert oncall_service.active_pages_for(offer.leads.sam) == [offer.incident]
+
+
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (
+            lead_response.requests.ConnectionError("refused"),
+            "Couldn't reach D8. Try again.",
+        ),
+        (
+            lead_response.requests.Timeout("read timed out"),
+            "D8 didn't answer in time. Try again.",
+        ),
+    ],
+)
+def test_d8_out_of_reach_keeps_the_page_ringing(client, offer, error, message):
+    offer.d8.side_effect = error
+
+    res = _answer(client, offer.incident, user=offer.leads.sam)
+
+    assert (res.status_code, res.get_json()) == (502, {"error": message})
+    assert Incident.get_by_id(offer.incident.id).state == "triggered"
+    assert oncall_service.active_pages_for(offer.leads.sam) == [offer.incident]
+
+
+def test_only_the_person_the_lead_was_offered_to_may_answer(client, offer):
+    admin = _user("boss", admin=True)
+    # Ana is an SDR and the admin may acknowledge anything, but neither was paged.
+    for user in (offer.leads.ana, admin, offer.leads.ceo):
+        res = _answer(client, offer.incident, user=user)
+        assert res.status_code == 403
+        assert "offered to" in res.get_json()["error"]
+    offer.d8.assert_not_called()
+    assert Incident.get_by_id(offer.incident.id).state == "triggered"
+
+
+@pytest.mark.parametrize("setting", ["D8_LEAD_RESPONSE_URL", "INTERNAL_NOTIFY_KEY"])
+def test_without_the_setting_nothing_is_sent(client, offer, app, setting):
+    app.config[setting] = ""
+
+    res = _answer(client, offer.incident, user=offer.leads.sam)
+
+    assert res.status_code == 503
+    assert "isn't set up" in res.get_json()["error"]
+    offer.d8.assert_not_called()
+    assert Incident.get_by_id(offer.incident.id).state == "triggered"
+
+
+def test_an_outage_cannot_be_accepted(client, offer):
+    oncall = offer.leads.oncall
+    res = client.post(
+        "/api/v1/integrations/uptime-kuma", json=_kuma(0), headers=KUMA_HEADERS
+    )
+    incident = Incident.get_by_id(res.get_json()["incident_id"])
+
+    assert _answer(client, incident, user=oncall.eng).status_code == 400
+    assert _answer(client, SimpleNamespace(id=99999)).status_code == 404
+    offer.d8.assert_not_called()
+
+
+def test_an_offer_d8_already_closed_is_not_sent(client, offer):
+    _resolve_page(client, key=OFFER_KEY, reason="expired")
+
+    res = _answer(client, offer.incident, user=offer.leads.sam)
+
+    assert res.status_code == 200
+    body = res.get_json()
+    assert (body["ok"], body["stopped"], body["code"]) == (False, True, "offer_closed")
+    assert body["message"] == "This offer has already closed (Expired in D8)."
+    offer.d8.assert_not_called()
+
+
+def test_the_card_gets_the_outcome_as_an_htmx_event(client, offer):
+    res = _answer(client, offer.incident, user=offer.leads.sam, htmx=True)
+
+    assert res.status_code == 200 and res.get_data() == b""
+    event = json.loads(res.headers["HX-Trigger"])["lead-response"]
+    assert (event["ok"], event["status"], event["lead_url"]) == (
+        True,
+        "accepted",
+        LEAD_URL,
+    )
+
+
+def test_the_card_gets_a_failure_as_plain_text_for_the_error_toast(client, offer):
+    offer.d8.side_effect = lead_response.requests.ConnectionError("refused")
+
+    res = _answer(client, offer.incident, user=offer.leads.sam, htmx=True)
+
+    assert res.status_code == 502
+    assert res.get_data(as_text=True) == "Couldn't reach D8. Try again."
+    assert "HX-Trigger" not in res.headers
+
+
+def test_a_failed_local_resolve_still_reports_the_answer(client, offer, mocker):
+    mocker.patch.object(
+        oncall_service, "resolve_incident", side_effect=RuntimeError("db gone")
+    )
+
+    res = _answer(client, offer.incident, user=offer.leads.sam)
+
+    assert res.status_code == 200 and res.get_json()["ok"] is True
+
+
+def test_a_page_request_keeps_whether_it_is_an_offer(client, leads):
+    offered = _directed_page(client, key="lead-1-offer-1", offer=True).get_json()
+    absent = _directed_page(client, key="d8-lead:1").get_json()
+    null = _directed_page(client, key="d8-lead:2", offer=None).get_json()
+    false = _directed_page(client, key="d8-lead:3", offer=False).get_json()
+
+    assert Incident.get_by_id(offered["incident_id"]).offer is True
+    for body in (absent, null, false):
+        assert Incident.get_by_id(body["incident_id"]).offer is False
+
+
+@pytest.mark.parametrize("offer", ["true", 1, 0, [], {}])
+def test_a_page_request_with_a_non_boolean_offer_is_refused(client, leads, offer):
+    res = _directed_page(client, offer=offer)
+
+    assert res.status_code == 400
+    assert "offer" in res.get_json()["error"]
+    assert Message.select().count() == 0
+    assert Incident.select().count() == 0
+
+
+def test_a_page_request_ignores_keys_it_does_not_know(client, leads):
+    res = _directed_page(client, priority="high", something_new={"a": 1})
+
+    assert res.status_code == 200
+    assert Incident.get_by_id(res.get_json()["incident_id"]).offer is False
+
+
+def test_a_lead_page_without_an_offer_keeps_acknowledge(client, leads, app, mocker):
+    """D8's "wrote in again" page to the SDR who has the lead (and its failed
+    intake page to the CEO) carry no offer: Acknowledge, as without D8's
+    answer endpoint, and nothing to accept or reject."""
+    app.config["D8_LEAD_RESPONSE_URL"] = LEAD_RESPONSE_URL
+    d8 = mocker.patch("app.services.lead_response.requests.post")
+    incident = Incident.get_by_id(_directed_page(client).get_json()["incident_id"])
+    ChannelMember.create(user=leads.sam, channel=leads.channel)
+    _login(client, leads.sam)
+
+    html = _card(client, leads.channel)
+
+    assert oncall_service.is_lead_page(incident) and not incident.offer
+    assert f"/oncall/incidents/{incident.id}/ack" in html
+    assert f"/oncall/incidents/{incident.id}/accept" not in html
+    assert '<span class="badge bg-success"><i class="bi bi-broadcast' in html
+    assert oncall_service.serialize_incident(incident)["lead_response"] is False
+    (frame,) = _frames(leads.sam.id, "page")
+    assert frame["incident"]["lead_response"] is False
+    for action in ("accept", "reject"):
+        res = _answer(client, incident, action=action)
+        assert res.status_code == 400
+        assert "offered" in res.get_json()["error"]
+    d8.assert_not_called()
+    assert Incident.get_by_id(incident.id).state == "triggered"
