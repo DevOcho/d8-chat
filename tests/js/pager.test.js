@@ -1,6 +1,8 @@
 // app/static/js/pager.js — the on-call pager overlay, siren, title flash,
 // desktop notification, acknowledge flow, and the active-pages sync (on load,
 // on every socket (re)open, every 30s while ringing, and on tab refocus).
+// Also D8's lead pages: Accept and Reject, the green screen, and the recorded
+// ka-ching with its synthesized fallback.
 //
 // Frames reach the pager the way they do in production: through the fake
 // socket, htmx-ws and chat.js's htmx:wsAfterMessage routing.
@@ -633,18 +635,17 @@ describe('ka-ching (website leads from D8)', () => {
         return env;
     };
 
-    it('plays every 5 s for the first minute, then every 10 s, on the audio clock', async () => {
+    it('plays every 6 s on the audio clock and never slows down', async () => {
         const env = await ringingLead();
 
-        const fast = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
         // Scheduled 180 s ahead: the one due at 180 s goes on the next top-up.
-        const slow = [70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170];
-        expect(kachings(env)).toEqual([...fast, ...slow]);
+        const every6 = Array.from({ length: 30 }, (_, n) => n * 6);
+        expect(kachings(env)).toEqual(every6);
         expect(sirenOn(env)).toBe(false);
         expect(ctxOf(env).oscillators.some((o) => o.type === 'square')).toBe(false);
         expect(ctxOf(env).bufferSources.map((s) => Math.round((s.startAt - 0.05) * 1000) / 1000))
-            .toEqual([...fast, ...slow]);
-        expect(env.eval('[0, 12, 13, 14].map(PagerManager.kachingOffset)')).toEqual([0, 60, 70, 80]);
+            .toEqual(every6);
+        expect(env.eval('[0, 10, 11, 100].map(PagerManager.kachingOffset)')).toEqual([0, 60, 66, 600]);
     });
 
     it('tops the schedule up as the audio clock runs, without repeating one', async () => {
@@ -653,8 +654,9 @@ describe('ka-ching (website leads from D8)', () => {
         await env.tick(15000);
 
         const times = kachings(env);
-        expect(times.at(-1)).toBe(270);
+        expect(times.at(-1)).toBe(276);
         expect(new Set(times).size).toBe(times.length);
+        expect(times.every((t, i) => t === i * 6)).toBe(true);
     });
 
     it('skips the ka-chings a sleeping tab missed instead of playing them all at once', async () => {
@@ -667,7 +669,7 @@ describe('ka-ching (website leads from D8)', () => {
         expect(late.every((t) => t >= 500 - 0.05)).toBe(true);
     });
 
-    it('a new lead starts the fast minute again; a repeat of the same one does not', async () => {
+    it('a new lead starts the ka-ching again; a repeat of the same one does not', async () => {
         const env = await ringingLead();
         ctxOf(env).currentTime = 120;
         await env.frame(pageFrame(lead(), { repeat: true }));
@@ -679,7 +681,7 @@ describe('ka-ching (website leads from D8)', () => {
 
         expect(masters(env)).toHaveLength(2);
         expect(liveMasters(env)).toHaveLength(1);
-        expect(kachings(env, 120, before).slice(0, 4)).toEqual([0, 5, 10, 15]);
+        expect(kachings(env, 120, before).slice(0, 4)).toEqual([0, 6, 12, 18]);
     });
 
     it('stops when the page is cleared, including the ka-chings already scheduled', async () => {
@@ -757,7 +759,7 @@ describe('ka-ching (website leads from D8)', () => {
         frame.incident.alarm = 'ka-ching';
         await env.frame(frame);
 
-        expect(kachings(env).slice(0, 3)).toEqual([0, 5, 10]);
+        expect(kachings(env).slice(0, 3)).toEqual([0, 6, 12]);
         expect(sirenOn(env)).toBe(false);
     });
 
@@ -874,5 +876,394 @@ describe('chime (the interview day)', () => {
 
         await env.frame(pageFrame(call(), { repeat: true }));
         expect(live()).toHaveLength(1);
+    });
+});
+
+describe('Accept and Reject (a lead D8 offered to this person)', () => {
+    const BELL_HZ = 2093;
+    const KACHING_MP3 = '/audio/ka-ching.mp3';
+    // serialize_incident() for one of D8's directed lead pages on a D8-Chat
+    // that knows D8's answer endpoint (lead_response).
+    const offer = (overrides = {}) => incident({
+        id: 77,
+        title: 'Website lead for you: Dana Whitfield at Meridian Health Systems',
+        details: 'Filled in the Contact page form. Open to accept within 5 minutes.',
+        source: 'd8',
+        source_url: 'https://new-d8.local/marketing/lead-offers/31',
+        alarm: 'ka-ching',
+        channel_name: 'website-leads',
+        message_id: 901,
+        next_escalation_at: null,
+        lead_response: true,
+        ...overrides,
+    });
+    // The server's outcomes (lead_response.Outcome.to_dict()).
+    const ACCEPTED = {
+        ok: true, stopped: true, status: 'accepted', message: 'The lead is yours.',
+        lead_url: 'https://new-d8.local/marketing/leads/12', code: null, incident_id: 77,
+    };
+    const REJECTED = {
+        ok: true, stopped: true, status: 'rejected', message: 'It goes to the next person.',
+        lead_url: null, code: null, incident_id: 77,
+    };
+    const ctxOf = (env) => env.state.audioContexts[0];
+    // The ka-ching's master gains: 0.5 for the synthesized one, 1 for the recording.
+    const masters = (env) => ctxOf(env).gains.filter((g) => [0.5, 1].includes(g.gain.value)
+        && g.connect.mock.calls.some(([dest]) => dest === ctxOf(env).destination));
+    const kachingOn = (env) => masters(env).some((g) => g.disconnect.mock.calls.length === 0);
+    const answers = (env) => env.$$('[data-pager-answer]');
+    const errorText = (env) => env.$('[data-incident-id="77"] .pager-incident-error');
+    const lastToast = (env) => env.toasts.at(-1);
+
+    async function offerEnv({ answer, action = 'accept', inc = offer(), ...opts } = {}) {
+        const fetchRoutes = [...(opts.fetchRoutes || [])];
+        if (answer !== undefined) fetchRoutes.push({ match: `/oncall/incidents/77/${action}`, reply: answer });
+        const env = await pagerEnv({ ...opts, fetchRoutes });
+        await env.openSocket();
+        await env.frame(pageFrame(inc));
+        return env;
+    }
+
+    it('offers Accept and Reject instead of Acknowledge, on a green screen', async () => {
+        const env = await offerEnv();
+        const [row] = rows(env);
+
+        expect(answers(env).map((b) => [b.dataset.pagerAnswer, b.textContent])).toEqual([
+            ['accept', 'Accept'], ['reject', 'Reject'],
+        ]);
+        expect(row.querySelector('[data-pager-ack]')).toBeNull();
+        // The lead's own link comes after the answer.
+        expect(row.querySelector('a.btn')).toBeNull();
+        expect(overlay(env).classList.contains('pager-overlay--lead')).toBe(true);
+        expect(overlay(env).classList.contains('pager-overlay--banner')).toBe(false);
+        expect(env.$('#pager-heading-text').textContent).toBe('Someone wants to talk to us');
+        expect(env.$('#pager-footer').textContent)
+            .toBe('Accept and the lead is yours. Reject and it goes to the next person.');
+        expect(kachingOn(env)).toBe(true);
+    });
+
+    it('Accept is one tap: it silences at once, sends it, then stops and links the lead', async () => {
+        const gate = deferred();
+        const env = await offerEnv({ answer: () => gate.promise });
+
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+
+        expect(kachingOn(env)).toBe(false);
+        expect(answers(env).every((b) => b.disabled)).toBe(true);
+        expect(overlay(env).hidden).toBe(false);
+        expect(env.$('.pager-incident-silenced')).toBeNull();
+        const [call] = env.fetches('/oncall/incidents/77/accept');
+        expect(call.init).toMatchObject({
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'X-CSRFToken': 'csrf-test-token', Accept: 'application/json' },
+        });
+
+        gate.resolve({ json: ACCEPTED });
+        await env.flush();
+
+        expect(overlay(env).hidden).toBe(true);
+        expect(kachingOn(env)).toBe(false);
+        expect(lastToast(env)).toMatchObject({ title: 'Lead accepted' });
+        expect(lastToast(env).header).toContain('bg-success');
+        const link = env.$('#toast-body-content a');
+        expect(link.textContent).toBe('Open the lead in D8');
+        expect(link.href).toBe('https://new-d8.local/marketing/leads/12');
+        expect(link.target).toBe('_blank');
+        expect(link.rel).toBe('noopener noreferrer');
+        expect(env.$('#toast-body-content').textContent).toContain('The lead is yours.');
+    });
+
+    it('copes with D8 stopping the page before the answer comes back', async () => {
+        const gate = deferred();
+        const env = await offerEnv({ answer: () => gate.promise });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+
+        await env.frame(pageClearedFrame(offer(), 'resolved'));
+        expect(overlay(env).hidden).toBe(true);
+
+        gate.resolve({ json: ACCEPTED });
+        await env.flush();
+        expect(overlay(env).hidden).toBe(true);
+        expect(lastToast(env).title).toBe('Lead accepted');
+    });
+
+    it('and with the answer first, then D8 stopping the page', async () => {
+        const env = await offerEnv({ answer: { json: ACCEPTED } });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+        expect(overlay(env).hidden).toBe(true);
+
+        await env.frame(pageClearedFrame(offer(), 'resolved'));
+        env.server.active = [];
+        await env.tick(RESYNC_MS);
+        expect(overlay(env).hidden).toBe(true);
+        expect(env.toasts).toHaveLength(1);
+    });
+
+    it('Reject asks first, in the app\'s dialog, and is silent while it asks', async () => {
+        const env = await offerEnv({ answer: { json: REJECTED }, action: 'reject' });
+
+        env.$('[data-pager-answer="reject"]').click();
+        await env.flush();
+
+        expect(kachingOn(env)).toBe(false);
+        expect(env.fetches('/oncall/incidents/77/reject')).toHaveLength(0);
+        expect(env.$('#confirm-modal-body').textContent).toBe('Reject this lead? It goes to the next person.');
+        expect(env.$('#confirm-modal-ok').textContent).toBe('Reject');
+
+        env.$('#confirm-modal-ok').click();
+        await env.flush();
+
+        expect(env.fetches('/oncall/incidents/77/reject')).toHaveLength(1);
+        expect(overlay(env).hidden).toBe(true);
+        expect(lastToast(env)).toMatchObject({ title: 'Lead rejected', body: 'It goes to the next person.' });
+    });
+
+    it('Reject, then Cancel: silent here until the server re-sends the page', async () => {
+        const env = await offerEnv();
+        env.$('[data-pager-answer="reject"]').click();
+        await env.flush();
+
+        expect(kachingOn(env)).toBe(false);
+        expect(env.$('[data-incident-id="77"] .pager-incident-silenced').textContent)
+            .toBe('🔇 Silenced in this tab. It rings again until you accept or reject.');
+        expect(answers(env).every((b) => !b.disabled)).toBe(true);
+
+        await env.frame(pageFrame(offer(), { repeat: true }));
+        expect(kachingOn(env)).toBe(true);
+    });
+
+    it('no connection: says so and rings again', async () => {
+        const env = await offerEnv({ answer: new TypeError('Failed to fetch') });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+
+        expect(errorText(env).hidden).toBe(false);
+        expect(errorText(env).textContent).toBe("Couldn't reach D8-Chat (Failed to fetch). Try again.");
+        expect(kachingOn(env)).toBe(true);
+        expect(overlay(env).hidden).toBe(false);
+        expect(answers(env).every((b) => !b.disabled)).toBe(true);
+        expect(env.$('.pager-incident-silenced')).toBeNull();
+    });
+
+    it('D8 out of reach: the server\'s reason shows and it rings again', async () => {
+        const env = await offerEnv({ answer: { status: 502, json: { error: "Couldn't reach D8. Try again." } } });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+
+        expect(errorText(env).textContent).toBe("Couldn't reach D8. Try again.");
+        expect(kachingOn(env)).toBe(true);
+        expect(env.toasts).toHaveLength(0);
+    });
+
+    it('an error without a JSON body reports the status and rings again', async () => {
+        const env = await offerEnv({ answer: { status: 504 } });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+
+        expect(errorText(env).textContent).toBe('D8-Chat had a problem (HTTP 504). Try again.');
+        expect(kachingOn(env)).toBe(true);
+    });
+
+    it('gives up after 8 s without an answer and rings again', async () => {
+        const env = await offerEnv({ answer: () => new Promise(() => {}) });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+        await env.tick(7000);
+        expect(errorText(env).hidden).toBe(true);
+        expect(kachingOn(env)).toBe(false);
+
+        await env.tick(1000);
+        expect(errorText(env).textContent).toBe("D8-Chat didn't answer in time. Try again.");
+        expect(kachingOn(env)).toBe(true);
+        expect(answers(env).every((b) => !b.disabled)).toBe(true);
+    });
+
+    it('a failure after D8 already stopped the page is a toast', async () => {
+        const gate = deferred();
+        const env = await offerEnv({ answer: () => gate.promise });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+        await env.frame(pageClearedFrame(offer(), 'resolved'));
+
+        gate.reject(new TypeError('Failed to fetch'));
+        await env.flush();
+
+        expect(overlay(env).hidden).toBe(true);
+        expect(lastToast(env)).toMatchObject({
+            title: "Couldn't send your answer",
+            body: "Couldn't reach D8-Chat (Failed to fetch). Try again.",
+        });
+    });
+
+    it('nothing left to answer (the offer closed): it stops and says why', async () => {
+        const closed = {
+            ok: false, stopped: true, status: null, lead_url: null, code: 'offer_closed',
+            message: 'Ana accepted it first.', incident_id: 77,
+        };
+        const env = await offerEnv({ answer: { json: closed } });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+
+        expect(overlay(env).hidden).toBe(true);
+        expect(kachingOn(env)).toBe(false);
+        expect(lastToast(env)).toMatchObject({ title: 'Nothing to answer', body: 'Ana accepted it first.' });
+        expect(env.$('#toast-body-content a')).toBeNull();
+    });
+
+    it('a re-send while the answer is out stays silent with the buttons disabled', async () => {
+        const gate = deferred();
+        const env = await offerEnv({ answer: () => gate.promise });
+        env.$('[data-pager-answer="accept"]').click();
+        await env.flush();
+
+        await env.frame(pageFrame(offer(), { repeat: true }));
+
+        expect(kachingOn(env)).toBe(false);
+        expect(answers(env).every((b) => b.disabled)).toBe(true);
+        gate.resolve({ json: ACCEPTED });
+        await env.flush();
+        expect(overlay(env).hidden).toBe(true);
+    });
+
+    it('the incident card\'s Accept goes through htmx and lands here as the lead-response event', async () => {
+        const card = `<div id="incident-card-77" class="incident-card incident-triggered incident-lead mt-2">
+            <button type="button" id="card-accept" hx-post="/oncall/incidents/77/accept" hx-disabled-elt="this" hx-swap="none">Accept</button>
+        </div>`;
+        const env = await offerEnv({
+            page: { extraMain: card },
+            xhrRoutes: [{
+                match: '/oncall/incidents/77/accept',
+                reply: { status: 200, body: '', headers: { 'HX-Trigger': JSON.stringify({ 'lead-response': ACCEPTED }) } },
+            }],
+        });
+
+        env.$('#card-accept').click();
+        await env.flush();
+
+        expect(env.xhrs('/oncall/incidents/77/accept')).toHaveLength(1);
+        expect(overlay(env).hidden).toBe(true);
+        expect(lastToast(env).title).toBe('Lead accepted');
+        expect(env.$('#toast-body-content a').href).toBe('https://new-d8.local/marketing/leads/12');
+    });
+
+    it('without D8\'s answer endpoint a lead keeps Acknowledge and its link, still green', async () => {
+        const env = await offerEnv({ inc: offer({ lead_response: false }) });
+        const [row] = rows(env);
+
+        expect(answers(env)).toHaveLength(0);
+        expect(row.querySelector('[data-pager-ack="77"]').textContent).toBe('Acknowledge');
+        expect(row.querySelector('a.btn').textContent).toBe('Open the lead in D8');
+        expect(overlay(env).classList.contains('pager-overlay--lead')).toBe(true);
+        expect(env.$('#pager-heading-text').textContent).toBe('Someone wants to talk to us');
+        expect(env.$('#pager-footer').textContent).toContain('Acknowledging');
+    });
+
+    it('an outage stays red, and turns the screen red while it rings beside a lead', async () => {
+        const env = await offerEnv();
+        await env.frame(pageFrame(incident()));
+        expect(overlay(env).classList.contains('pager-overlay--lead')).toBe(false);
+        expect(env.$('#pager-heading-text').textContent).toBe('You are being paged');
+        // Each row keeps its own buttons.
+        expect(answers(env)).toHaveLength(2);
+        expect(env.$('[data-pager-ack="42"]')).not.toBeNull();
+
+        await env.frame(pageClearedFrame(incident()));
+        expect(overlay(env).classList.contains('pager-overlay--lead')).toBe(true);
+    });
+
+    it('a ka-ching test page looks like a lead but only stops the test', async () => {
+        const env = await pagerEnv();
+        await env.openSocket();
+        const frame = testPageFrame('test-1792245600-ka-ching');
+        frame.incident.alarm = 'ka-ching';
+        await env.frame(frame);
+
+        expect(overlay(env).classList.contains('pager-overlay--lead')).toBe(true);
+        expect(answers(env)).toHaveLength(0);
+        expect(env.$('[data-pager-ack]').textContent).toBe('Stop test');
+    });
+
+    it('the desktop notification asks to accept or reject', async () => {
+        const env = await offerEnv({ inc: offer({ details: null }) });
+        expect(env.notifications[0].title).toBe('💰 Website lead for you: Dana Whitfield at Meridian Health Systems');
+        expect(env.notifications[0].options.body).toBe('Someone wants to talk to us. Open D8-Chat to accept or reject.');
+    });
+
+    describe('the recorded ka-ching', () => {
+        const withRecording = { fetchRoutes: [{ match: KACHING_MP3, reply: { body: 'ID3 fake mp3' } }] };
+        const recordings = (env) => ctxOf(env).bufferSources.filter((s) => s.buffer?.decoded);
+        const bells = (env) => ctxOf(env).oscillators.filter((o) => o.frequency.value === BELL_HZ);
+        const at = (sources) => sources.map((s) => Math.round((s.startAt - 0.05) * 1000) / 1000);
+
+        it('replaces the synthesized one as soon as it loads, every 6 s on the same beat', async () => {
+            const env = await offerEnv(withRecording);
+
+            const [call] = env.fetches(KACHING_MP3);
+            expect(call.url).toBe('/audio/ka-ching.mp3?v=0123abcd');
+            expect(ctxOf(env).decoded).toHaveLength(1);
+            expect(at(recordings(env))).toEqual(Array.from({ length: 30 }, (_, n) => n * 6));
+            recordings(env).forEach((s) => expect(s.stopAt - s.startAt).toBeCloseTo(1.55));
+            // The synthesized ones it replaced are cut off (stopped again, on
+            // top of their scheduled stop).
+            expect(bells(env).length).toBeGreaterThan(0);
+            expect(bells(env).every((o) => o.stop.mock.calls.length >= 2)).toBe(true);
+            const live = masters(env).filter((g) => g.disconnect.mock.calls.length === 0);
+            expect(live.map((g) => g.gain.value)).toEqual([1]);
+        });
+
+        it('plays from the first ka-ching when it loaded before the page', async () => {
+            const env = await pagerEnv(withRecording);
+            await env.openSocket();
+            env.document.body.click(); // any click starts the audio, and the load
+            await env.flush();
+            expect(ctxOf(env).decoded).toHaveLength(1);
+
+            await env.frame(pageFrame(offer()));
+
+            expect(bells(env)).toHaveLength(0);
+            expect(at(recordings(env)).slice(0, 3)).toEqual([0, 6, 12]);
+        });
+
+        it('is fetched once, however many pages ring', async () => {
+            const env = await offerEnv(withRecording);
+            await env.frame(pageFrame(offer({ id: 78 })));
+            await env.frame(pageClearedFrame(offer()));
+            await env.frame(pageClearedFrame(offer({ id: 78 })));
+            await env.frame(pageFrame(offer({ id: 79 })));
+            expect(env.fetches(KACHING_MP3)).toHaveLength(1);
+        });
+
+        it('falls back to the synthesized ka-ching when the file can\'t load', async () => {
+            const env = await offerEnv();
+            expect(env.fetches(KACHING_MP3)).toHaveLength(1);
+            expect(recordings(env)).toHaveLength(0);
+            expect(bells(env).length).toBeGreaterThan(0);
+            expect(bells(env).every((o) => o.stop.mock.calls.length === 1)).toBe(true);
+            expect(kachingOn(env)).toBe(true);
+            expect(env.state.console.some((c) => c.level === 'warn' && String(c.args[0]).includes('synthesized ka-ching'))).toBe(true);
+        });
+
+        it('and when it can\'t be decoded', async () => {
+            const env = await offerEnv({ ...withRecording, audioDecodeFails: true });
+            expect(ctxOf(env).decoded).toHaveLength(0);
+            expect(recordings(env)).toHaveLength(0);
+            expect(bells(env).length).toBeGreaterThan(0);
+            expect(bells(env).every((o) => o.stop.mock.calls.length === 1)).toBe(true);
+            expect(kachingOn(env)).toBe(true);
+        });
+
+        it('stops when the lead is answered, including the ka-chings already scheduled', async () => {
+            const env = await offerEnv({ ...withRecording, answer: { json: ACCEPTED } });
+            env.$('[data-pager-answer="accept"]').click();
+            await env.flush();
+
+            expect(kachingOn(env)).toBe(false);
+            expect(recordings(env).length).toBeGreaterThan(0);
+            expect(recordings(env).every((s) => s.stop.mock.calls.length >= 2)).toBe(true);
+        });
     });
 });

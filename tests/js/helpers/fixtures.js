@@ -546,7 +546,7 @@ ${dmItems}
             </button>
         </div>
         ${composer}
-        <div id="pager-overlay" class="pager-overlay" role="alertdialog" aria-modal="true" aria-labelledby="pager-heading" hidden>
+        <div id="pager-overlay" class="pager-overlay" role="alertdialog" aria-modal="true" aria-labelledby="pager-heading" data-kaching-src="/audio/ka-ching.mp3?v=0123abcd" hidden>
             <div class="pager-panel">
                 <div class="pager-heading" id="pager-heading"><span id="pager-heading-text">You are being paged</span></div>
                 <div id="pager-sound-hint" class="pager-sound-hint" hidden>Your browser blocked the alarm sound. Click anywhere to start it.</div>

@@ -238,6 +238,7 @@ export function response({ status = 200, json, body } = {}) {
             return json;
         },
         text: async () => body ?? (json !== undefined ? JSON.stringify(json) : ''),
+        arrayBuffer: async () => new TextEncoder().encode(body ?? '').buffer,
     };
 }
 
@@ -290,6 +291,8 @@ export function makeAudio(state) {
 // pager's siren is running (started and not yet stopped), and the scheduled
 // start times (`startAt`) of oscillators and buffer sources so they can check
 // when each ka-ching plays. `currentTime` is the audio clock: tests set it.
+// decodeAudioData() turns any bytes into a 1.5 s buffer (recorded in
+// `decoded`), or rejects while `state.audioDecodeFails` is set.
 export function makeAudioContext(state) {
     const node = (extra = {}) => ({
         connect: vi.fn((dest) => dest),
@@ -318,6 +321,7 @@ export function makeAudioContext(state) {
             this.oscillators = [];
             this.bufferSources = [];
             this.gains = [];
+            this.decoded = [];
             this.currentTime = 0;
             this.sampleRate = 48000;
             state.audioContexts.push(this);
@@ -346,6 +350,13 @@ export function makeAudioContext(state) {
             const src = source({ buffer: null });
             this.bufferSources.push(src);
             return src;
+        }
+
+        async decodeAudioData(bytes) {
+            if (state.audioDecodeFails) throw new DOMException('Unable to decode audio data', 'EncodingError');
+            const buffer = { duration: 1.5, sampleRate: this.sampleRate, bytes, decoded: true };
+            this.decoded.push(buffer);
+            return buffer;
         }
 
         createBuffer(channels, length, sampleRate) {

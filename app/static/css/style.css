@@ -1360,10 +1360,31 @@ a.hashtag-link:hover {
     50% { background-color: rgba(120, 0, 22, 0.96); }
 }
 
+/* A website lead (the ka-ching): good news, so green and a slower pulse. */
+.pager-overlay.pager-overlay--lead {
+    background-color: rgba(var(--bs-success-rgb), 0.94);
+    animation: pager-pulse-lead 2.4s ease-in-out infinite;
+}
+
+@keyframes pager-pulse-lead {
+    0%, 100% { background-color: rgba(var(--bs-success-rgb), 0.94); }
+    50% { background-color: rgba(var(--bs-success-rgb), 0.82); }
+}
+
+.pager-overlay--lead .pager-sound-hint {
+    color: var(--bs-success-text-emphasis);
+}
+
 @media (prefers-reduced-motion: reduce) {
-    .pager-overlay {
+    .pager-overlay,
+    .pager-overlay.pager-overlay--lead {
         animation: none;
     }
+}
+
+/* Reject's "are you sure?" opens while the pager covers the screen. */
+body.pager-active #confirm-modal {
+    z-index: 2010;
 }
 
 .pager-panel {

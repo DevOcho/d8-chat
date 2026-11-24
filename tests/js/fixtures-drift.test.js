@@ -57,6 +57,7 @@ const HOOKS = {
         'class="incident-time"',
         'data-format="datetime"',
         'id="pager-overlay"',
+        "data-kaching-src=\"{{ static_url('audio/ka-ching.mp3') }}\"",
         'id="pager-incidents"',
         'id="pager-sound-hint"',
         'id="pager-heading-text"',
@@ -249,6 +250,8 @@ const HOOKS = {
     'app/blueprints/oncall.py': [
         '"/oncall/pages/active"',
         '"/oncall/incidents/<int:incident_id>/ack", methods=["POST"]',
+        '"/oncall/incidents/<int:incident_id>/<any(accept, reject):action>",',
+        '"lead-response"',
     ],
     'app/blueprints/profile.py': [
         '"/profile/activity", methods=["POST"]',
