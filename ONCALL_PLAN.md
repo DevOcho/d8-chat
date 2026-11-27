@@ -279,8 +279,11 @@ second 10 minutes.
   - **Acknowledge silences this device first**, before the request. If it fails (lost
     connection, server error) the page stays up, silenced here only. The server never
     heard, so escalation carries on, and its next re-send (~60s, only once back online)
-    rings again. Same rule in the mobile app, including the notification's Acknowledge
-    button. Added 2026-11-15 after a page couldn't be stopped when the wifi dropped.
+    rings again. Added 2026-11-15 after a page couldn't be stopped when the wifi dropped.
+  - **The mobile app stays silent until the page ends**, including from the
+    notification's Acknowledge button. FCM delivers re-sends even when the phone can't
+    reach the server, so on 2026-11-26 (VPN down) the phone rang every minute after an
+    Acknowledge that never got through. The tap isn't queued; Acknowledge stays on screen.
 - Pages ignore presence (busy/away) and `exclude_channel`. Viewing #devops-uptime
   doesn't silence a page.
 - Incident card in the DOWN message (rendered like polls in `message.html`): state

@@ -959,9 +959,12 @@ about every 60s until the page is acknowledged or cleared.
 Clients stop the alarm on the device as soon as Acknowledge is tapped, before
 the request. If the request fails (no connection, timeout, error) the page
 stays up, silenced on that device only: the server never heard, so it keeps
-escalating. The next re-send (a `page` frame or push for that incident, which
-only arrives once the device is back online) rings it again. A re-sync via
-`GET /api/v1/oncall/incidents/active` does not.
+escalating. The web pager rings again on the next `page` frame for that
+incident (a WebSocket frame only arrives once the browser can reach the
+server). The mobile app stays silent until the page ends: FCM delivers the
+server's re-sends even when the phone can't reach the server (2026-11-26, the
+VPN was down), so a re-send proves nothing. A re-sync via
+`GET /api/v1/oncall/incidents/active` never un-silences.
 
 - `data`: `{ "type": "page", "incident_id": "17", "conversation_id_str": "channel_4", "message_id": "123", "alarm": "siren", "title": "🚨 DOWN: <monitor>", "body": "<details>" }`
   (a test page has `"test": "1"` and a string `incident_id`). A website lead
