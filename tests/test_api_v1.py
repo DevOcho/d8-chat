@@ -966,6 +966,90 @@ def test_api_sso_exchange_success(client, mocker):
     assert data["user"]["display_name"] == "Mobile User"
 
 
+def test_api_sso_exchange_refuses_a_deactivated_account(client, mocker):
+    """A deactivated account gets a clear 403, not a token every call rejects."""
+    User.create(
+        username="gone_user",
+        email="gone.user@example.com",
+        sso_id="fake_sso_id_gone",
+        is_active=False,
+    )
+    mocker.patch(
+        "app.blueprints.api_v1.oauth.authentik.fetch_access_token",
+        return_value={"access_token": "fake_oauth_token"},
+    )
+    mocker.patch(
+        "app.blueprints.api_v1.oauth.authentik.parse_id_token",
+        return_value={"sub": "fake_sso_id_gone", "email": "gone.user@example.com"},
+    )
+
+    res = client.post(
+        "/api/v1/auth/sso/exchange",
+        json={"code": "auth_code_123", "redirect_uri": "d8chat://auth/callback"},
+    )
+
+    assert res.status_code == 403
+    assert "api_token" not in res.get_json()
+    assert res.get_json()["error"] == "This account has been deactivated."
+
+
+def _shift_token_clock(mocker, seconds):
+    """Moves only the API token signer's clock, not the whole process's."""
+    from itsdangerous.timed import TimestampSigner
+
+    now = TimestampSigner.get_timestamp(None)
+    mocker.patch.object(TimestampSigner, "get_timestamp", lambda self: now + seconds)
+
+
+def test_api_refresh_token_issues_a_fresh_working_token(client, mocker):
+    old = _login_token(client)
+    # Ten seconds later, so the new token carries a different issue time.
+    _shift_token_clock(mocker, seconds=10)
+
+    res = client.post(
+        "/api/v1/auth/refresh", headers={"Authorization": f"Bearer {old}"}
+    )
+
+    assert res.status_code == 200
+    new = res.get_json()["api_token"]
+    assert new.startswith("d8_sec_") and new != old
+    me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {new}"})
+    assert me.status_code == 200
+    assert me.get_json()["user"]["username"] == "testuser"
+
+
+def test_api_refresh_token_needs_a_valid_token(client):
+    assert client.post("/api/v1/auth/refresh").status_code == 401
+    res = client.post(
+        "/api/v1/auth/refresh", headers={"Authorization": "Bearer d8_sec_bogus"}
+    )
+    assert res.status_code == 401
+
+
+def test_api_refresh_token_rejects_an_expired_token(client, mocker):
+    old = _login_token(client)
+    # 31 days later: past the 30-day max_age, so it can't be renewed.
+    _shift_token_clock(mocker, seconds=86400 * 31)
+
+    res = client.post(
+        "/api/v1/auth/refresh", headers={"Authorization": f"Bearer {old}"}
+    )
+
+    assert res.status_code == 401
+    assert res.get_json()["error"] == "Invalid or expired token"
+
+
+def test_api_refresh_token_refuses_a_deactivated_account(client):
+    token = _login_token(client)
+    User.update(is_active=False).where(User.username == "testuser").execute()
+
+    res = client.post(
+        "/api/v1/auth/refresh", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert res.status_code == 401
+
+
 def test_api_update_me(client):
     """
     GIVEN a valid token

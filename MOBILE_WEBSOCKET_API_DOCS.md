@@ -224,6 +224,26 @@ Returns the api_token and serialized User object.
 }
 ```
 
+Errors: 400 (missing fields, or a `redirect_uri` that isn't allowed), 401 (the
+code is invalid, already used, or older than the IdP's code lifetime, about a
+minute), 403 `{"error": "This account has been deactivated."}`.
+
+### Token Renewal
+API tokens expire 30 days after they were issued. Swap a still-valid token for
+a fresh one about once a day, so only a device left unopened for 30 days has to
+sign in again. The old token stays valid until its own expiry.
+
+**POST** /api/v1/auth/refresh
+**Headers:** `Authorization: Bearer <api_token>`
+
+Response (200 OK):
+```json
+{ "api_token": "d8_sec_..." }
+```
+
+401 if the token has already expired or the account is deactivated: sign in
+again. Older servers answer 404; keep the current token.
+
 ### Messages
 Use this endpoint to send new messages. This automatically broadcasts the real-time WebSocket events to all other active clients.
 

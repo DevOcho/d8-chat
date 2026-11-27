@@ -478,6 +478,21 @@ def get_me():
     return jsonify({"user": user_to_dict(g.api_user)}), 200
 
 
+@api_v1_bp.route("/auth/refresh", methods=["POST"])
+@api_token_required
+def refresh_api_token():
+    """Swaps a still-valid token for a fresh 30-day one.
+
+    Tokens expire 30 days after they were issued, and nothing else renews
+    them: the mobile app calls this about once a day, so only a phone left
+    unopened for 30 days has to sign in again. The old token stays valid
+    until its own expiry (tokens are stateless), and a deactivated account
+    gets the decorator's 401 like any other call.
+    """
+    token = "d8_sec_" + generate_api_token(g.api_user.id)
+    return jsonify({"api_token": token}), 200
+
+
 @api_v1_bp.route("/auth/sso/exchange", methods=["POST"])
 @limiter.limit("20 per minute")
 def sso_exchange():
@@ -523,6 +538,15 @@ def sso_exchange():
         # Leverage existing web SSO logic to link/create the user and auto-join channels
         user = _create_or_link_sso_user(sso_id, email, base_username, display_name)
         sync_sso_groups(user, groups_claim(token_response, user_info))
+
+    # Same rule as the web callback: is_active is the local source of truth.
+    # Without this, a deactivated account got a token that every other call
+    # rejected, and the app bounced back to its login screen with no reason.
+    if not user.is_active:
+        current_app.logger.warning(
+            f"SSO exchange rejected: account for sso_id={sso_id} is deactivated"
+        )
+        return jsonify({"error": "This account has been deactivated."}), 403
 
     token = "d8_sec_" + generate_api_token(user.id)
     return jsonify({"api_token": token, "user": user_to_dict(user)}), 200
